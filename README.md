@@ -64,7 +64,7 @@ Essas escolhas são conservadoras para teste técnico, não substituem a confirm
 
 O repositório mantém `backend/` e `frontend/` separados. O deploy inicial usa **um Web Service Node que serve frontend compilado + API**, com **PostgreSQL separado**. Não depende do disco temporário do Web Service e não requer CORS entre dois domínios.
 
-Consulte [DEPLOY.md](DEPLOY.md) e [render.yaml](render.yaml). O blueprint está preparado para homologação e contém recursos pagos; revise os planos antes de aplicar. Nenhum repositório remoto, serviço, banco pago ou deploy foi criado por esta implementação.
+Consulte [DEPLOY.md](DEPLOY.md) e [render.yaml](render.yaml). O Blueprint usa Web Service e PostgreSQL **Free** para homologação: o servidor pode dormir e o banco expira em 30 dias. Não usar para dados de pacientes. O código foi enviado ao GitHub; a criação dos serviços e o deploy no Render são etapas separadas.
 
 No ambiente publicado, o banco começa vazio, exige credenciais próprias e não carrega os perfis fictícios. O bootstrap cria apenas a conta de gestão; o cadastro operacional das atendentes está documentado em [DEPLOY.md](DEPLOY.md).
 

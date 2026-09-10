@@ -1,13 +1,12 @@
-# Blueprint de homologação. Recursos pagos: revise os planos antes de aplicar.
+# Homologação Free. PostgreSQL expira em 30 dias; não usar para operação real.
 services:
   - type: web
     name: artisti-crm
     runtime: node
-    plan: 0.5c-512mb
+    plan: free
     region: virginia
     numInstances: 1
     buildCommand: npm ci --include=dev && npm run build
-    preDeployCommand: npm run migrate -w backend
     startCommand: npm run start -w backend
     healthCheckPath: /api/health
     autoDeployTrigger: off
@@ -31,7 +30,6 @@ databases:
     databaseName: artisti
     user: artisti
     region: virginia
-    plan: 0.1c-256mb
-    diskSizeGB: 5
+    plan: free
     postgresMajorVersion: '18'
     ipAllowList: []

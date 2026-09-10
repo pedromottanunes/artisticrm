@@ -8,7 +8,7 @@ const parsed = z
   .object({
     email: z.string().email(),
     name: z.string().min(2).max(160),
-    password: z.string().min(16).max(128),
+    password: z.string().min(6).max(128),
     position: z.coerce.number().int().min(1).max(99),
   })
   .safeParse({
@@ -19,7 +19,7 @@ const parsed = z
   });
 if (!parsed.success)
   throw new Error(
-    'Configure CREATE_USER_EMAIL, CREATE_USER_NAME, CREATE_USER_PASSWORD (16+ caracteres), CREATE_USER_POSITION (1–99).',
+    'Configure CREATE_USER_EMAIL, CREATE_USER_NAME, CREATE_USER_PASSWORD (6+ caracteres), CREATE_USER_POSITION (1–99).',
   );
 const input = parsed.data;
 if (input.email.endsWith('@demo.artisti.local'))

@@ -90,12 +90,12 @@ export function PasswordChange({
               aria-label="Nova senha"
               type="password"
               autoComplete="new-password"
-              minLength={16}
+              minLength={6}
               maxLength={128}
               required
             />
             <small>
-              Use pelo menos 16 caracteres. Uma frase longa e exclusiva é uma boa opção.
+              Mínimo de 6 caracteres. Para maior proteção, prefira uma frase longa e exclusiva.
             </small>
           </label>
           <label className="full">
@@ -105,7 +105,7 @@ export function PasswordChange({
               type="password"
               autoComplete="new-password"
               required
-              minLength={16}
+              minLength={6}
               maxLength={128}
             />
           </label>
@@ -303,7 +303,7 @@ export function Team({
                       type="password"
                       autoComplete="new-password"
                       required
-                      minLength={16}
+                      minLength={6}
                       maxLength={128}
                     />
                   </label>

@@ -27,8 +27,8 @@ O workflow `.github/workflows/ci.yml` instala dependências, verifica tipos, exe
 
 1. Autorizar a conta Render a acessar o repositório correto.
 2. Criar um Blueprint a partir do `render.yaml`, mantendo o diretório raiz do repositório.
-3. Conferir a região e os planos de Web Service/PostgreSQL. **São recursos pagos**, sem autorização de contratação nesta entrega; os preços e disponibilidade precisam ser conferidos antes da confirmação.
-4. Definir e-mail e senha de bootstrap na interface do Render. Usar senha forte, exclusiva, com pelo menos 16 caracteres; nunca colocá-la no código.
+3. Conferir a região e os planos de Web Service/PostgreSQL: ambos devem aparecer como **Free**. O banco gratuito tem 1 GB, expira em 30 dias e só pode existir um por workspace. Se já houver outro, não o exclua: interrompa a criação para avaliar as opções.
+4. Definir e-mail e senha de bootstrap na interface do Render. O sistema aceita 6 a 128 caracteres; prefira uma senha longa e exclusiva antes de usar dados reais. Nunca colocá-la no código.
 5. Aplicar o Blueprint. `autoDeployTrigger: off` mantém deploys posteriores manuais até o fluxo de publicação ser aprovado.
 6. Verificar o health check, entrar com a conta criada e validar os fluxos com dados de teste.
 
@@ -37,7 +37,7 @@ Configuração usada:
 | Campo | Valor |
 | --- | --- |
 | Build | `npm ci --include=dev && npm run build` |
-| Pre-deploy | `npm run migrate -w backend` |
+| Migrations | Executadas automaticamente no início do servidor, antes de atender requisições |
 | Start | `npm run start -w backend` |
 | Health check | `/api/health` — verifica acesso ao banco |
 | Node | 22.18.0 |
@@ -45,7 +45,13 @@ Configuração usada:
 | Instâncias iniciais | 1; rate limiting em memória exige revisão antes de escalar |
 | Banco | PostgreSQL 18, rede privada, sem IPs externos autorizados |
 
-O processo também confere migrations ao iniciar; são versionadas, transacionais e serializadas com um advisory lock no PostgreSQL. Fazer backup antes de futuras migrations destrutivas. Não há rollback automático de schema implementado.
+O processo confere migrations ao iniciar; são versionadas, transacionais e serializadas com um advisory lock no PostgreSQL. O Blueprint Free não depende de pre-deploy separado. Fazer backup antes de futuras migrations destrutivas. Não há rollback automático de schema implementado.
+
+### Limitações do Free
+
+O Web Service dorme após 15 minutos sem tráfego e pode levar cerca de um minuto para acordar. Enquanto dorme, o processador da central e a reconciliação do bolsão não executam. As reservas preservam o vencimento no banco e são reconciliadas ao retomar, sem reiniciar os dez minutos. Não há garantia de atendimento instantâneo a webhooks durante o despertar.
+
+O PostgreSQL Free fica inacessível ao expirar em 30 dias; após mais 14 dias sem upgrade, o Render exclui o banco e os dados. Não há backups gerenciados gratuitos. Usar somente dados de teste e planejar exportação/migração antes do vencimento. [Limites oficiais](https://render.com/docs/free).
 
 ## Variáveis de ambiente
 
@@ -54,7 +60,7 @@ O processo também confere migrations ao iniciar; são versionadas, transacionai
 | `NODE_ENV=production` | Desativa seed demo, exige PostgreSQL, ativa cookie Secure e serve frontend compilado |
 | `DATABASE_URL` | Ligação privada ao PostgreSQL, preenchida por `fromDatabase` |
 | `BOOTSTRAP_ADMIN_EMAIL` | E-mail da primeira conta de gestão |
-| `BOOTSTRAP_ADMIN_PASSWORD` | Senha da primeira conta, 16–128 caracteres |
+| `BOOTSTRAP_ADMIN_PASSWORD` | Senha da primeira conta, 6–128 caracteres |
 | `RENDER_EXTERNAL_URL` | Origem HTTPS padrão fornecida pelo Render |
 | `APP_ORIGIN` | Opcional: origem HTTPS canônica ao usar domínio próprio, sem caminho |
 | `PORT` | Porta fornecida pelo Render |
@@ -67,13 +73,13 @@ As credenciais da central são opcionais e configuradas conforme [WHATSAPP.md](W
 
 ## Criar atendentes de homologação
 
-Preferir **Configurações → Equipe e acessos → Nova atendente**. Informar nome, e-mail, posição livre e senha temporária de pelo menos 16 caracteres. Entregar a senha por canal seguro: a atendente deverá trocá-la antes de consultar os leads.
+Preferir **Configurações → Equipe e acessos → Nova atendente**. Informar nome, e-mail, posição livre e senha temporária de pelo menos 6 caracteres. Entregar a senha por canal seguro: a atendente deverá trocá-la antes de consultar os leads.
 
 Na mesma área, a gestão pode redefinir a senha temporária (revogando sessões), renomear a atendente e desativar/reativar sua conta. A desativação exige outra atendente ativa quando houver leads abertos sob responsabilidade ou reserva; a transferência e a revogação são atômicas. Dados históricos não são apagados.
 
 Alternativa técnica: há um comando administrativo explícito, executado somente por quem tem acesso ao ambiente autorizado:
 
-1. No serviço de homologação, configurar temporariamente `CREATE_USER_NAME`, `CREATE_USER_EMAIL`, `CREATE_USER_PASSWORD` (16+ caracteres) e `CREATE_USER_POSITION` (1–99, única).
+1. No serviço de homologação, configurar temporariamente `CREATE_USER_NAME`, `CREATE_USER_EMAIL`, `CREATE_USER_PASSWORD` (6+ caracteres) e `CREATE_USER_POSITION` (1–99, única).
 2. No shell do serviço, executar `npm run user:create -w backend`.
 3. O comando cria uma atendente habilitada na posição indicada. E-mail/posição repetidos falham, sem sobrescrever contas.
 4. Remover as quatro variáveis após o uso e entregar a senha por canal seguro. Não escrever senhas em comandos que fiquem no histórico.

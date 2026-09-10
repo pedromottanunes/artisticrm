@@ -7,11 +7,11 @@ export async function bootstrapManager(db: Database, email?: string, password?: 
   if (Number((await db.query<{ count: string }>('SELECT count(*) FROM users')).rows[0].count))
     return;
   const credentials = z
-    .object({ email: z.string().email().max(200), password: z.string().min(16).max(128) })
+    .object({ email: z.string().email().max(200), password: z.string().min(6).max(128) })
     .safeParse({ email, password });
   if (!credentials.success)
     throw new Error(
-      'Banco vazio: configure BOOTSTRAP_ADMIN_EMAIL e BOOTSTRAP_ADMIN_PASSWORD (mínimo 16 caracteres) no Render.',
+      'Banco vazio: configure BOOTSTRAP_ADMIN_EMAIL e BOOTSTRAP_ADMIN_PASSWORD (mínimo 6 caracteres) no Render.',
     );
   if (credentials.data.email.endsWith('@demo.artisti.local'))
     throw new Error('Contas de demonstração não são permitidas no ambiente publicado.');

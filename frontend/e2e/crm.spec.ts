@@ -109,7 +109,7 @@ test('gestão cria atendente e primeiro acesso obriga troca de senha', async ({ 
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Nome da atendente').fill('Atendente E2E');
   await dialog.getByLabel('E-mail de acesso').fill('atendente-e2e@example.test');
-  await dialog.getByLabel('Senha temporária').fill('Temporary-test-password-2026');
+  await dialog.getByLabel('Senha temporária').fill('Ab!123');
   await dialog.getByRole('button', { name: 'Confirmar alteração' }).click();
   await expect(dialog).not.toBeVisible();
   await expect(page.getByText('Atendente E2E', { exact: true })).toBeVisible();
@@ -123,21 +123,21 @@ test('gestão cria atendente e primeiro acesso obriga troca de senha', async ({ 
     await attendant.goto('/');
     await attendant.getByRole('button', { name: 'Usar e-mail e senha' }).click();
     await attendant.getByLabel('E-mail', { exact: true }).fill('atendente-e2e@example.test');
-    await attendant.getByLabel('Senha', { exact: true }).fill('Temporary-test-password-2026');
+    await attendant.getByLabel('Senha', { exact: true }).fill('Ab!123');
     await attendant.getByRole('button', { name: 'Entrar no espaço de trabalho' }).click();
     await expect(
       attendant.getByRole('heading', { name: 'Defina sua senha pessoal' }),
     ).toBeVisible();
-    await attendant.getByLabel('Senha atual ou temporária').fill('Temporary-test-password-2026');
-    await attendant.getByLabel('Nova senha', { exact: true }).fill('Personal-test-password-2026');
-    await attendant.getByLabel('Confirmar nova senha').fill('Personal-test-password-2026');
+    await attendant.getByLabel('Senha atual ou temporária').fill('Ab!123');
+    await attendant.getByLabel('Nova senha', { exact: true }).fill('Cd!456');
+    await attendant.getByLabel('Confirmar nova senha').fill('Cd!456');
     await attendant.getByRole('button', { name: 'Salvar nova senha' }).click();
     await expect(
       attendant.getByRole('button', { name: 'Entrar no espaço de trabalho' }),
     ).toBeVisible();
     await attendant.getByRole('button', { name: 'Usar e-mail e senha' }).click();
     await attendant.getByLabel('E-mail', { exact: true }).fill('atendente-e2e@example.test');
-    await attendant.getByLabel('Senha', { exact: true }).fill('Personal-test-password-2026');
+    await attendant.getByLabel('Senha', { exact: true }).fill('Cd!456');
     await attendant.getByRole('button', { name: 'Entrar no espaço de trabalho' }).click();
     await expect(attendant.getByRole('heading', { name: /Olá, Atendente E2E/ })).toBeVisible();
   } finally {

@@ -295,7 +295,7 @@ export async function buildApp(
   });
   const commandKey = (headers: Record<string, unknown>) =>
     z.string().min(8).max(100).parse(headers['idempotency-key']);
-  const password = z.string().min(16, 'Use pelo menos 16 caracteres.').max(128);
+  const password = z.string().min(6, 'Use pelo menos 6 caracteres.').max(128);
   const reason = z.string().trim().min(5, 'Explique o motivo em pelo menos 5 caracteres.').max(500);
   app.post('/api/v1/users', async (request, reply) => {
     requireManager(request.user);

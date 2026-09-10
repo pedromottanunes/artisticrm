@@ -532,7 +532,8 @@ test('bootstrap de homologação não aceita credenciais ausentes nem gera demo'
   try {
     await migrate(isolated);
     await assert.rejects(() => bootstrapManager(isolated));
-    await bootstrapManager(isolated, 'gestor@example.test', 'Example-long-password-2026');
+    await assert.rejects(() => bootstrapManager(isolated, 'gestor@example.test', 'Ab!12'));
+    await bootstrapManager(isolated, 'gestor@example.test', 'Ab!123');
     assert.equal(
       Number((await isolated.query<{ count: string }>('SELECT count(*) FROM users')).rows[0].count),
       1,
