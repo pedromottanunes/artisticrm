@@ -1,12 +1,16 @@
 import { test, expect, type Page } from '@playwright/test';
 
-test('gestão consulta central desligada em viewport móvel sem expor configuração', async ({ page }) => {
+test('gestão consulta central desligada em viewport móvel sem expor configuração', async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
   // Navigate through the desktop-sized menu first, then inspect the same panel on mobile.
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.getByRole('button', { name: 'Configurações', exact: true }).click();
-  const panel = page.locator('section').filter({ has: page.getByRole('heading', { name: 'WhatsApp central', exact: true }) });
+  const panel = page
+    .locator('section')
+    .filter({ has: page.getByRole('heading', { name: 'WhatsApp central', exact: true }) });
   await expect(panel.getByText('Desligado', { exact: true })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await panel.scrollIntoViewIfNeeded();
@@ -19,6 +23,38 @@ async function login(page: Page, profile = 'cadu') {
   await page.getByRole('button', { name: 'Entrar no espaço de trabalho' }).click();
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
 }
+
+test('tipografia permanece legível em desktop amplo e celular', async ({ page }) => {
+  const unreadableText = async () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('body *')]
+        .filter((element) => {
+          const box = element.getBoundingClientRect();
+          const style = getComputedStyle(element);
+          return (
+            element.children.length === 0 &&
+            !!element.textContent?.trim() &&
+            !element.classList.contains('sr-only') &&
+            box.width > 0 &&
+            box.height > 0 &&
+            style.display !== 'none' &&
+            style.visibility !== 'hidden'
+          );
+        })
+        .map((element) => ({
+          text: element.textContent!.trim().slice(0, 80),
+          size: parseFloat(getComputedStyle(element).fontSize),
+        }))
+        .filter(({ size }) => size < 12),
+    );
+
+  await page.setViewportSize({ width: 1874, height: 920 });
+  await login(page);
+  expect(await unreadableText()).toEqual([]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await unreadableText()).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
 test('gestão navega, filtra e cadastra lead persistente', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -113,10 +149,14 @@ test('gestão cria atendente e primeiro acesso obriga troca de senha', async ({ 
   await dialog.getByRole('button', { name: 'Confirmar alteração' }).click();
   await expect(dialog).not.toBeVisible();
   await expect(page.getByText('Atendente E2E', { exact: true })).toBeVisible();
-  await page.setViewportSize({width:390,height:844});
-  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
-  await page.screenshot({path:'test-results/equipe-mobile.png',fullPage:true,animations:'disabled'});
-  await page.setViewportSize({width:1280,height:720});
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({
+    path: 'test-results/equipe-mobile.png',
+    fullPage: true,
+    animations: 'disabled',
+  });
+  await page.setViewportSize({ width: 1280, height: 720 });
   const context = await browser.newContext();
   const attendant = await context.newPage();
   try {

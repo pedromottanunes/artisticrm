@@ -23,11 +23,11 @@
   min-width: 0;
 }
 .team-list strong {
-  font-size: 12px;
+  font-size: 17px;
 }
 .team-list small {
   display: block;
-  font-size: 9px;
+  font-size: 14px;
   color: #99aabd;
   margin-top: 6px;
   overflow-wrap: anywhere;
@@ -67,10 +67,10 @@
   gap: 12px;
 }
 .appointment-editor strong {
-  font-size: 12px;
+  font-size: 17px;
 }
 .appointment-editor p {
-  font-size: 10px;
+  font-size: 15px;
   color: #95a7ba;
   margin-top: 8px;
   line-height: 1.8;
@@ -159,7 +159,7 @@
     padding-right: 48px;
   }
   .page-heading h1 {
-    font-size: 34px;
+    font-size: 40px;
   }
   .stat-card {
     padding: 25px;
@@ -192,16 +192,16 @@
     padding-right: 15px;
   }
   .page-heading h1 {
-    font-size: 25px;
+    font-size: 31px;
   }
   .stat-card {
     padding: 18px 15px;
   }
   .stat-card > div {
-    font-size: 9px;
+    font-size: 14px;
   }
   .stat-card small {
-    font-size: 7px;
+    font-size: 12px;
     white-space: normal;
     line-height: 1.7;
     min-height: 23px;
@@ -217,10 +217,10 @@
     padding: 21px 19px;
   }
   .panel-heading h2 {
-    font-size: 12px;
+    font-size: 17px;
   }
   .panel-heading .eyebrow {
-    font-size: 6px;
+    font-size: 12px;
     letter-spacing: 1.1px;
   }
   .funnel-chart {
@@ -228,7 +228,7 @@
     gap: 10px;
   }
   .funnel-label {
-    font-size: 7px;
+    font-size: 12px;
   }
   .leads-table th,
   .leads-table td {
@@ -240,13 +240,13 @@
   }
   .integration-steps {
     gap: 10px;
-    font-size: 9px;
+    font-size: 14px;
   }
   .two-columns {
     gap: 17px;
   }
   .distribution-hero h2 {
-    font-size: 16px;
+    font-size: 21px;
   }
   .distribution-numbers {
     gap: 17px;
@@ -262,7 +262,7 @@
     padding: 45px;
   }
   .login-copy h1 {
-    font-size: 43px;
+    font-size: 49px;
   }
 }
 @media (max-width: 1000px) {
@@ -286,13 +286,13 @@
     padding-top: 15px;
   }
   .panel-heading .eyebrow {
-    font-size: 7px;
+    font-size: 12px;
   }
   .funnel-label {
-    font-size: 9px;
+    font-size: 14px;
   }
   .funnel-value span {
-    font-size: 8px;
+    font-size: 13px;
   }
   .page-heading {
     align-items: flex-start;
@@ -301,7 +301,7 @@
     display: block;
   }
   .page-heading h1 {
-    font-size: 27px;
+    font-size: 33px;
   }
   .heading-actions {
     padding-top: 18px;
@@ -322,17 +322,17 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .stat-card > div {
-    font-size: 10px;
+    font-size: 15px;
   }
   .stat-card small {
-    font-size: 8px;
+    font-size: 13px;
     min-height: 0;
   }
   .stat-card > strong {
     margin: 18px 0;
   }
   .login-copy h1 {
-    font-size: 37px;
+    font-size: 43px;
   }
   .login-story {
     padding: 35px;
@@ -341,7 +341,7 @@
     padding: 35px;
   }
   .login-form-content h2 {
-    font-size: 23px;
+    font-size: 28px;
   }
   .integration-steps {
     flex-wrap: wrap;
@@ -376,7 +376,7 @@
   }
   .breadcrumbs {
     gap: 9px;
-    font-size: 10px;
+    font-size: 15px;
   }
   .breadcrumbs > span {
     display: none;
@@ -394,7 +394,7 @@
     padding: 0 19px 25px;
   }
   .demo-strip {
-    font-size: 8px;
+    font-size: 13px;
     line-height: 1.8;
     padding: 11px 0;
   }
@@ -406,16 +406,16 @@
     gap: 15px;
   }
   .page-heading .eyebrow {
-    font-size: 7px;
+    font-size: 12px;
     letter-spacing: 1.3px;
   }
   .page-heading h1 {
-    font-size: 26px;
+    font-size: 32px;
     letter-spacing: -0.8px;
     margin-top: 11px;
   }
   .page-heading p {
-    font-size: 10px;
+    font-size: 15px;
     line-height: 1.8;
   }
   .heading-actions {
@@ -423,12 +423,12 @@
     gap: 10px;
   }
   .heading-actions .button {
-    font-size: 10px;
+    font-size: 15px;
     min-height: 38px;
     padding: 10px 12px;
   }
   .today-label {
-    font-size: 7px;
+    font-size: 12px;
   }
   .stats-grid {
     gap: 12px;
@@ -438,7 +438,7 @@
     padding: 19px;
   }
   .stat-card > strong {
-    font-size: 31px;
+    font-size: 37px;
   }
   .overview-grid {
     margin-bottom: 20px;
@@ -447,10 +447,10 @@
     padding: 20px;
   }
   .panel-heading p {
-    font-size: 9px;
+    font-size: 14px;
   }
   .panel-heading h2 {
-    font-size: 12px;
+    font-size: 17px;
   }
   .queue-users {
     gap: 0 20px;
@@ -459,10 +459,10 @@
   .page-footer {
     gap: 16px;
     line-height: 1.8;
-    font-size: 7px;
+    font-size: 12px;
   }
   .page-footer > span:first-child {
-    font-size: 6px;
+    font-size: 12px;
     letter-spacing: 0.8px;
   }
   .lead-cards {
@@ -480,7 +480,7 @@
     margin-left: auto;
   }
   .lead-card-identity h2 {
-    font-size: 11px;
+    font-size: 16px;
   }
   .table-filters {
     width: 100%;
@@ -513,10 +513,10 @@
     height: 46px;
   }
   .distribution-hero .eyebrow {
-    font-size: 7px;
+    font-size: 12px;
   }
   .distribution-hero h2 {
-    font-size: 15px;
+    font-size: 20px;
   }
   .integration-hero {
     padding: 24px;
@@ -525,10 +525,10 @@
     padding: 36px 24px;
   }
   .feature-notice h2 {
-    font-size: 17px;
+    font-size: 22px;
   }
   .feature-notice > p {
-    font-size: 10px;
+    font-size: 15px;
   }
   .integration-steps {
     flex-direction: column;
@@ -541,7 +541,7 @@
     padding: 20px;
   }
   .integration-hero h2 {
-    font-size: 20px;
+    font-size: 25px;
   }
   .mobile-bottom-nav {
     display: flex;
@@ -562,7 +562,7 @@
     flex-direction: column;
     gap: 6px;
     color: #8196ad;
-    font-size: 8px;
+    font-size: 13px;
     padding: 4px 12px;
   }
   .mobile-bottom-nav > button.active {
@@ -576,7 +576,7 @@
     left: 15px;
     bottom: 21px;
     max-width: none;
-    font-size: 10px;
+    font-size: 15px;
   }
   .app-shell:has(.mobile-bottom-nav) .toast {
     bottom: 89px;
@@ -597,7 +597,7 @@
     padding: 0;
   }
   .login-copy h1 {
-    font-size: 33px;
+    font-size: 39px;
     margin-top: 17px;
   }
   .login-copy h1 br:first-of-type {
@@ -611,7 +611,7 @@
     display: none;
   }
   .login-copy .eyebrow {
-    font-size: 7px;
+    font-size: 12px;
     letter-spacing: 1.6px;
   }
   .login-form-wrap {
@@ -621,7 +621,7 @@
     max-width: 480px;
   }
   .login-form-content h2 {
-    font-size: 24px;
+    font-size: 29px;
     margin-top: 15px;
   }
   .login-form-content form {
@@ -645,7 +645,7 @@
     min-width: 110px;
   }
   .appointment-time {
-    font-size: 11px;
+    font-size: 16px;
   }
   .appointment-list {
     padding: 0 19px 18px;
@@ -658,10 +658,10 @@
     padding: 23px 20px;
   }
   .modal-heading h2 {
-    font-size: 19px;
+    font-size: 24px;
   }
   .modal-heading .eyebrow {
-    font-size: 7px;
+    font-size: 12px;
   }
   .modal-body {
     padding: 22px 20px;
@@ -678,13 +678,13 @@
     padding: 0 20px;
   }
   .demo-tag {
-    font-size: 6px;
+    font-size: 12px;
   }
   .detail-evidence {
     padding: 0 20px 20px;
   }
   .modal-actions .button {
-    font-size: 10px;
+    font-size: 15px;
   }
   .form-error.in-modal {
     margin-left: 20px;
@@ -701,7 +701,7 @@
     padding-right: 15px;
   }
   .sync-status {
-    font-size: 8px;
+    font-size: 13px;
   }
   .topbar-right > .avatar {
     display: none;
@@ -711,7 +711,7 @@
     gap: 15px;
   }
   .page-heading h1 {
-    font-size: 25px;
+    font-size: 31px;
   }
   .heading-break {
     display: none;
@@ -724,24 +724,24 @@
     width: 100%;
   }
   .heading-actions .today-label {
-    font-size: 8px;
+    font-size: 13px;
   }
   .stat-card {
     padding: 17px 14px;
   }
   .stat-card > div {
-    font-size: 8px;
+    font-size: 13px;
     gap: 5px;
   }
   .stat-card > div > svg {
     width: 15px;
   }
   .stat-card small {
-    font-size: 7px;
+    font-size: 12px;
     min-height: 22px;
   }
   .stat-card > strong {
-    font-size: 30px;
+    font-size: 36px;
   }
   .stats-grid {
     gap: 10px;
@@ -751,14 +751,14 @@
     gap: 12px;
   }
   .panel-heading h2 {
-    font-size: 11px;
+    font-size: 16px;
   }
   .panel-heading .eyebrow {
-    font-size: 6px;
+    font-size: 12px;
     letter-spacing: 0.8px;
   }
   .text-link {
-    font-size: 8px;
+    font-size: 13px;
   }
   .funnel-chart {
     padding: 17px 15px 18px;
@@ -766,13 +766,13 @@
     min-height: 204px;
   }
   .funnel-value strong {
-    font-size: 21px;
+    font-size: 26px;
   }
   .funnel-value span {
-    font-size: 6px;
+    font-size: 12px;
   }
   .funnel-label {
-    font-size: 6px;
+    font-size: 12px;
     gap: 3px;
     min-height: 22px;
   }
@@ -782,7 +782,7 @@
   }
   .panel-footnote {
     padding: 12px 16px;
-    font-size: 7px;
+    font-size: 12px;
   }
   .queue-users {
     grid-template-columns: 1fr;
@@ -793,10 +793,10 @@
     padding: 10px 0;
   }
   .queue-person strong {
-    font-size: 11px;
+    font-size: 16px;
   }
   .queue-person small {
-    font-size: 9px;
+    font-size: 14px;
   }
   .queue-bottom {
     padding: 15px 18px;
@@ -809,29 +809,29 @@
     padding: 20px;
   }
   .lead-card-identity h2 {
-    font-size: 13px;
+    font-size: 18px;
   }
   .lead-card footer .button {
-    font-size: 10px;
+    font-size: 15px;
     min-height: 40px;
   }
   .lead-card footer .text-link {
-    font-size: 10px;
+    font-size: 15px;
   }
   .lead-card-info .source {
-    font-size: 10px;
+    font-size: 15px;
   }
   .lead-card-info > span:last-child {
-    font-size: 10px;
+    font-size: 15px;
   }
   .lead-card-top .badge {
-    font-size: 9px;
+    font-size: 14px;
   }
   .attendant-summary {
     padding: 18px;
   }
   .attendant-summary strong {
-    font-size: 11px;
+    font-size: 16px;
   }
   .table-filters {
     flex-direction: column;
@@ -849,7 +849,7 @@
   }
   .appointment-time {
     gap: 4px;
-    font-size: 10px;
+    font-size: 15px;
   }
   .appointment-card {
     gap: 12px;
@@ -858,10 +858,10 @@
     width: 43px;
   }
   .appointment-card > div > strong {
-    font-size: 10px;
+    font-size: 15px;
   }
   .appointment-card > div > span {
-    font-size: 8px;
+    font-size: 13px;
   }
   .page-footer {
     flex-direction: column;
@@ -876,7 +876,7 @@
     grid-column: auto;
   }
   .detail-summary .source {
-    font-size: 8px;
+    font-size: 13px;
   }
   .detail-summary .demo-tag {
     margin-left: 0;
@@ -885,7 +885,7 @@
     gap: 18px;
   }
   .detail-tabs > button {
-    font-size: 9px;
+    font-size: 14px;
   }
   .modal-actions {
     flex-wrap: wrap;
@@ -899,10 +899,10 @@
     padding: 18px;
   }
   .distribution-hero h2 {
-    font-size: 13px;
+    font-size: 18px;
   }
   .distribution-hero p {
-    font-size: 9px;
+    font-size: 14px;
   }
   .round-robin-icon {
     height: 38px;
@@ -913,7 +913,7 @@
     width: 20px;
   }
   .distribution-hero .eyebrow {
-    font-size: 6px;
+    font-size: 12px;
   }
   .integration-hero {
     gap: 16px;
@@ -922,35 +922,35 @@
     flex: 1;
   }
   .integration-hero .eyebrow {
-    font-size: 7px;
+    font-size: 12px;
   }
   .integration-hero p {
-    font-size: 9px;
+    font-size: 14px;
   }
   .integration-logo {
     width: 50px;
     height: 50px;
-    font-size: 32px;
+    font-size: 38px;
   }
   .login-copy h1 {
-    font-size: 29px;
+    font-size: 35px;
   }
   .login-form-content h2 {
-    font-size: 22px;
+    font-size: 27px;
   }
   .pool-summary > button {
     gap: 8px;
   }
   .pool-summary strong {
-    font-size: 9px;
+    font-size: 14px;
   }
   .pool-summary .badge {
-    font-size: 7px;
+    font-size: 12px;
   }
   .connection-banner {
     align-items: flex-start;
     flex-wrap: wrap;
-    font-size: 10px;
+    font-size: 15px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
