@@ -1,10 +1,10 @@
-# Homologação Free. PostgreSQL expira em 30 dias; não usar para operação real.
+# Homologação: Web Service Free + MongoDB Atlas externo. Não usar para operação real.
 services:
   - type: web
     name: artisti-crm
     runtime: node
     plan: free
-    region: virginia
+    region: oregon
     numInstances: 1
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm run start -w backend
@@ -17,19 +17,11 @@ services:
         value: production
       - key: WHATSAPP_ENABLED
         value: 'false'
-      - key: DATABASE_URL
-        fromDatabase:
-          name: artisti-crm-db
-          property: connectionString
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_DB
+        value: artisti
       - key: BOOTSTRAP_ADMIN_EMAIL
         sync: false
       - key: BOOTSTRAP_ADMIN_PASSWORD
         sync: false
-databases:
-  - name: artisti-crm-db
-    databaseName: artisti
-    user: artisti
-    region: virginia
-    plan: free
-    postgresMajorVersion: '18'
-    ipAllowList: []

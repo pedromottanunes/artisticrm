@@ -16,6 +16,9 @@ export default defineConfig({
       FRONTEND_PORT: '5175',
       ARTISTI_API_TARGET: 'http://127.0.0.1:3335',
       ARTISTI_EPHEMERAL_DB: '1',
+      MONGODB_URI: '',
+      DATABASE_URL: '',
+      NODE_ENV: 'development',
     },
   },
 });

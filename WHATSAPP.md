@@ -4,7 +4,7 @@ A integração foi preparada para WhatsApp Cloud API, sem número, conta Meta ou
 
 ## Configuração no Render
 
-Após publicar o backend com PostgreSQL e HTTPS, defina no ambiente do serviço (nunca no Git):
+Após publicar o backend com MongoDB Atlas e HTTPS, defina no ambiente do serviço (nunca no Git):
 
 | Variável | Valor a fornecer depois |
 | --- | --- |
@@ -30,7 +30,7 @@ Sem ativação, GET/POST do webhook retornam 503. Ativar com configuração inco
 - POST exige HMAC-SHA256 sobre os bytes originais com `X-Hub-Signature-256`. A rota não depende de sessão de navegador. As APIs do CRM continuam protegidas por sessão e controles de origem.
 - Aceita somente a WABA e o Phone Number ID configurados. Eventos de outros recursos e campos, incluindo histórico/echoes, são ignorados. Status de entrega sem mensagem não cria lead.
 - O evento é confirmado com HTTP 200 somente depois de persistir o lote normalizado. Falha no banco retorna erro para permitir reenvio pela Meta.
-- Fila durável no PostgreSQL, processada no backend a cada segundo, com exclusão mútua por evento, lease recuperável após dois minutos e novas tentativas com espera progressiva até cinco minutos. O processo precisa de um serviço continuamente disponível.
+- Fila durável no MongoDB (também suportada no PostgreSQL legado), processada no backend a cada segundo, com exclusão mútua por evento, lease recuperável após dois minutos e novas tentativas com espera progressiva até cinco minutos. O processo precisa de um serviço continuamente disponível.
 - Deduplicação permanente pelo ID da mensagem. Repetição após crash não recria o lead nem avança novamente o rodízio. Novas mensagens do mesmo contato preservam a oportunidade aberta.
 - O prazo da reserva começa quando o backend efetivamente distribui o lead, não no clique do site. Sem destinatária habilitada, fica pendente até habilitar o rodízio.
 - Nome e telefone vêm do webhook. Texto, mídia e histórico de chat não são armazenados; não há downloads de anexos ou respostas automáticas. Mensagens sem telefone válido são rejeitadas para diagnóstico, não convertidas em contatos fictícios.

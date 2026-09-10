@@ -7,6 +7,8 @@ import { z, ZodError } from 'zod';
 import { registerWhatsApp, type WhatsAppConfig } from './whatsapp.js';
 import type { Database } from './db.js';
 import { Operations } from './operations.js';
+import { MongoOperations, publicUser } from './mongo-crm.js';
+import type { MongoStore } from './mongo-store.js';
 import { tokenHash, verifyPassword } from './auth.js';
 import { DomainError, requireManager, stages, type User } from './types.js';
 
@@ -34,7 +36,7 @@ const leadSchema = z
   .strict();
 
 export async function buildApp(
-  db: Database,
+  db: Database | MongoStore,
   options: {
     clock?: () => Date;
     reconcile?: boolean;
@@ -50,7 +52,10 @@ export async function buildApp(
     bodyLimit: 32_768,
     trustProxy: options.production ? (_address, hop) => hop === 0 : false,
   });
-  const crm = new Operations(db, options.clock);
+  const crm =
+    db.kind === 'mongo'
+      ? new MongoOperations(db, options.clock)
+      : new Operations(db, options.clock);
   await app.register(cookie);
   await app.register(rateLimit, { max: 240, timeWindow: '1 minute' });
   app.decorateRequest('user');
@@ -89,13 +94,33 @@ export async function buildApp(
     if (request.url.split('?')[0] === '/api/v1/auth/login' || request.url === '/api/health') return;
     const token = request.cookies.artisti_session;
     if (!token) throw new DomainError('UNAUTHENTICATED', 'Entre para continuar.', 401);
-    const user = (
-      await db.query<User>(
-        `SELECT u.id,u.name,u.email,u.role,u.active,u.queue_enabled,u.queue_position,u.color,u.version,u.auth_version,u.must_change_password FROM sessions s
+    const session =
+      db.kind === 'mongo'
+        ? await db.one('sessions', {
+            token_hash: tokenHash(token),
+            expires_at: { $gt: await crm.now() },
+          })
+        : null;
+    const mongoUser =
+      db.kind === 'mongo' && session
+        ? await db.one('users', {
+            id: session.user_id,
+            active: true,
+            auth_version: session.auth_version,
+          })
+        : null;
+    const user =
+      db.kind === 'mongo'
+        ? mongoUser
+          ? publicUser(mongoUser)
+          : undefined
+        : (
+            await db.query<User>(
+              `SELECT u.id,u.name,u.email,u.role,u.active,u.queue_enabled,u.queue_position,u.color,u.version,u.auth_version,u.must_change_password FROM sessions s
       JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>$2 AND u.active AND s.auth_version=u.auth_version`,
-        [tokenHash(token), await crm.now()],
-      )
-    ).rows[0];
+              [tokenHash(token), await crm.now()],
+            )
+          ).rows[0];
     if (!user)
       throw new DomainError('UNAUTHENTICATED', 'Sua sessão expirou. Entre novamente.', 401);
     request.user = user;
@@ -140,8 +165,12 @@ export async function buildApp(
     });
   });
   app.get('/api/health', async () => {
-    await db.query('SELECT 1');
-    return { status: 'ok', mode: options.production ? 'staging' : 'local-demo' };
+    if (db.kind === 'mongo') await db.database.command({ ping: 1 });
+    else await db.query('SELECT 1');
+    return {
+      status: 'ok',
+      mode: options.production ? 'staging' : db.kind === 'mongo' ? 'development' : 'local-demo',
+    };
   });
   app.post(
     '/api/v1/auth/login',
@@ -150,32 +179,57 @@ export async function buildApp(
       const input = z
         .object({ email: z.string().email().max(200), password: z.string().min(1).max(128) })
         .parse(request.body);
-      const user = (
-        await db.query<User & { password_hash: string }>(
-          'SELECT * FROM users WHERE lower(email)=$1 AND active',
-          [input.email.toLowerCase()],
-        )
-      ).rows[0];
+      const user =
+        db.kind === 'mongo'
+          ? await db.one<User & { password_hash: string }>('users', {
+              email: input.email.toLowerCase(),
+              active: true,
+            })
+          : (
+              await db.query<User & { password_hash: string }>(
+                'SELECT * FROM users WHERE lower(email)=$1 AND active',
+                [input.email.toLowerCase()],
+              )
+            ).rows[0];
       if (!user || !(await verifyPassword(input.password, user.password_hash)))
         throw new DomainError('INVALID_CREDENTIALS', 'E-mail ou senha incorretos.', 401);
       const token = randomBytes(32).toString('base64url');
-      await db.transaction(async (tx) => {
-        const current = (
-          await tx.query<User>('SELECT * FROM users WHERE id=$1 FOR SHARE', [user.id])
-        ).rows[0];
-        if (!current.active || current.auth_version !== user.auth_version)
-          throw new DomainError(
-            'INVALID_CREDENTIALS',
-            'Credenciais alteradas. Entre novamente.',
-            401,
-          );
-        await tx.query('INSERT INTO sessions VALUES ($1,$2,$3,$4)', [
-          tokenHash(token),
-          user.id,
-          new Date((await crm.now(tx)).getTime() + 8 * 3_600_000),
-          user.auth_version,
-        ]);
-      });
+      if (db.kind === 'mongo')
+        await db.atomic(async (tx) => {
+          const current = await tx.one('users', { id: user.id });
+          if (!current?.active || current.auth_version !== user.auth_version)
+            throw new DomainError(
+              'INVALID_CREDENTIALS',
+              'Credenciais alteradas. Entre novamente.',
+              401,
+            );
+          await tx.insert('sessions', {
+            token_hash: tokenHash(token),
+            user_id: user.id,
+            expires_at: new Date(
+              (options.clock ? options.clock() : await tx.now()).getTime() + 8 * 3_600_000,
+            ),
+            auth_version: user.auth_version,
+          });
+        });
+      else
+        await db.transaction(async (tx) => {
+          const current = (
+            await tx.query<User>('SELECT * FROM users WHERE id=$1 FOR SHARE', [user.id])
+          ).rows[0];
+          if (!current.active || current.auth_version !== user.auth_version)
+            throw new DomainError(
+              'INVALID_CREDENTIALS',
+              'Credenciais alteradas. Entre novamente.',
+              401,
+            );
+          await tx.query('INSERT INTO sessions VALUES ($1,$2,$3,$4)', [
+            tokenHash(token),
+            user.id,
+            new Date((await new Operations(db, options.clock).now(tx)).getTime() + 8 * 3_600_000),
+            user.auth_version,
+          ]);
+        });
       reply.setCookie('artisti_session', token, {
         path: '/',
         httpOnly: true,
@@ -187,9 +241,12 @@ export async function buildApp(
     },
   );
   app.post('/api/v1/auth/logout', async (request, reply) => {
-    await db.query('DELETE FROM sessions WHERE token_hash=$1', [
-      tokenHash(request.cookies.artisti_session!),
-    ]);
+    if (db.kind === 'mongo')
+      await db.remove('sessions', { token_hash: tokenHash(request.cookies.artisti_session!) });
+    else
+      await db.query('DELETE FROM sessions WHERE token_hash=$1', [
+        tokenHash(request.cookies.artisti_session!),
+      ]);
     reply.clearCookie('artisti_session', { path: '/' });
     return { ok: true };
   });
@@ -203,10 +260,10 @@ export async function buildApp(
           appointments: [],
           settings: { version: 0, timeout_minutes: 10, last_position: 0 },
           server_time: (await crm.now()).toISOString(),
-          demo: !options.production,
+          demo: !options.production && db.kind !== 'mongo',
           limit: 0,
         }
-      : { ...(await crm.snapshot(request.user)), demo: !options.production },
+      : { ...(await crm.snapshot(request.user)), demo: !options.production && db.kind !== 'mongo' },
   );
   app.get('/api/v1/opportunities/:id', async (request) =>
     crm.detail(request.user, idParams.parse(request.params).id),

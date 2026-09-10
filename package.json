@@ -15,7 +15,7 @@
     "typecheck": "npm run typecheck --workspaces",
     "test": "npm run test -w backend",
     "test:e2e": "playwright test",
-    "test:release": "tsx backend/test/release-smoke.ts",
+    "test:release": "tsx backend/test/release-smoke.ts && tsx backend/test/mongo-release.ts",
     "format": "prettier --write \"backend/src/**/*.ts\" \"backend/test/**/*.ts\" \"frontend/src/**/*.{ts,tsx,css}\" \"frontend/e2e/**/*.ts\""
   },
   "devDependencies": {

@@ -1,112 +1,79 @@
-# GitHub → Render: homologação
+# GitHub → Render + MongoDB Atlas
 
-## Arquitetura inicial
+## Configuração para o ambiente de teste
 
-```text
-Repositório GitHub
-  ├─ frontend/ ── build React/Vite ─┐
-  └─ backend/ ── build Fastify ────┴─ Web Service Node / HTTPS
-                                      └─ Render PostgreSQL privado
+Um **Web Service Node Free** serve o frontend compilado e a API no mesmo domínio. O banco é o **MongoDB Atlas já criado**, fora do Render. Não criar Static Site, Background Worker nem PostgreSQL para esta configuração.
+
+| Campo no Render | Valor |
+| --- | --- |
+| Repositório | `pedromottanunes/artisticrm` |
+| Branch | `main` |
+| Language | `Node` |
+| Root Directory | Deixar vazio |
+| Build Command | `npm ci --include=dev && npm run build` |
+| Start Command | `npm run start -w backend` |
+| Instance Type | `Free` |
+| Health Check Path | `/api/health` |
+
+Alternativa: o [render.yaml](render.yaml) cria esse Web Service via Blueprint. A URI do Atlas e o acesso inicial são preenchidos no painel, nunca no GitHub. O Blueprint não cria nem apaga o cluster Atlas. Se já estiver usando criação manual, não é preciso criar outro serviço via Blueprint.
+
+## Variáveis no Render
+
+Em **Environment → Add from .env**, inserir o bloco abaixo, substituindo os três valores indicados. Não publicar credenciais no repositório.
+
+```dotenv
+NODE_ENV=production
+NODE_VERSION=22.18.0
+MONGODB_URI=COLE_AQUI_SUA_CONNECTION_STRING_COMPLETA
+MONGODB_DB=artisti
+BOOTSTRAP_ADMIN_EMAIL=SEU_EMAIL_DE_LOGIN
+BOOTSTRAP_ADMIN_PASSWORD=SUA_SENHA_DE_LOGIN
+WHATSAPP_ENABLED=false
 ```
 
-O código continua separado nas duas pastas. Um único serviço serve a interface e `/api`, simplificando cookies de sessão, origem e configuração. Os ativos de logo e fonte são locais ao build, sem dependência do site da clínica no carregamento.
+- Remover `DATABASE_URL` se tiver sido cadastrada: o processo recusa dois bancos configurados simultaneamente.
+- A senha de login aceita 6 a 128 caracteres. Ela é diferente da senha do usuário MongoDB, embutida na URI.
+- `MONGODB_DB=artisti` corresponde à permissão `readWrite@artisti` configurada no Atlas.
+- `PORT` e `RENDER_EXTERNAL_URL` são fornecidas pelo Render. Não é necessário cadastrá-las manualmente.
+- `APP_ORIGIN` só é necessária para definir um domínio HTTPS próprio como origem canônica.
 
-Reservas, cursor e inbox da central WhatsApp vivem no PostgreSQL, não no disco temporário do serviço. A reconciliação e o processador da inbox executam dentro da API, com prazo persistido, leases e repetição idempotente. Não há pg-boss nem serviço worker separado nesta entrega. Push e sincronização de anúncios ainda precisam de implementação.
+## Liberar o acesso ao Atlas
 
-## Antes de subir ao GitHub
+No Web Service, consulte **Connect → Outbound** e copie os IPs/faixas de saída apresentados. No Atlas, em **Database & Network Access → IP Access List**, adicione esses IPs/faixas. Autorizar apenas o IP do seu computador não libera o Render. Não é necessário abrir a rede inteira. [Guia oficial Render/Atlas](https://render.com/docs/connect-to-mongodb-atlas).
 
-1. Criar um repositório, preferencialmente privado, sob a conta/organização autorizada.
-2. Versionar código, especificações, migrations, lockfile e `render.yaml`.
-3. Não incluir `.env`, banco `.data`, tokens, documentos ou exportações de pacientes.
-4. Executar os comandos de validação do README.
-5. Configurar proteção da branch principal e exigir a CI antes de integrar alterações. A criação/configuração do repositório ainda não foi feita.
+Se ainda não houver serviço salvo para consultar os IPs, um primeiro deploy pode falhar na conexão. Depois de liberar as faixas, repetir o deploy. Não alterar permissões para administrador: `readWrite` no banco `artisti` é suficiente.
 
-O workflow `.github/workflows/ci.yml` instala dependências, verifica tipos, executa testes com PGlite e PostgreSQL 18, compila e testa a interface em Chromium. As credenciais do PostgreSQL nesse workflow são apenas para o banco efêmero de testes, não são segredos de operação.
+## O que acontece no primeiro início
 
-## Criar a homologação no Render
+1. O servidor conecta ao Atlas e verifica suporte a transações.
+2. Cria as coleções/índices necessários e a configuração inicial de dez minutos, sem apagar registros existentes.
+3. Se o banco não tem usuários, cria somente a conta de gestão usando o e-mail/senha de bootstrap.
+4. Passa a servir a interface e a API. `/api/health` verifica acesso ao banco.
 
-1. Autorizar a conta Render a acessar o repositório correto.
-2. Criar um Blueprint a partir do `render.yaml`, mantendo o diretório raiz do repositório.
-3. Conferir a região e os planos de Web Service/PostgreSQL: ambos devem aparecer como **Free**. O banco gratuito tem 1 GB, expira em 30 dias e só pode existir um por workspace. Se já houver outro, não o exclua: interrompa a criação para avaliar as opções.
-4. Definir e-mail e senha de bootstrap na interface do Render. O sistema aceita 6 a 128 caracteres; prefira uma senha longa e exclusiva antes de usar dados reais. Nunca colocá-la no código.
-5. Aplicar o Blueprint. `autoDeployTrigger: off` mantém deploys posteriores manuais até o fluxo de publicação ser aprovado.
-6. Verificar o health check, entrar com a conta criada e validar os fluxos com dados de teste.
+Não são criados pacientes fictícios, números de central ou atendentes automaticamente no MongoDB. Após entrar, cadastre as atendentes em **Configurações → Equipe e acessos**. Defina nome, e-mail, posição no rodízio e senha temporária. O primeiro acesso exige troca da senha. Não é necessário cadastrar o telefone da atendente.
 
-Configuração usada:
+Após confirmar o primeiro login, pode remover `BOOTSTRAP_ADMIN_PASSWORD`. Alterar essa variável **não redefine uma senha existente**; a troca ocorre na aplicação. Se já houver pendências, salvar a configuração da fila após habilitar a equipe para distribuí-las.
 
-| Campo | Valor |
-| --- | --- |
-| Build | `npm ci --include=dev && npm run build` |
-| Migrations | Executadas automaticamente no início do servidor, antes de atender requisições |
-| Start | `npm run start -w backend` |
-| Health check | `/api/health` — verifica acesso ao banco |
-| Node | 22.18.0 |
-| Porta/host | `PORT` fornecida pelo Render, host `0.0.0.0` |
-| Instâncias iniciais | 1; rate limiting em memória exige revisão antes de escalar |
-| Banco | PostgreSQL 18, rede privada, sem IPs externos autorizados |
+## Persistência e limitações
 
-O processo confere migrations ao iniciar; são versionadas, transacionais e serializadas com um advisory lock no PostgreSQL. O Blueprint Free não depende de pre-deploy separado. Fazer backup antes de futuras migrations destrutivas. Não há rollback automático de schema implementado.
+Leads, usuários, sessões, reservas, cursor do rodízio, auditoria e inbox WhatsApp ficam no Atlas. Reiniciar/republicar o Web Service não apaga esses registros. A integração WhatsApp continua desligada até configurar os IDs e segredos descritos em [WHATSAPP.md](WHATSAPP.md).
 
-### Limitações do Free
+O Render Free dorme após 15 minutos sem tráfego e pode demorar para acordar. Enquanto dorme, os processadores não executam. O prazo original permanece no banco, e o bolsão é reconciliado ao retomar; não existe garantia de execução pontual no décimo minuto durante suspensão. Essa limitação também afeta a recepção imediata de webhooks. [Limites oficiais do Free](https://render.com/docs/free).
 
-O Web Service dorme após 15 minutos sem tráfego e pode levar cerca de um minuto para acordar. Enquanto dorme, o processador da central e a reconciliação do bolsão não executam. As reservas preservam o vencimento no banco e são reconciliadas ao retomar, sem reiniciar os dez minutos. Não há garantia de atendimento instantâneo a webhooks durante o despertar.
+Use dados de teste. Antes de operação real: homologar Meta e celulares, implementar push, definir backup/restauração e monitoramento, revisar capacidade/planos, segurança e regras comerciais. A migração de dados de outro CRM/PostgreSQL não é automática. [Detalhes técnicos MongoDB](MONGODB.md).
 
-O PostgreSQL Free fica inacessível ao expirar em 30 dias; após mais 14 dias sem upgrade, o Render exclui o banco e os dados. Não há backups gerenciados gratuitos. Usar somente dados de teste e planejar exportação/migração antes do vencimento. [Limites oficiais](https://render.com/docs/free).
+## Validação local e CI
 
-## Variáveis de ambiente
+```bash
+npm ci
+npm run typecheck
+npm test
+npm run build
+npm run test:release
+npx playwright install chromium
+npm run test:e2e
+```
 
-| Variável | Uso |
-| --- | --- |
-| `NODE_ENV=production` | Desativa seed demo, exige PostgreSQL, ativa cookie Secure e serve frontend compilado |
-| `DATABASE_URL` | Ligação privada ao PostgreSQL, preenchida por `fromDatabase` |
-| `BOOTSTRAP_ADMIN_EMAIL` | E-mail da primeira conta de gestão |
-| `BOOTSTRAP_ADMIN_PASSWORD` | Senha da primeira conta, 6–128 caracteres |
-| `RENDER_EXTERNAL_URL` | Origem HTTPS padrão fornecida pelo Render |
-| `APP_ORIGIN` | Opcional: origem HTTPS canônica ao usar domínio próprio, sem caminho |
-| `PORT` | Porta fornecida pelo Render |
+Os testes MongoDB usam um replica set real, temporário e isolado; baixam o binário na primeira execução. Nenhum teste usa a URI do seu Atlas. Os testes SQL foram preservados para evitar regressões na demonstração local. A CI também valida PostgreSQL externo como modo legado.
 
-O bootstrap só cria a primeira conta quando não há usuários. Depois do primeiro acesso confirmado, remover `BOOTSTRAP_ADMIN_PASSWORD` do ambiente; o servidor não precisa dela para reiniciar com banco inicializado. Alterar essa variável não muda senhas existentes. A conta autenticada pode trocar sua senha em Configurações; recuperação autônoma por e-mail ainda não está implementada.
-
-Não reutilizar a base local de demonstração no Render: o servidor publicado se recusa a iniciar se detectar contas `@demo.artisti.local`. A opção `ARTISTI_EPHEMERAL_DB` serve só aos testes e nunca substitui `DATABASE_URL` em produção.
-
-As credenciais da central são opcionais e configuradas conforme [WHATSAPP.md](WHATSAPP.md). O webhook fica desligado até a ativação explícita. Credenciais de anúncios Meta/Google e exportação automática de conversões continuam pendentes.
-
-## Criar atendentes de homologação
-
-Preferir **Configurações → Equipe e acessos → Nova atendente**. Informar nome, e-mail, posição livre e senha temporária de pelo menos 6 caracteres. Entregar a senha por canal seguro: a atendente deverá trocá-la antes de consultar os leads.
-
-Na mesma área, a gestão pode redefinir a senha temporária (revogando sessões), renomear a atendente e desativar/reativar sua conta. A desativação exige outra atendente ativa quando houver leads abertos sob responsabilidade ou reserva; a transferência e a revogação são atômicas. Dados históricos não são apagados.
-
-Alternativa técnica: há um comando administrativo explícito, executado somente por quem tem acesso ao ambiente autorizado:
-
-1. No serviço de homologação, configurar temporariamente `CREATE_USER_NAME`, `CREATE_USER_EMAIL`, `CREATE_USER_PASSWORD` (6+ caracteres) e `CREATE_USER_POSITION` (1–99, única).
-2. No shell do serviço, executar `npm run user:create -w backend`.
-3. O comando cria uma atendente habilitada na posição indicada. E-mail/posição repetidos falham, sem sobrescrever contas.
-4. Remover as quatro variáveis após o uso e entregar a senha por canal seguro. Não escrever senhas em comandos que fiquem no histórico.
-5. Repetir com identidades reais das atendentes de teste; nomes e ordem da proposta precisam ser confirmados.
-6. Se existirem leads pendentes de antes da criação da equipe, salvar a configuração da fila pela gestão para distribuí-los.
-
-Convites por link, recuperação autônoma por e-mail, MFA e administração de outras contas de gestão continuam pendentes. As ações disponíveis não substituem a homologação de segurança antes da operação real.
-
-## Critérios antes de operar com pacientes
-
-- Homologar os testes em PostgreSQL externo e revisar resultados da CI.
-- Validar comportamento em aparelhos reais e acesso HTTPS móvel.
-- Implementar entrada oficial WhatsApp com assinatura, destinatário permitido, inbox durável e deduplicação por conta/número/evento.
-- Implementar push e monitorar falhas; não depender da consulta com navegador aberto.
-- Confirmar regras de reentrada, horários, transferências e comissão com Cadu.
-- Implementar paginação e consultas agregadas adequadas ao volume (hoje: até 500 oportunidades por resposta).
-- Completar gestão de identidades, revogação e recuperação de acesso; avaliar MFA para gestão.
-- Formalizar acesso por unidade/papel, retenção, descarte, auditoria de edição detalhada e tratamento de dados sensíveis.
-- Configurar monitoramento operacional, alertas, rate limiting compatível com a topologia e uma política de backup/restauração testada.
-- Usar armazenamento privado externo quando houver documentos; nunca gravá-los no filesystem efêmero do Web Service.
-- Planejar migração do número central, importação, treinamento e retorno operacional. Apenas um distribuidor deve comandar a operação real.
-
-## Referências oficiais
-
-Configuração baseada na [referência de Blueprints do Render](https://render.com/docs/blueprint-spec) e nas [variáveis de ambiente disponibilizadas pelo Render](https://render.com/docs/environment-variables). Validar o Blueprint na conta antes de aplicar: nenhum deploy externo foi realizado ou confirmado por esta entrega.
-
-O banco embarcado segue a [API do PGlite](https://pglite.dev/docs/api), exclusivamente para desenvolvimento/testes; o ambiente publicado usa o driver `pg` e PostgreSQL separado.
-# Ativação opcional da central
-
-A integração WhatsApp fica desligada no blueprint. Depois do deploy, siga [WHATSAPP.md](WHATSAPP.md) para configurar os segredos e IDs no ambiente, verificar o webhook HTTPS e assinar a WABA. Não coloque número ou credenciais no repositório. A tela Configurações mostra o estado da fila sem expor segredos.
+Os arquivos `.env`, dados locais, tokens e credenciais permanecem fora do Git. Backups e futuras mudanças destrutivas de estrutura exigem planejamento próprio; não há rollback automático de dados.

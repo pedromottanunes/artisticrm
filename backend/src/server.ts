@@ -6,38 +6,48 @@ import { seedDemo } from './seed.js';
 import { buildApp } from './app.js';
 import { bootstrapManager } from './bootstrap.js';
 import { whatsappConfig } from './whatsapp.js';
+import { openMongo, initializeMongo, bootstrapMongo } from './mongo-store.js';
 
 const production = process.env.NODE_ENV === 'production';
 const whatsapp = whatsappConfig(process.env);
-if (production && !process.env.DATABASE_URL)
+if (process.env.MONGODB_URI && process.env.DATABASE_URL)
+  throw new Error('Configure apenas MONGODB_URI ou DATABASE_URL, nunca ambos.');
+if (production && !process.env.DATABASE_URL && !process.env.MONGODB_URI)
   throw new Error(
-    'DATABASE_URL é obrigatória no ambiente publicado. Banco embarcado não é permitido no Render.',
+    'Configure MONGODB_URI no ambiente publicado. Banco embarcado não é permitido no Render.',
   );
 const appOrigin = process.env.APP_ORIGIN ?? process.env.RENDER_EXTERNAL_URL;
 if (production && (!appOrigin || new URL(appOrigin).protocol !== 'https:'))
   throw new Error('APP_ORIGIN ou RENDER_EXTERNAL_URL deve conter a origem HTTPS pública.');
 const dataPath = fileURLToPath(new URL('../.data/postgres', import.meta.url));
-if (!process.env.DATABASE_URL)
+if (!process.env.DATABASE_URL && !process.env.MONGODB_URI)
   await mkdir(fileURLToPath(new URL('../.data', import.meta.url)), { recursive: true });
-const db = await openDatabase(
-  !production && process.env.ARTISTI_EPHEMERAL_DB === '1' ? 'memory://' : dataPath,
-  process.env.DATABASE_URL,
-);
-await migrate(db);
-if (production) {
-  const demoUsers = await db.query('SELECT id FROM users WHERE email LIKE $1 LIMIT 1', [
-    '%@demo.artisti.local',
-  ]);
-  if (demoUsers.rows.length)
-    throw new Error(
-      'O banco contém contas de demonstração. Use um banco vazio e exclusivo para homologação.',
+const db = process.env.MONGODB_URI
+  ? await openMongo(process.env.MONGODB_URI, process.env.MONGODB_DB ?? 'artisti')
+  : await openDatabase(
+      !production && process.env.ARTISTI_EPHEMERAL_DB === '1' ? 'memory://' : dataPath,
+      process.env.DATABASE_URL,
     );
-  await bootstrapManager(
-    db,
-    process.env.BOOTSTRAP_ADMIN_EMAIL,
-    process.env.BOOTSTRAP_ADMIN_PASSWORD,
-  );
-} else await seedDemo(new CRM(db));
+if (db.kind === 'mongo') {
+  await initializeMongo(db);
+  await bootstrapMongo(db, process.env.BOOTSTRAP_ADMIN_EMAIL, process.env.BOOTSTRAP_ADMIN_PASSWORD);
+} else {
+  await migrate(db);
+  if (production) {
+    const demoUsers = await db.query('SELECT id FROM users WHERE email LIKE $1 LIMIT 1', [
+      '%@demo.artisti.local',
+    ]);
+    if (demoUsers.rows.length)
+      throw new Error(
+        'O banco contém contas de demonstração. Use um banco vazio e exclusivo para homologação.',
+      );
+    await bootstrapManager(
+      db,
+      process.env.BOOTSTRAP_ADMIN_EMAIL,
+      process.env.BOOTSTRAP_ADMIN_PASSWORD,
+    );
+  } else await seedDemo(new CRM(db));
+}
 const { app } = await buildApp(db, {
   production,
   whatsapp,
@@ -53,7 +63,7 @@ await app.listen({
 console.info(
   production
     ? 'Artisti CRM • servidor de homologação iniciado'
-    : 'Artisti API • demonstração local • http://127.0.0.1:3333',
+    : `Artisti API • ${db.kind === 'mongo' ? 'MongoDB' : 'demonstração local'} • http://127.0.0.1:${process.env.PORT ?? 3333}`,
 );
 let closing = false;
 const close = async () => {

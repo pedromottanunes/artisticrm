@@ -27,6 +27,7 @@ Abra **http://127.0.0.1:5173**. Escolha Cadu para gestão ou uma atendente para 
 - Banco local: PostgreSQL embarcado (PGlite) em `backend/.data/postgres`. Persiste entre reinícios; não é versionado. Apenas um processo de desenvolvimento deve abrir esse diretório.
 - Dados iniciais: contatos fictícios, reservas, bolsão, agendamentos e quatro atendentes. São criados uma única vez no banco vazio. O prazo das reservas continua correndo mesmo sem o navegador aberto.
 - `DATABASE_URL` permite usar PostgreSQL externo de desenvolvimento. Não aponte o desenvolvimento para o banco publicado: o seed local é exclusivo de teste.
+- Para usar MongoDB, configure `MONGODB_URI` e `MONGODB_DB=artisti`, sem `DATABASE_URL`. O MongoDB começa sem dados fictícios e exige `BOOTSTRAP_ADMIN_EMAIL` e `BOOTSTRAP_ADMIN_PASSWORD` na primeira inicialização. Use um banco separado para desenvolvimento. Consulte [MONGODB.md](MONGODB.md).
 - Os exemplos `.env.example` documentam variáveis; nesta etapa, o processo lê o ambiente do terminal/Render e não carrega arquivos `.env` automaticamente.
 - Contatos fictícios não abrem WhatsApp. Cadastros manuais podem abrir o contato após aceite, por ação explícita da atendente. O CRM não envia mensagens.
 
@@ -62,9 +63,9 @@ Essas escolhas são conservadoras para teste técnico, não substituem a confirm
 
 ## GitHub e Render
 
-O repositório mantém `backend/` e `frontend/` separados. O deploy inicial usa **um Web Service Node que serve frontend compilado + API**, com **PostgreSQL separado**. Não depende do disco temporário do Web Service e não requer CORS entre dois domínios.
+O repositório mantém `backend/` e `frontend/` separados. O deploy usa **um Web Service Node que serve frontend compilado + API**, com **MongoDB Atlas externo**. Não depende do disco temporário do Web Service e não requer CORS entre dois domínios.
 
-Consulte [DEPLOY.md](DEPLOY.md) e [render.yaml](render.yaml). O Blueprint usa Web Service e PostgreSQL **Free** para homologação: o servidor pode dormir e o banco expira em 30 dias. Não usar para dados de pacientes. O código foi enviado ao GitHub; a criação dos serviços e o deploy no Render são etapas separadas.
+Consulte [DEPLOY.md](DEPLOY.md), [MONGODB.md](MONGODB.md) e [render.yaml](render.yaml). O Blueprint cria apenas o Web Service **Free**, usando a conexão do Atlas criada separadamente. Não é necessário criar PostgreSQL no Render. O servidor pode dormir; não usar esta configuração para operação com pacientes. A criação dos serviços e o deploy no Render são etapas separadas.
 
 No ambiente publicado, o banco começa vazio, exige credenciais próprias e não carrega os perfis fictícios. O bootstrap cria apenas a conta de gestão; o cadastro operacional das atendentes está documentado em [DEPLOY.md](DEPLOY.md).
 
@@ -80,6 +81,7 @@ npm run test:e2e
 ```
 
 - Testes do backend: distribuição, duplicidade, concorrência, prazo, permissões, idempotência, agenda e persistência.
+- Testes MongoDB: executam um `mongod` real em replica set temporário, inclusive teste com usuário restrito a `readWrite` em `artisti`. O primeiro uso baixa o binário MongoDB; não utiliza nem apaga o banco Atlas. Sem fallback silencioso para banco em memória quando a conexão Atlas falha.
 - Cobertura operacional adicional: transferência concorrente com aceite, revogação de acesso durante trabalho, reentrada em revisão, remarcação auditada, senhas temporárias e rejeição de aceite antigo após transferência.
 - Teste de release: frontend compilado servido pela API, CSP, cookies seguros e ausência das credenciais demo no bundle.
 - Testes de navegador: gestão, cadastro, edição, agendamento e atendimento em viewport móvel. Usam banco temporário em memória e portas 5175/3335, sem alterar a base de desenvolvimento.
@@ -145,8 +147,8 @@ Instagram pode existir como campo opcional do cadastro. Meta Ads e Google Ads s�
 | Reentrada | Oportunidade aberta mantém responsável; retorno após encerramento precisa de política validada |
 | Aceite | Registra posse e tempo até aceite; não comprova primeira mensagem enviada |
 | Instalação | PWA candidata; aplicativo de loja depende dos testes nos celulares e decisão de distribuição |
-| Tecnologia | React/TypeScript, API Node.js/Fastify, PostgreSQL, worker com pg-boss |
-| Serviços gerenciados | Supabase candidato para banco, autenticação e arquivos privados |
+| Tecnologia | React/TypeScript, API Node.js/Fastify, MongoDB nativo com transações; reconciliação/inbox dentro da API |
+| Serviços gerenciados | MongoDB Atlas para dados e Render para aplicação; sessões próprias; arquivos privados pendentes |
 
 ## Entregas e critérios de avanço
 

@@ -2,6 +2,7 @@ import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { CRM, LeadInput } from './crm.js';
+import type { MongoOperations } from './mongo-crm.js';
 import { DomainError } from './types.js';
 
 export interface WhatsAppConfig {
@@ -69,7 +70,7 @@ const valueSchema = z.object({
 
 export class WhatsAppCentral {
   constructor(
-    private crm: CRM,
+    private crm: CRM | MongoOperations,
     private config?: WhatsAppConfig,
   ) {}
 
@@ -128,53 +129,142 @@ export class WhatsAppCentral {
       }
     }
     // Persist the entire batch before acknowledging. No chat bodies/media are stored.
-    await this.crm.db.transaction(async (tx) => {
-      for (const event of events)
-        await tx.query(
-          `INSERT INTO whatsapp_inbox(event_id,phone_number_id,lead)
+    const db = this.crm.db;
+    if (db.kind === 'mongo')
+      await db.atomic(async (tx) => {
+        const now = await tx.now();
+        for (const event of events)
+          await tx.collection('whatsapp_inbox').updateOne(
+            { event_id: event.id },
+            {
+              $setOnInsert: {
+                event_id: event.id,
+                phone_number_id: config.phoneNumberId,
+                lead: event.lead,
+                received_at: now,
+                available_at: now,
+                processed_at: null,
+                attempts: 0,
+                lease_id: null,
+                last_error: null,
+              },
+            },
+            { upsert: true, session: tx.session },
+          );
+      });
+    else
+      await db.transaction(async (tx) => {
+        for (const event of events)
+          await tx.query(
+            `INSERT INTO whatsapp_inbox(event_id,phone_number_id,lead)
           VALUES ($1,$2,$3) ON CONFLICT (event_id) DO NOTHING`,
-          [event.id, config.phoneNumberId, JSON.stringify(event.lead)],
-        );
-    });
+            [event.id, config.phoneNumberId, JSON.stringify(event.lead)],
+          );
+      });
   }
 
   async drain(limit = 25) {
     if (!this.config) return;
+    const db = this.crm.db;
+    // Do not acquire the domain write fence on an empty inbox every second.
+    if (
+      db.kind === 'mongo' &&
+      !(await db.count('whatsapp_inbox', {
+        processed_at: null,
+        available_at: { $lte: await db.now() },
+        phone_number_id: this.config.phoneNumberId,
+      }))
+    )
+      return;
     for (let i = 0; i < limit; i++) {
       const lease = randomUUID();
-      const row = await this.crm.db.transaction(async (tx) => {
-        const selected = (
-          await tx.query<{ event_id: string; lead: LeadInput; attempts: number }>(
-            `SELECT event_id,lead,attempts FROM whatsapp_inbox
+      const row =
+        db.kind === 'mongo'
+          ? await db.atomic(async (tx) => {
+              const now = await tx.now();
+              const selected = (
+                await tx.many<{ event_id: string; lead: LeadInput; attempts: number }>(
+                  'whatsapp_inbox',
+                  {
+                    processed_at: null,
+                    available_at: { $lte: now },
+                    phone_number_id: this.config!.phoneNumberId,
+                  },
+                  { received_at: 1, event_id: 1 },
+                  1,
+                )
+              )[0];
+              if (!selected) return;
+              await tx.update(
+                'whatsapp_inbox',
+                { event_id: selected.event_id },
+                {
+                  $set: { lease_id: lease, available_at: new Date(now.getTime() + 120_000) },
+                  $inc: { attempts: 1 },
+                },
+              );
+              return selected;
+            })
+          : await db.transaction(async (tx) => {
+              const selected = (
+                await tx.query<{ event_id: string; lead: LeadInput; attempts: number }>(
+                  `SELECT event_id,lead,attempts FROM whatsapp_inbox
            WHERE processed_at IS NULL AND available_at <= clock_timestamp() AND phone_number_id=$1
            ORDER BY received_at,event_id LIMIT 1 FOR UPDATE SKIP LOCKED`,
-            [this.config!.phoneNumberId],
-          )
-        ).rows[0];
-        if (!selected) return;
-        await tx.query(
-          `UPDATE whatsapp_inbox SET lease_id=$2,attempts=attempts+1,
+                  [this.config!.phoneNumberId],
+                )
+              ).rows[0];
+              if (!selected) return;
+              await tx.query(
+                `UPDATE whatsapp_inbox SET lease_id=$2,attempts=attempts+1,
           available_at=clock_timestamp()+interval '2 minutes' WHERE event_id=$1`,
-          [selected.event_id, lease],
-        );
-        return selected;
-      });
+                [selected.event_id, lease],
+              );
+              return selected;
+            });
       if (!row) return;
       try {
         // Ingest itself is idempotent: crash after commit, before marking done, is safe.
         const result = await this.crm.ingest(row.lead, row.event_id, null);
-        await this.crm.db.query(
-          `UPDATE whatsapp_inbox SET processed_at=clock_timestamp(),
+        if (db.kind === 'mongo')
+          await db.update(
+            'whatsapp_inbox',
+            { event_id: row.event_id, lease_id: lease },
+            {
+              $set: {
+                processed_at: await db.now(),
+                opportunity_id: result.id,
+                lease_id: null,
+                last_error: null,
+              },
+            },
+          );
+        else
+          await db.query(
+            `UPDATE whatsapp_inbox SET processed_at=clock_timestamp(),
           opportunity_id=$3,lease_id=NULL,last_error=NULL WHERE event_id=$1 AND lease_id=$2`,
-          [row.event_id, lease, result.id],
-        );
+            [row.event_id, lease, result.id],
+          );
       } catch {
         const seconds = Math.min(300, 2 ** Math.min(row.attempts + 1, 8));
-        await this.crm.db.query(
-          `UPDATE whatsapp_inbox SET lease_id=NULL,last_error='PROCESSING_FAILED',
+        if (db.kind === 'mongo')
+          await db.update(
+            'whatsapp_inbox',
+            { event_id: row.event_id, lease_id: lease },
+            {
+              $set: {
+                lease_id: null,
+                last_error: 'PROCESSING_FAILED',
+                available_at: new Date((await db.now()).getTime() + seconds * 1000),
+              },
+            },
+          );
+        else
+          await db.query(
+            `UPDATE whatsapp_inbox SET lease_id=NULL,last_error='PROCESSING_FAILED',
           available_at=clock_timestamp()+($3 * interval '1 second') WHERE event_id=$1 AND lease_id=$2`,
-          [row.event_id, lease, seconds],
-        );
+            [row.event_id, lease, seconds],
+          );
       }
     }
   }
@@ -189,23 +279,57 @@ export class WhatsAppCentral {
         last_received_at: null,
         last_processed_at: null,
       };
-    const row = (
-      await this.crm.db.query(
-        `SELECT
+    const db = this.crm.db;
+    const row =
+      db.kind === 'mongo'
+        ? ((await db
+            .collection('whatsapp_inbox')
+            .aggregate([
+              { $match: { phone_number_id: this.config.phoneNumberId } },
+              {
+                $group: {
+                  _id: null,
+                  pending: { $sum: { $cond: [{ $eq: ['$processed_at', null] }, 1, 0] } },
+                  retrying: {
+                    $sum: {
+                      $cond: [
+                        {
+                          $and: [{ $eq: ['$processed_at', null] }, { $ne: ['$last_error', null] }],
+                        },
+                        1,
+                        0,
+                      ],
+                    },
+                  },
+                  last_received_at: { $max: '$received_at' },
+                  last_processed_at: { $max: '$processed_at' },
+                },
+              },
+              { $project: { _id: 0 } },
+            ])
+            .next()) ?? {
+            pending: 0,
+            retrying: 0,
+            last_received_at: null,
+            last_processed_at: null,
+          })
+        : (
+            await db.query(
+              `SELECT
       count(*) FILTER (WHERE processed_at IS NULL)::integer AS pending,
       count(*) FILTER (WHERE processed_at IS NULL AND last_error IS NOT NULL)::integer AS retrying,
       max(received_at) AS last_received_at, max(processed_at) AS last_processed_at
       FROM whatsapp_inbox WHERE phone_number_id=$1`,
-        [this.config.phoneNumberId],
-      )
-    ).rows[0];
+              [this.config.phoneNumberId],
+            )
+          ).rows[0];
     return { configured: true, state: 'configured', ...row };
   }
 }
 
 export async function registerWhatsApp(
   app: FastifyInstance,
-  crm: CRM,
+  crm: CRM | MongoOperations,
   config?: WhatsAppConfig,
   runWorker = true,
 ) {

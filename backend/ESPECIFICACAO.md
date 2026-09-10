@@ -4,9 +4,9 @@ Status: especificação-alvo. O núcleo inicial já está implementado; o [READM
 
 ## Arquitetura
 
-Monólito modular em Node.js/TypeScript com Fastify. API e worker executam o mesmo domínio em processos separados. PostgreSQL é a fonte de verdade para cadastros, regras, reservas, histórico e tarefas persistentes. pg-boss é o candidato para tarefas; não pressupor execução única de efeitos externos: os consumidores devem ser idempotentes.
+Monólito modular em Node.js/TypeScript com Fastify. Na implementação atual, MongoDB Atlas é a fonte de verdade para cadastros, regras, reservas, histórico e inbox. Os processadores de vencimento e inbox executam dentro da API; não há worker separado nem pg-boss. Os consumidores são idempotentes. PostgreSQL/PGlite são mantidos como modo legado/local de testes. Ver [MONGODB.md](../MONGODB.md).
 
-Supabase é candidato para PostgreSQL, Auth e Storage privado. Regras de negócio e autorização permanecem explícitas na API, independentemente do provedor. Frontend não pode escrever diretamente em reservas, propriedade ou comissões. Credenciais privilegiadas não são enviadas ao navegador.
+O banco escolhido é MongoDB Atlas; autenticação por sessões próprias no backend. Armazenamento privado de arquivos permanece pendente. Regras de negócio e autorização permanecem explícitas na API. Frontend não pode escrever diretamente no banco. Credenciais privilegiadas não são enviadas ao navegador.
 
 Módulos: identidade/permissões, contatos, oportunidades, distribuição, atividades/agendamentos, contratos/comissões, entrada WhatsApp, notificações, rastreamento, relatórios de mídia e auditoria.
 
