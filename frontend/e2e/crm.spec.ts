@@ -1,4 +1,8 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type BrowserContext } from '@playwright/test';
+
+// Reuse demo sessions across isolated pages; repeated UI login isn't the purpose
+// of every regression and would exhaust the real login rate limit for one IP.
+const demoSessions = new Map<string, Awaited<ReturnType<BrowserContext['cookies']>>>();
 
 test('gestão consulta central desligada em viewport móvel sem expor configuração', async ({
   page,
@@ -19,10 +23,17 @@ test('gestão consulta central desligada em viewport móvel sem expor configura�
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 async function login(page: Page, profile = 'cadu') {
+  const cookies = demoSessions.get(profile);
+  if (cookies) await page.context().addCookies(cookies);
   await page.goto('/');
+  if (cookies && (await page.request.get('/api/v1/me')).ok()) {
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+    return;
+  }
   await page.getByLabel('Escolha um perfil de demonstração').selectOption(profile);
   await page.getByRole('button', { name: 'Entrar no espaço de trabalho' }).click();
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+  demoSessions.set(profile, await page.context().cookies());
 }
 
 test('tipografia permanece legível em desktop amplo e celular', async ({ page }) => {
@@ -286,6 +297,133 @@ test('central de distribuição acompanha reservas, histórico e aceite por outr
   } finally {
     await context.close();
   }
+});
+
+test('distribuição aceita consulta lenta e usa a mesma fotografia para equipe e leads', async ({
+  page,
+}) => {
+  await login(page);
+  const expected = await (await page.request.get('/api/v1/distribution/board')).json();
+  const firstUser = expected.users.find(
+    (u: { id: string }) => u.id === expected.rows[0].reserved_to,
+  );
+  // Simulate the workspace's independent snapshot lagging behind the board.
+  await page.route('**/api/v1/workspace', async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    await route.fulfill({
+      json: { ...body, users: [], settings: { ...body.settings, timeout_minutes: 55 } },
+    });
+  });
+  let calls = 0;
+  await page.route('**/api/v1/distribution/board?*', async (route) => {
+    calls++;
+    const response = await route.fetch();
+    await new Promise((resolve) => setTimeout(resolve, 6500));
+    await route.fulfill({ response });
+  });
+  await page
+    .getByRole('navigation', { name: 'Menu principal' })
+    .getByRole('button', { name: 'Distribuição', exact: true })
+    .click();
+  await expect(page.locator('.distribution-table tbody tr').first()).toBeVisible({
+    timeout: 12000,
+  });
+  // React StrictMode can mount twice, but a slow request must finish rather than
+  // being restarted by each five-second workspace poll.
+  expect(calls).toBeLessThanOrEqual(2);
+  await expect(page.locator('.distribution-rule')).toContainText('10 min');
+  await expect(
+    page.locator('.distribution-table tbody tr').first().locator('.distribution-owner'),
+  ).toContainText(firstUser.name);
+});
+
+test('distribuição recupera falhas e descarta respostas de filtros anteriores', async ({
+  page,
+}) => {
+  await login(page);
+  let unavailable = true;
+  let releaseOld!: () => void;
+  let completeOld!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    releaseOld = resolve;
+  });
+  const oldComplete = new Promise<void>((resolve) => {
+    completeOld = resolve;
+  });
+  await page.route('**/api/v1/distribution/board?*', async (route) => {
+    if (unavailable) {
+      await route.fulfill({ status: 503, json: { message: 'Falha temporária no teste' } });
+      return;
+    }
+    const response = await route.fetch();
+    if (new URL(route.request().url()).searchParams.get('search') === 'Eduardo') {
+      await gate;
+      try {
+        await route.fulfill({ response });
+      } finally {
+        completeOld();
+      }
+    } else await route.fulfill({ response });
+  });
+  await page
+    .getByRole('navigation', { name: 'Menu principal' })
+    .getByRole('button', { name: 'Distribuição', exact: true })
+    .click();
+  await expect(page.getByRole('alert')).toContainText('Falha temporária');
+  unavailable = false;
+  await expect(page.locator('.distribution-table tbody tr').first()).toBeVisible({
+    timeout: 12000,
+  });
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const requested = page.waitForRequest(
+    (request) => new URL(request.url()).searchParams.get('search') === 'Eduardo',
+  );
+  await page.getByLabel('Buscar na distribuição').fill('Eduardo');
+  await requested;
+  await page.getByLabel('Buscar na distribuição').fill('Henrique');
+  await expect(page.locator('.distribution-contact')).toContainText(['Henrique Alves']);
+  releaseOld();
+  await oldComplete;
+  await expect(page.locator('.distribution-contact')).toContainText(['Henrique Alves']);
+});
+
+test('configuração preserva rascunho e mostra conflito dentro da janela', async ({ page }) => {
+  await login(page);
+  await page
+    .getByRole('navigation', { name: 'Menu principal' })
+    .getByRole('button', { name: 'Distribuição', exact: true })
+    .click();
+  await page.getByRole('button', { name: 'Configurar rodízio' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Prazo para aceite').fill('15');
+  const original = await (await page.request.get('/api/v1/distribution/board')).json();
+  const payload = {
+    version: original.settings.version,
+    timeout_minutes: 11,
+    participants: original.users
+      .filter((u: { role: string }) => u.role === 'attendant')
+      .map((u: { id: string; queue_enabled: boolean }) => ({ id: u.id, enabled: u.queue_enabled })),
+  };
+  const result = await page.request.patch('/api/v1/distribution/settings', {
+    headers: { 'X-Artisti-Client': 'web' },
+    data: payload,
+  });
+  expect(result.status()).toBe(200);
+  await expect(page.locator('.distribution-rule')).toContainText('11 min', { timeout: 12000 });
+  await expect(dialog.getByLabel('Prazo para aceite')).toHaveValue('15');
+  await dialog.getByRole('button', { name: 'Salvar configuração' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('configuração mudou');
+  expect(
+    (await (await page.request.get('/api/v1/distribution/board')).json()).settings.timeout_minutes,
+  ).toBe(11);
+  await dialog.getByRole('button', { name: 'Fechar janela' }).click();
+  await page.getByRole('button', { name: 'Configurar rodízio' }).click();
+  await expect(dialog.getByLabel('Prazo para aceite')).toHaveValue('11');
+  await dialog.getByLabel('Prazo para aceite').fill('10');
+  await dialog.getByRole('button', { name: 'Salvar configuração' }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect(page.locator('.distribution-rule')).toContainText('10 min');
 });
 
 test('gestão transfere lead e desativação redistribui os atendimentos', async ({ page }) => {

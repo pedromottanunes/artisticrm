@@ -17,9 +17,11 @@ Primeira versão executável do CRM: interface de gestão e atendimento, API e b
 Abra **Distribuição** no menu lateral. O painel mostra reservas e tempo restante, bolsão, atendimentos assumidos e leads sem destino/revisão. Os cartões filtram a tabela; também é possível pesquisar nome/telefone e filtrar a responsável atual. Reservas com vencimento mais próximo aparecem primeiro.
 
 - Consulta própria (`GET /api/v1/distribution/board`), restrita à gestão, com 25 registros por página. Totais dos cartões e da equipe abrangem todas as oportunidades abertas, independentemente dos filtros e do limite de 500 da visão geral.
-- Atualização a cada 5 segundos enquanto a página está aberta; relógio ancorado no horário do servidor. Falhas de consulta são sinalizadas, e respostas antigas são descartadas ao mudar filtros.
+- Equipe, cursor do rodízio, configuração, totais e leads são lidos na mesma transação. A central não combina sua lista com a fotografia independente da visão geral.
+- A próxima consulta é agendada 5 segundos após a anterior terminar, com atualização ao retornar à aba e recuperação após falhas. Requisições que excedem 20 segundos são canceladas e repetidas; mudar filtros descarta respostas antigas. O relógio usa o horário do servidor obtido ao concluir a consulta.
 - **Histórico** abre os eventos do lead; **Gerenciar** abre a ficha com atribuição/transferência. **Últimas movimentações** lista os 20 eventos de distribuição mais recentes da central.
 - **Configurar rodízio** abre a participação da equipe e o prazo, sem ocupar a área de acompanhamento. Os contadores são operacionais, não comprovam envio de mensagens no WhatsApp.
+- O rascunho da configuração permanece estável durante as atualizações do painel. Alterações concorrentes são rejeitadas por versão e o erro aparece dentro da janela; fechar e reabrir carrega a configuração atual.
 - No MongoDB, a retomada processa todo o conjunto vencido em lotes transacionais de 100, com uma única expiração auditada por reserva. O Render Free não executa rotinas enquanto dorme; ao retomar, os prazos persistidos são reconciliados.
 
 ## Executar localmente

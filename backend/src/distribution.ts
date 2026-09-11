@@ -31,9 +31,48 @@ export async function distributionBoard(
   now: () => Promise<Date>,
 ) {
   requireManager(user);
-  const serverTime = (await now()).toISOString();
+  const result = await readDistributionBoard(db, query);
+  // Read the clock after the query, without opening another connection inside its
+  // transaction. Long queries must not restart the displayed countdown in the past.
+  return { ...result, server_time: (await now()).toISOString() };
+}
+
+const userFields = [
+  'id',
+  'name',
+  'email',
+  'role',
+  'active',
+  'queue_enabled',
+  'queue_position',
+  'color',
+  'version',
+  'must_change_password',
+];
+
+async function readDistributionBoard(
+  db: Database | MongoStore,
+  query: z.infer<typeof distributionQuery>,
+) {
   if (db.kind === 'mongo')
     return db.atomic(async (tx) => {
+      const users = await tx
+        .collection('users')
+        .find(
+          {},
+          {
+            session: tx.session,
+            projection: { _id: 0, ...Object.fromEntries(userFields.map((field) => [field, 1])) },
+          },
+        )
+        .sort({ queue_position: 1, id: 1 })
+        .toArray();
+      const configuration = (await tx.one('distribution_settings', { id: 1 }))!;
+      const settings = {
+        version: configuration.version,
+        timeout_minutes: configuration.timeout_minutes,
+        last_position: configuration.last_position,
+      };
       const open = { state: { $in: states }, stage: { $nin: ['LOST', 'WON'] } };
       const filter: Document = { ...open };
       if (query.state !== 'ALL') filter.state = query.state;
@@ -157,6 +196,8 @@ export async function distributionBoard(
         },
       ]);
       return {
+        users,
+        settings,
         rows,
         total,
         page,
@@ -168,13 +209,22 @@ export async function distributionBoard(
           .filter((t) => t._id.user)
           .map((t) => ({ user_id: t._id.user, state: t._id.state, count: Number(t.count) })),
         events,
-        server_time: serverTime,
       };
     }, true);
 
   return db.transaction(async (tx) => {
     // A coherent read for rows, totals and movement history in PostgreSQL as well.
     await tx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+    const users = (
+      await tx.query(
+        `SELECT ${userFields.join(',')} FROM users ORDER BY queue_position NULLS FIRST,id`,
+      )
+    ).rows;
+    const settings = (
+      await tx.query(
+        'SELECT version,timeout_minutes,last_position FROM distribution_settings WHERE id=1',
+      )
+    ).rows[0];
     const open =
       "o.state IN ('RESERVED','POOL','CLAIMED','PENDING') AND o.stage NOT IN ('WON','LOST')";
     const where = `${open} AND ($1='ALL' OR o.state=$1)
@@ -218,6 +268,8 @@ export async function distributionBoard(
       )
     ).rows;
     return {
+      users,
+      settings,
       rows,
       total,
       page,
@@ -227,7 +279,6 @@ export async function distributionBoard(
       ),
       team: team.filter((t) => t.user_id).map((t) => ({ ...t, count: Number(t.count) })),
       events,
-      server_time: serverTime,
     };
   });
 }

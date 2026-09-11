@@ -37,16 +37,14 @@ export async function checkDistribution(
   if (db.kind === 'mongo') {
     const original = (await db.one('opportunities', { id: first.id }))!;
     await db.collection('contacts').insertMany(contacts);
-    await db
-      .collection('opportunities')
-      .insertMany(
-        contacts.map((c) => ({
-          ...original,
-          id: randomUUID(),
-          contact_id: c.id,
-          created_at: new Date(getNow().getTime() + 1),
-        })),
-      );
+    await db.collection('opportunities').insertMany(
+      contacts.map((c) => ({
+        ...original,
+        id: randomUUID(),
+        contact_id: c.id,
+        created_at: new Date(getNow().getTime() + 1),
+      })),
+    );
   } else
     await db.transaction(async (tx) => {
       for (const c of contacts) {
@@ -73,6 +71,11 @@ export async function checkDistribution(
   assert.equal(all.total, 506);
   assert.equal(all.counts.RESERVED, 506);
   assert.equal(all.rows.length, 25);
+  assert.equal(all.settings.timeout_minutes, 10);
+  assert.equal(all.settings.last_position, users[0].queue_position);
+  assert.equal(all.users.length, users.length + 1);
+  assert.equal(all.users.find((u) => u.id === users[0].id)?.name, users[0].name);
+  assert.ok(all.users.every((u) => !('password_hash' in u) && !('auth_version' in u)));
   assert.equal(all.team.find((t) => t.user_id === users[0].id)?.count, 506);
   const next = await board({ page: 2 });
   assert.ok(next.rows.every((r) => !all.rows.some((a) => a.id === r.id)));
@@ -131,6 +134,18 @@ export async function checkDistribution(
     assert.equal(expired.statusCode, 200, expired.body);
     assert.equal(expired.json().counts.POOL, 506);
     assert.equal(expired.json().counts.RESERVED, 0);
+    assert.equal(await crm.expire(), 0);
+    const expiredEvents =
+      db.kind === 'mongo'
+        ? await db.count('audit_events', { kind: 'reservation.expired' })
+        : Number(
+            (
+              await db.query<{ count: string }>(
+                "SELECT count(*) FROM audit_events WHERE kind='reservation.expired'",
+              )
+            ).rows[0].count,
+          );
+    assert.equal(expiredEvents, 506);
     assert.equal(expired.json().events.length, 20);
     assert.ok(
       expired.json().events.some((e: { kind: string }) => e.kind === 'reservation.expired'),

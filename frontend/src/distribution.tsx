@@ -21,6 +21,8 @@ type Row = Pick<
   | 'version'
 >;
 interface Board {
+  users: Snapshot['users'];
+  settings: Snapshot['settings'];
   rows: Row[];
   total: number;
   page: number;
@@ -74,7 +76,7 @@ export function Distribution({
   const [revision, setRevision] = useState(0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [settings, setSettings] = useState(false);
+  const [settings, setSettings] = useState<Snapshot | null>(null);
   const [now, setNow] = useState(0);
   const clock = useRef({ server: 0, monotonic: 0 });
   const lastQuery = useRef('');
@@ -98,35 +100,75 @@ export function Distribution({
     return () => clearInterval(timer);
   }, []);
   useEffect(() => {
-    const controller = new AbortController();
+    let disposed = false;
+    let inFlight = false;
+    let controller: AbortController | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
     if (lastQuery.current !== query) setBoard(null);
     lastQuery.current = query;
-    setBusy(true);
-    void api<Board>(`/distribution/board?${query}`, { signal: controller.signal })
-      .then((result) => {
-        if (controller.signal.aborted) return;
+    const load = async () => {
+      if (disposed || inFlight) return;
+      clearTimeout(timer);
+      inFlight = true;
+      controller = new AbortController();
+      let timedOut = false;
+      deadline = setTimeout(() => {
+        timedOut = true;
+        controller?.abort();
+      }, 20000);
+      setBusy(true);
+      try {
+        const result = await api<Board>(`/distribution/board?${query}`, {
+          signal: controller.signal,
+        });
+        if (disposed) return;
         setBoard(result);
         setError('');
         clock.current = { server: Date.parse(result.server_time), monotonic: performance.now() };
         setNow(clock.current.server);
         if (result.page !== page) setPage(result.page);
-      })
-      .catch((e) => {
-        if (!controller.signal.aborted) setError((e as Error).message);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setBusy(false);
-      });
-    return () => controller.abort();
-  }, [query, revision, data.server_time]);
+      } catch (e) {
+        if (!disposed)
+          setError(
+            timedOut
+              ? 'O servidor demorou para responder. Tentaremos novamente.'
+              : (e as Error).message,
+          );
+      } finally {
+        clearTimeout(deadline);
+        inFlight = false;
+        if (!disposed) {
+          setBusy(false);
+          timer = setTimeout(() => void load(), 5000);
+        }
+      }
+    };
+    const resume = () => {
+      if (!document.hidden) void load();
+    };
+    void load();
+    window.addEventListener('focus', resume);
+    window.addEventListener('online', resume);
+    document.addEventListener('visibilitychange', resume);
+    return () => {
+      disposed = true;
+      controller?.abort();
+      clearTimeout(timer);
+      clearTimeout(deadline);
+      window.removeEventListener('focus', resume);
+      window.removeEventListener('online', resume);
+      document.removeEventListener('visibilitychange', resume);
+    };
+  }, [query, revision]);
 
-  const members = data.users.filter((u) => u.role === 'attendant');
+  const members = (board?.users ?? []).filter((u) => u.role === 'attendant');
   const ordered = members
     .filter((u) => u.active && u.queue_enabled)
     .sort(
       (a, b) =>
-        (a.queue_position! > data.settings.last_position ? 0 : 1) -
-          (b.queue_position! > data.settings.last_position ? 0 : 1) ||
+        (a.queue_position! > board!.settings.last_position ? 0 : 1) -
+          (b.queue_position! > board!.settings.last_position ? 0 : 1) ||
         a.queue_position! - b.queue_position!,
     );
   const count = (key: string) =>
@@ -144,7 +186,7 @@ export function Distribution({
     <div className="distribution-board">
       <div className="distribution-controls">
         <span className="distribution-rule">
-          <Clock3 size={16} /> {data.settings.timeout_minutes} min para aceite
+          <Clock3 size={16} /> {board?.settings.timeout_minutes ?? '—'} min para aceite
         </span>
         <span className="distribution-sync" role="status">
           {error || !connected
@@ -162,7 +204,13 @@ export function Distribution({
           <RefreshCw size={16} />
           <span>Atualizar</span>
         </button>
-        <button className="button outline compact" onClick={() => setSettings(true)}>
+        <button
+          className="button outline compact"
+          disabled={!board || !!error || !connected}
+          onClick={() =>
+            board && setSettings({ ...data, users: board.users, settings: board.settings })
+          }
+        >
           <Settings size={16} /> Configurar rodízio
         </button>
       </div>
@@ -214,7 +262,9 @@ export function Distribution({
           </ol>
         ) : (
           <p>
-            Nenhuma atendente habilitada. Configure o rodízio para distribuir os próximos leads.
+            {board
+              ? 'Nenhuma atendente habilitada. Configure o rodízio para distribuir os próximos leads.'
+              : 'Carregando equipe…'}
           </p>
         )}
       </section>
@@ -279,7 +329,7 @@ export function Distribution({
                         : lead.state === 'CLAIMED'
                           ? lead.owner_id
                           : null;
-                    const user = data.users.find((u) => u.id === responsible);
+                    const user = board.users.find((u) => u.id === responsible);
                     return (
                       <tr key={lead.id}>
                         <td data-label="Lead / origem">
@@ -407,11 +457,12 @@ export function Distribution({
         Atualização a cada 5 segundos. Aceite no CRM não confirma envio de mensagem no WhatsApp.
       </p>
       {settings && (
-        <Modal title="Configurar rodízio" onClose={() => setSettings(false)} wide>
+        <Modal title="Configurar rodízio" onClose={() => setSettings(null)} wide>
           <QueueSettings
-            data={data}
+            data={settings}
             connected={connected}
             onSaved={async () => {
+              setSettings(null);
               await onSaved();
               setRevision((r) => r + 1);
             }}

@@ -430,10 +430,15 @@ export function QueueSettings({
   onNotice: (message: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const submitting = useRef(false);
   const members = data.users.filter((u) => u.role === 'attendant');
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (submitting.current || !connected) return;
+    submitting.current = true;
     setBusy(true);
+    setError('');
     const fields = new FormData(e.currentTarget);
     try {
       await api('/distribution/settings', {
@@ -447,8 +452,11 @@ export function QueueSettings({
       onNotice('Configuração salva. Reservas existentes mantêm o prazo original.');
       await onSaved();
     } catch (error) {
-      onNotice((error as Error).message);
+      setError(
+        `${(error as Error).message} Feche e reabra a configuração para consultar os dados atuais.`,
+      );
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   };
@@ -460,7 +468,7 @@ export function QueueSettings({
           <p>A ordem é sequencial, independentemente de estar online.</p>
         </div>
       </div>
-      <form onSubmit={submit} key={data.settings.version}>
+      <form onSubmit={submit}>
         <div className="queue-settings">
           {members.map((u) => (
             <label className="queue-toggle" key={u.id}>
@@ -496,6 +504,11 @@ export function QueueSettings({
             inclusive as pausadas no rodízio. Leads sem destino serão distribuídos ao reativar a
             equipe.
           </p>
+          {error && (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          )}
         </div>
         <div className="modal-actions">
           <button className="button gold" disabled={busy || !connected}>
