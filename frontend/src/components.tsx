@@ -102,7 +102,6 @@ export function Modal({
     >
       <div className="modal-heading">
         <div>
-          <span className="eyebrow">ARTISTI • RELACIONAMENTO</span>
           <h2>{title}</h2>
           {description && <p>{description}</p>}
         </div>

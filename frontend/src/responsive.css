@@ -125,9 +125,6 @@
   .brand img {
     height: 50px;
   }
-  .brand > span {
-    margin-top: 8px;
-  }
   .workspace-label {
     padding: 9px;
     margin-bottom: 5px;
@@ -141,12 +138,6 @@
   }
   .sidebar-bottom {
     padding: 14px 20px;
-  }
-  .local-label {
-    padding-bottom: 12px;
-  }
-  .user-block {
-    padding-top: 12px;
   }
 }
 @media (min-width: 1550px) {
@@ -461,10 +452,6 @@
     line-height: 1.8;
     font-size: 12px;
   }
-  .page-footer > span:first-child {
-    font-size: 12px;
-    letter-spacing: 0.8px;
-  }
   .lead-cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 13px;
@@ -701,7 +688,7 @@
     padding-right: 15px;
   }
   .sync-status {
-    font-size: 13px;
+    display: none;
   }
   .topbar-right > .avatar {
     display: none;

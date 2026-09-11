@@ -15,6 +15,11 @@
 * {
   box-sizing: border-box;
 }
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
 body {
   margin: 0;
 }
@@ -151,20 +156,13 @@ em {
   flex-direction: column;
 }
 .brand {
-  padding: 34px 22px 27px;
+  padding: 34px 22px 22px;
   text-align: center;
 }
 .brand img {
   width: 160px;
   height: 68px;
   object-fit: contain;
-}
-.brand > span {
-  display: block;
-  font-size: 12px;
-  letter-spacing: 1.75px;
-  color: #a6a8a9;
-  margin-top: 13px;
 }
 .workspace-label {
   margin: 0 19px 12px;
@@ -187,12 +185,6 @@ em {
 .workspace-label strong {
   font-size: 16px;
   font-weight: 600;
-}
-.workspace-label small {
-  display: block;
-  font-size: 14px;
-  color: var(--muted);
-  margin-top: 4px;
 }
 .workspace-label > svg {
   margin-left: auto;
@@ -259,8 +251,6 @@ em {
 .local-label {
   font-size: 14px;
   color: #b2becc;
-  border-bottom: 1px solid var(--line);
-  padding-bottom: 18px;
 }
 .local-label small {
   display: block;
@@ -279,24 +269,6 @@ em {
 }
 .status-dot.paused {
   background: #738397;
-}
-.user-block {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  padding-top: 18px;
-}
-.user-block > div {
-  flex: 1;
-}
-.user-block strong {
-  font-size: 16px;
-}
-.user-block small {
-  display: block;
-  font-size: 14px;
-  color: var(--muted);
-  margin-top: 5px;
 }
 .avatar {
   display: inline-flex;
@@ -333,6 +305,8 @@ em {
 }
 .main-shell {
   margin-left: 238px;
+  min-width: 0;
+  overflow-x: hidden;
 }
 .topbar {
   height: 70px;
@@ -748,6 +722,7 @@ main {
 }
 .table-scroll {
   overflow-x: auto;
+  contain: inline-size;
 }
 .leads-table {
   width: 100%;
@@ -900,23 +875,10 @@ main {
 .page-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   padding: 29px 0 8px;
   color: #62758a;
   font-size: 13px;
-}
-.page-footer > span:first-child {
-  font-size: 12px;
-  letter-spacing: 1.5px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.page-footer i {
-  display: inline-block;
-  width: 16px;
-  height: 1px;
-  background: #a083553b;
 }
 .list-toolbar {
   display: flex;

@@ -43,7 +43,7 @@ export function LeadForm({
   };
   return (
     <Modal
-      title="Uma nova conexão"
+      title="Novo lead"
       description="Novo contato entra no rodízio. Retornos após encerramento aguardam revisão da gestão."
       onClose={onClose}
     >

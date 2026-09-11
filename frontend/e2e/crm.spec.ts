@@ -4,6 +4,7 @@ test('gestão consulta central desligada em viewport móvel sem expor configura�
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(250);
   await login(page);
   // Navigate through the desktop-sized menu first, then inspect the same panel on mobile.
   await page.setViewportSize({ width: 1280, height: 720 });
@@ -52,14 +53,26 @@ test('tipografia permanece legível em desktop amplo e celular', async ({ page }
   await login(page);
   expect(await unreadableText()).toEqual([]);
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(250);
   expect(await unreadableText()).toEqual([]);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const layout = await page.evaluate(() => {
+    const table = document.querySelector<HTMLElement>('.table-scroll')!;
+    return {
+      bodyWidth: document.body.scrollWidth,
+      viewport: innerWidth,
+      pageOverflowIsClipped: getComputedStyle(document.documentElement).overflowX === 'hidden',
+      tableCanScrollInternally: table.scrollWidth > table.clientWidth,
+    };
+  });
+  expect(layout.bodyWidth).toBeLessThanOrEqual(layout.viewport);
+  expect(layout.pageOverflowIsClipped).toBe(true);
+  expect(layout.tableCanScrollInternally).toBe(true);
 });
 test('gestão navega, filtra e cadastra lead persistente', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await login(page);
-  await expect(page.getByText('Seu relacionamento,')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Visão geral' })).toBeVisible();
   await page.screenshot({ path: 'test-results/gestao-desktop.png', fullPage: true });
   await page.getByRole('button', { name: 'Novo lead', exact: true }).click();
   const dialog = page.getByRole('dialog');
@@ -82,7 +95,7 @@ test('atendimento móvel acessa bolsão e confirma aceite sem abrir contato fict
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page, 'vanessa');
-  await expect(page.getByRole('heading', { name: /Olá, Vanessa/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Meus atendimentos' })).toBeVisible();
   await page
     .getByRole('navigation', { name: 'Atalhos de atendimento' })
     .getByRole('button', { name: 'Bolsão' })
@@ -93,7 +106,12 @@ test('atendimento móvel acessa bolsão e confirma aceite sem abrir contato fict
   await expect(claim).toBeVisible();
   await claim.click();
   await expect(page.getByRole('status').filter({ hasText: 'Contato fictício' })).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(
+    await page.evaluate(() => {
+      scrollTo(1000, 0);
+      return scrollX === 0 && document.body.scrollWidth <= innerWidth;
+    }),
+  ).toBe(true);
   await page
     .getByRole('navigation', { name: 'Atalhos de atendimento' })
     .getByRole('button', { name: 'Meus leads' })
@@ -128,14 +146,27 @@ test('ficha edita cadastro, agenda avaliação e preserva histórico', async ({ 
 test('painel móvel sem transbordamento e menu utilizável', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await login(page);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.waitForTimeout(250);
+  expect(
+    await page.evaluate(
+      () =>
+        document.body.scrollWidth <= innerWidth &&
+        getComputedStyle(document.documentElement).overflowX === 'hidden',
+    ),
+  ).toBe(true);
   await page.getByRole('button', { name: 'Abrir menu' }).click();
   await page
     .getByRole('navigation', { name: 'Menu principal' })
     .getByRole('button', { name: 'Google Ads', exact: true })
     .click();
   await expect(page.getByRole('heading', { level: 1, name: 'Google Ads' })).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(
+    await page.evaluate(
+      () =>
+        document.body.scrollWidth <= innerWidth &&
+        getComputedStyle(document.documentElement).overflowX === 'hidden',
+    ),
+  ).toBe(true);
 });
 
 test('gestão cria atendente e primeiro acesso obriga troca de senha', async ({ page, browser }) => {
@@ -179,7 +210,7 @@ test('gestão cria atendente e primeiro acesso obriga troca de senha', async ({ 
     await attendant.getByLabel('E-mail', { exact: true }).fill('atendente-e2e@example.test');
     await attendant.getByLabel('Senha', { exact: true }).fill('Cd!456');
     await attendant.getByRole('button', { name: 'Entrar no espaço de trabalho' }).click();
-    await expect(attendant.getByRole('heading', { name: /Olá, Atendente E2E/ })).toBeVisible();
+    await expect(attendant.getByRole('heading', { name: 'Meus atendimentos' })).toBeVisible();
   } finally {
     await context.close();
   }

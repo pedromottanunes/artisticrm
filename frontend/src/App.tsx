@@ -415,7 +415,6 @@ export function App() {
       <aside className={`sidebar ${mobileMenu ? 'is-open' : ''}`}>
         <div className="brand">
           <img src="/artisti-logo.webp" alt="Artisti Transplante Capilar" />
-          <span>RELACIONAMENTOS QUE TRANSFORMAM</span>
         </div>
         <div className="workspace-label">
           <span className="workspace-icon">
@@ -423,7 +422,6 @@ export function App() {
           </span>
           <div>
             <strong>Artisti CRM</strong>
-            <small>{isManager ? 'Espaço de gestão' : 'Espaço de atendimento'}</small>
           </div>
           <ChevronRight size={15} />
         </div>
@@ -479,16 +477,6 @@ export function App() {
             {data.demo ? 'Ambiente de demonstração' : 'Ambiente de homologação'}
             <small>Versão de homologação</small>
           </div>
-          <div className="user-block">
-            <Avatar user={data.user} />
-            <div>
-              <strong>{data.user.name}</strong>
-              <small>{isManager ? 'Gestão' : 'Atendimento'}</small>
-            </div>
-            <IconButton label="Sair da conta" onClick={() => void logout()}>
-              <LogOut size={17} />
-            </IconButton>
-          </div>
         </div>
       </aside>
       <div className="main-shell">
@@ -515,6 +503,9 @@ export function App() {
               <Bell size={19} />
             </IconButton>
             <Avatar user={data.user} small />
+            <IconButton label="Sair da conta" onClick={() => void logout()}>
+              <LogOut size={18} />
+            </IconButton>
           </div>
         </header>
         <main>
@@ -537,33 +528,21 @@ export function App() {
           </div>
           <section className="page-heading">
             <div>
-              <span className="eyebrow">
-                {isManager
-                  ? 'VISÃO ESTRATÉGICA, CUIDADO EM CADA ETAPA'
-                  : 'CADA NOVO CONTATO É UM NOVO COMEÇO'}
-              </span>
               <h1>
-                {activePage === 'overview' ? (
-                  <>
-                    Seu relacionamento,
-                    <br className="heading-break" /> <em>em perspectiva.</em>
-                  </>
-                ) : activePage === 'mine' ? (
-                  <>
-                    Olá, {data.user.name}. <em>Vamos conectar?</em>
-                  </>
-                ) : (
-                  title
-                )}
+                {activePage === 'overview'
+                  ? 'Visão geral'
+                  : activePage === 'mine'
+                    ? 'Meus atendimentos'
+                    : title}
               </h1>
               <p>
                 {activePage === 'overview'
-                  ? 'Acompanhe as oportunidades e cuide do que realmente importa: as pessoas.'
+                  ? 'Acompanhe os leads, atendimentos, avaliações e o rodízio da equipe.'
                   : activePage === 'mine'
-                    ? 'Seus próximos atendimentos começam aqui.'
+                    ? 'Consulte suas reservas e os leads sob sua responsabilidade.'
                     : activePage === 'pool'
                       ? 'Oportunidades disponíveis. O primeiro aceite confirmado assume.'
-                      : 'Organização e clareza para cada etapa da jornada.'}
+                      : ''}
               </p>
             </div>
             <div className="heading-actions">
@@ -616,9 +595,7 @@ export function App() {
                     label: 'Disponíveis no bolsão',
                     value: pool.length,
                     icon: Inbox,
-                    note: pool.length
-                      ? 'Aguardando uma nova conexão'
-                      : 'Todos os contatos encaminhados',
+                    note: pool.length ? 'Aguardando aceite' : 'Todos os contatos encaminhados',
                     accent: 'amber',
                   },
                 ].map(({ label, value, icon: Icon, note, accent }) => (
@@ -639,8 +616,7 @@ export function App() {
                 <section className="panel funnel-panel">
                   <div className="panel-heading">
                     <div>
-                      <span className="eyebrow">DO PRIMEIRO CONTATO À CONQUISTA</span>
-                      <h2>Uma jornada, muitas possibilidades.</h2>
+                      <h2>Funil de vendas</h2>
                     </div>
                     <TextLink onClick={() => navigate('pipeline')}>Ver funil</TextLink>
                   </div>
@@ -685,7 +661,6 @@ export function App() {
                 <section className="panel queue-preview">
                   <div className="panel-heading">
                     <div>
-                      <span className="eyebrow">ATENDIMENTO EM MOVIMENTO</span>
                       <h2>Rodízio da equipe</h2>
                     </div>
                     <Shuffle size={19} />
@@ -726,8 +701,7 @@ export function App() {
               <section className="panel">
                 <div className="panel-heading">
                   <div>
-                    <h2>As conexões mais recentes</h2>
-                    <p>Cada contato é uma oportunidade de transformar uma história.</p>
+                    <h2>Leads mais recentes</h2>
                   </div>
                   <TextLink onClick={() => navigate('leads')}>Todos os leads</TextLink>
                 </div>
@@ -845,7 +819,7 @@ export function App() {
               </div>
               {!data.appointments.length ? (
                 <Empty
-                  title="Agenda aberta para novos começos"
+                  title="Nenhuma avaliação agendada"
                   description="Abra a ficha de um lead para agendar uma avaliação."
                 />
               ) : (
@@ -893,8 +867,7 @@ export function App() {
                   <Shuffle size={28} />
                 </div>
                 <div>
-                  <span className="eyebrow">DISTRIBUIÇÃO EQUILIBRADA</span>
-                  <h2>O próximo contato tem um destino.</h2>
+                  <h2>Configuração do rodízio</h2>
                   <p>
                     Rodízio sequencial. Após {data.settings.timeout_minutes} minutos sem aceite, a
                     reserva vai para o bolsão, disponível para todas as atendentes com acesso ativo.
@@ -1064,7 +1037,7 @@ export function App() {
               </div>
               <div className="feature-notice">
                 <FileCheck2 size={34} />
-                <h2>Uma conquista precisa de confirmação.</h2>
+                <h2>Funcionalidade ainda não disponível</h2>
                 <p>
                   A validação de assinatura e as regras de comissão ainda serão implementadas. Mover
                   um lead para contrato pendente não confirma venda nem libera pagamento.
@@ -1089,7 +1062,7 @@ export function App() {
             <div className="two-columns">
               <section className="panel">
                 <div className="panel-heading">
-                  <h2>Seu espaço na Artisti</h2>
+                  <h2>Minha conta</h2>
                   <ShieldCheck size={21} />
                 </div>
                 <div className="profile-card">
@@ -1137,9 +1110,6 @@ export function App() {
             </div>
           )}
           <footer className="page-footer">
-            <span>
-              ARTISTI <i /> CUIDADO EM CADA CONEXÃO.
-            </span>
             <span>
               {lastUpdated
                 ? `Atualizado às ${lastUpdated.toLocaleTimeString('pt-BR')}`
@@ -1209,7 +1179,7 @@ export function App() {
       )}
       {whatsappUrl && (
         <Modal
-          title="Lead assumido. Vamos conversar?"
+          title="Lead assumido"
           description="O CRM abre o contato; a mensagem será enviada por você no WhatsApp."
           onClose={() => setWhatsappUrl('')}
         >
@@ -1235,7 +1205,7 @@ export function App() {
       {notifications && (
         <Modal
           title="Central de avisos"
-          description="Visibilidade sobre o que precisa da sua atenção."
+          description="Avisos operacionais do CRM."
           onClose={() => setNotifications(false)}
         >
           <div className="modal-body">
@@ -1306,32 +1276,12 @@ function Login({ onLogin, connected }: { onLogin: () => Promise<void>; connected
           <div />
           <div />
         </div>
-        <div className="login-copy">
-          <span className="eyebrow">RELACIONAMENTOS QUE TRANSFORMAM</span>
-          <h1>
-            Grandes histórias
-            <br />
-            começam com
-            <br />
-            <em>uma conexão.</em>
-          </h1>
-          <p>
-            Um espaço para aproximar pessoas,
-            <br />
-            cuidar de oportunidades e crescer juntos.
-          </p>
-        </div>
-        <span className="login-copyright">ARTISTI CRM • EXPERIÊNCIA DE ATENDIMENTO</span>
       </div>
       <div className="login-form-wrap">
         <div className="login-form-content">
-          <span className="eyebrow">BEM-VINDO AO SEU WORKSPACE</span>
-          <h2>
-            Cuidado em cada detalhe.
-            <br />
-            <em>Clareza em cada etapa.</em>
-          </h2>
-          <p>Explore a primeira versão do CRM da Artisti.</p>
+          <span className="eyebrow">ACESSO RESTRITO</span>
+          <h2>Entrar no Artisti CRM</h2>
+          <p>Use suas credenciais para acessar a plataforma.</p>
           <form onSubmit={login}>
             {import.meta.env.DEV && (
               <button
@@ -1421,9 +1371,8 @@ function IntegrationPage({ platform, leads }: { platform: 'meta' | 'google'; lea
       <div className="integration-hero">
         <span className={`integration-logo ${platform}`}>{platform === 'meta' ? '∞' : 'G'}</span>
         <div>
-          <span className="eyebrow">AQUISIÇÃO & RELACIONAMENTO</span>
           <h2>{name}</h2>
-          <p>Da campanha à conversa. Dados de mídia e resultados do CRM, lado a lado.</p>
+          <p>Métricas de mídia e resultados registrados no CRM.</p>
         </div>
         <span className="badge pending">
           <i />
@@ -1445,7 +1394,7 @@ function IntegrationPage({ platform, leads }: { platform: 'meta' | 'google'; lea
       <section className="panel">
         <div className="feature-notice">
           <Link2 size={32} />
-          <h2>Os números certos começam com a conexão certa.</h2>
+          <h2>Integração ainda não configurada</h2>
           <p>
             A sincronização oficial de {name} ainda não está ativa. A configuração de contas,
             permissões e credenciais será feita no backend. Não insira chaves nesta interface.
@@ -1470,8 +1419,8 @@ function IntegrationPage({ platform, leads }: { platform: 'meta' | 'google'; lea
             <strong>
               {associated.length} oportunidades com origem “{name}” nesta base local.
             </strong>
-            A origem pode vir do cadastro ou de referência recebida pela central. Esta contagem
-            não representa conversões verificadas nem métricas sincronizadas da plataforma.
+            A origem pode vir do cadastro ou de referência recebida pela central. Esta contagem não
+            representa conversões verificadas nem métricas sincronizadas da plataforma.
           </p>
         </div>
       </section>
@@ -1479,8 +1428,8 @@ function IntegrationPage({ platform, leads }: { platform: 'meta' | 'google'; lea
         <ShieldCheck size={19} />
         <p>
           <strong>Um clique não é um lead.</strong> O GTM registrará interações no site. O contato
-          será criado quando a central configurada receber uma mensagem no WhatsApp. A atribuição
-          de cliques do site ao contato ainda depende da integração de tracking.
+          será criado quando a central configurada receber uma mensagem no WhatsApp. A atribuição de
+          cliques do site ao contato ainda depende da integração de tracking.
         </p>
       </div>
     </>
