@@ -12,6 +12,16 @@ Primeira versão executável do CRM: interface de gestão e atendimento, API e b
 - O processo periódico e as consultas reconciliam reservas vencidas; o próprio aceite também verifica o prazo. Reiniciar o servidor não reinicia o cronômetro.
 - A entrada da central tem webhook assinado, fila persistente, deduplicação e novas tentativas; permanece desligada até configurar a Meta e o ambiente. Notificações push ainda não estão implementadas. O fluxo pode ser verificado com cadastros manuais e testes automatizados, sem enviar mensagens.
 
+### Painel operacional da gestão
+
+Abra **Distribuição** no menu lateral. O painel mostra reservas e tempo restante, bolsão, atendimentos assumidos e leads sem destino/revisão. Os cartões filtram a tabela; também é possível pesquisar nome/telefone e filtrar a responsável atual. Reservas com vencimento mais próximo aparecem primeiro.
+
+- Consulta própria (`GET /api/v1/distribution/board`), restrita à gestão, com 25 registros por página. Totais dos cartões e da equipe abrangem todas as oportunidades abertas, independentemente dos filtros e do limite de 500 da visão geral.
+- Atualização a cada 5 segundos enquanto a página está aberta; relógio ancorado no horário do servidor. Falhas de consulta são sinalizadas, e respostas antigas são descartadas ao mudar filtros.
+- **Histórico** abre os eventos do lead; **Gerenciar** abre a ficha com atribuição/transferência. **Últimas movimentações** lista os 20 eventos de distribuição mais recentes da central.
+- **Configurar rodízio** abre a participação da equipe e o prazo, sem ocupar a área de acompanhamento. Os contadores são operacionais, não comprovam envio de mensagens no WhatsApp.
+- No MongoDB, a retomada processa todo o conjunto vencido em lotes transacionais de 100, com uma única expiração auditada por reserva. O Render Free não executa rotinas enquanto dorme; ao retomar, os prazos persistidos são reconciliados.
+
 ## Executar localmente
 
 Requisito: Node.js 22.12+ (validado com 22.18) e npm.
@@ -47,7 +57,7 @@ Abra **http://127.0.0.1:5173**. Escolha Cadu para gestão ou uma atendente para 
 - Layout responsivo, logo original e tema azul-marinho/dourado da Artisti.
 - Áreas Meta Ads/Google Ads com estado **não conectado**, sem métricas de mídia inventadas.
 
-Não implementado: sincronização de anúncios, instrumentação do site/GTM, push/PWA, contratos e comissões, upload de documentos, recuperação autônoma de senha por e-mail, convites por link, MFA e administração de perfis de gestão. A central exige configuração e homologação com a Meta. A lista inicial possui limite de 500 oportunidades por consulta; paginação e relatórios por período ainda precisam ser implementados. Não usar esta etapa como sistema de produção.
+Não implementado: sincronização de anúncios, instrumentação do site/GTM, push/PWA, contratos e comissões, upload de documentos, recuperação autônoma de senha por e-mail, convites por link, MFA e administração de perfis de gestão. A central exige configuração e homologação com a Meta. A visão geral e a lista de Leads possuem limite de 500 oportunidades por consulta; a central de Distribuição já tem paginação e totais completos. Relatórios por período ainda precisam ser implementados. Não usar esta etapa como sistema de produção.
 
 ### Regras operacionais implementadas, sujeitas à validação do cliente
 

@@ -10,6 +10,7 @@ import { seedDemo, DEMO_PASSWORD } from '../src/seed.js';
 import { buildApp } from '../src/app.js';
 import { bootstrapManager } from '../src/bootstrap.js';
 import type { User, Opportunity } from '../src/types.js';
+import { checkDistribution } from './distribution-checks.js';
 
 let db: Database;
 let crm: CRM;
@@ -64,6 +65,20 @@ const get = async (id: string) =>
   (await db.query<Opportunity>('SELECT * FROM opportunities WHERE id=$1', [id])).rows[0];
 const count = async (table: string) =>
   Number((await db.query<{ count: string }>(`SELECT count(*) FROM ${table}`)).rows[0].count);
+
+test('painel de distribuição: paginação acima de 500 leads, filtros, prazos e acesso', async () => {
+  await checkDistribution(
+    db,
+    crm,
+    manager,
+    users,
+    DEMO_PASSWORD,
+    () => now,
+    () => {
+      now = new Date(now.getTime() + 600000);
+    },
+  );
+});
 
 test('oito novos contatos percorrem duas voltas exatas do rodízio', async () => {
   const assigned = [];

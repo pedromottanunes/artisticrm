@@ -150,6 +150,7 @@ export async function initializeMongo(db: MongoStore) {
       { unique: true, partialFilterExpression: { status: 'scheduled' } },
     );
   await db.collection('audit_events').createIndex({ opportunity_id: 1, created_at: -1 });
+  await db.collection('audit_events').createIndex({ kind: 1, created_at: -1, id: -1 });
   await db.collection('inbound_events').createIndex({ external_id: 1 }, { unique: true });
   await db.collection('claims').createIndex({ user_id: 1, key: 1 }, { unique: true });
   await db.collection('operation_receipts').createIndex({ actor_id: 1, key: 1 }, { unique: true });

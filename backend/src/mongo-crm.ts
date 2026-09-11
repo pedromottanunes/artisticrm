@@ -224,37 +224,50 @@ export class MongoOperations {
     });
   }
   async expire() {
+    const cutoff = await this.now();
     // Avoid a transaction/write fence on every poll when nothing is due.
     if (
       !(await this.db.count('opportunities', {
         state: 'RESERVED',
-        expires_at: { $lte: await this.now() },
+        expires_at: { $lte: cutoff },
       }))
     )
       return 0;
-    return this.db.atomic(async (tx) => {
-      const rows = await tx.many<Opportunity>(
-        'opportunities',
-        { state: 'RESERVED', expires_at: { $lte: await this.now(tx) } },
-        { expires_at: 1 },
-        100,
-      );
-      for (const row of rows) {
+    let total = 0;
+    // Drain the overdue backlog at this cutoff, in short atomic batches. This matters
+    // after a sleeping server resumes: a read must not leave the 101st lead reserved.
+    for (;;) {
+      const processed = await this.db.atomic(async (tx) => {
+        const rows = await tx.many<Opportunity>(
+          'opportunities',
+          { state: 'RESERVED', expires_at: { $lte: cutoff } },
+          { expires_at: 1, id: 1 },
+          100,
+        );
+        if (!rows.length) return 0;
         await tx.update(
           'opportunities',
-          { id: row.id, state: 'RESERVED' },
+          { id: { $in: rows.map((row) => row.id) }, state: 'RESERVED' },
           { $set: { state: 'POOL' }, $inc: { version: 1 } },
         );
-        await this.audit(
-          tx,
-          row.id,
-          null,
-          'reservation.expired',
-          'Reserva vencida. Lead disponível no bolsão.',
+        const recordedAt = await this.now(tx);
+        await tx.collection('audit_events').insertMany(
+          rows.map((row) => ({
+            id: randomUUID(),
+            opportunity_id: row.id,
+            actor_id: null,
+            kind: 'reservation.expired',
+            description: 'Reserva vencida. Lead disponível no bolsão.',
+            details: {},
+            created_at: recordedAt,
+          })),
+          { session: tx.session },
         );
-      }
-      return rows.length;
-    });
+        return rows.length;
+      });
+      total += processed;
+      if (processed < 100) return total;
+    }
   }
   async claim(user: User, id: string, mode: 'pool' | 'reservation', version: number, key: string) {
     if (user.role !== 'attendant')

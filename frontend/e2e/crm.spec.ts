@@ -217,6 +217,77 @@ test('gestão cria atendente e primeiro acesso obriga troca de senha', async ({ 
   }
 });
 
+test('central de distribuição acompanha reservas, histórico e aceite por outra atendente', async ({
+  page,
+  browser,
+}) => {
+  await login(page);
+  await page
+    .getByRole('navigation', { name: 'Menu principal' })
+    .getByRole('button', { name: 'Distribuição', exact: true })
+    .click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Distribuição' })).toBeVisible();
+  await expect(page.locator('.distribution-table tbody tr').first()).toBeVisible();
+  await page.getByLabel('Buscar na distribuição').fill('Eduardo Ribeiro');
+  const reservation = page
+    .locator('.distribution-table tbody tr')
+    .filter({ hasText: 'Eduardo Ribeiro' });
+  await expect(reservation.locator('.countdown')).toHaveText(/\d{2}:\d{2}/);
+  await page.getByRole('button', { name: 'Histórico de Eduardo Ribeiro' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText(/Distribuído para/)).toBeVisible();
+  await dialog.getByRole('button', { name: 'Fechar janela' }).click();
+  await page.getByLabel('Buscar na distribuição').clear();
+  await page
+    .getByLabel('Situação dos leads')
+    .getByRole('button', { name: /^Bolsão/ })
+    .click();
+  await expect(page.locator('.distribution-table').getByText('Daniel Rocha')).toBeVisible();
+  const response = await page.request.get('/api/v1/distribution/board?state=POOL');
+  const lead = (await response.json()).rows.find(
+    (r: { name: string }) => r.name === 'Daniel Rocha',
+  );
+  const context = await browser.newContext();
+  try {
+    const attendant = await context.newPage();
+    await login(attendant, 'vanessa');
+    const claim = await attendant.request.post(`/api/v1/opportunities/${lead.id}/claim`, {
+      headers: { 'X-Artisti-Client': 'web', 'Idempotency-Key': `e2e-distribution-${Date.now()}` },
+      data: { mode: 'pool', expected_version: lead.version },
+    });
+    expect(claim.status()).toBe(200);
+    await expect(page.locator('.distribution-table').getByText('Daniel Rocha')).toHaveCount(0, {
+      timeout: 12000,
+    });
+    await page
+      .getByLabel('Situação dos leads')
+      .getByRole('button', { name: /^Em atendimento/ })
+      .click();
+    const assigned = page
+      .locator('.distribution-table tbody tr')
+      .filter({ hasText: 'Daniel Rocha' });
+    await expect(assigned.locator('.distribution-owner')).toContainText('Vanessa');
+    await page.getByRole('button', { name: 'Histórico de Daniel Rocha' }).click();
+    await expect(dialog.getByText(/Lead assumido por Vanessa/)).toBeVisible();
+    await dialog.getByRole('button', { name: 'Fechar janela' }).click();
+    await page.screenshot({ path: 'test-results/distribuicao-desktop.png', fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.getByRole('button', { name: 'Configurar rodízio' })).toBeVisible();
+    expect(await page.evaluate(() => document.body.scrollWidth <= innerWidth)).toBe(true);
+    await expect(page.getByRole('button', { name: 'Gerenciar Daniel Rocha' })).toBeVisible();
+    await page.screenshot({
+      path: 'test-results/distribuicao-mobile.png',
+      fullPage: true,
+      animations: 'disabled',
+    });
+    await page.getByRole('button', { name: 'Configurar rodízio' }).click();
+    await expect(dialog.getByLabel('Prazo para aceite')).toHaveValue('10');
+    await dialog.getByRole('button', { name: 'Fechar janela' }).click();
+  } finally {
+    await context.close();
+  }
+});
+
 test('gestão transfere lead e desativação redistribui os atendimentos', async ({ page }) => {
   await login(page);
   await page

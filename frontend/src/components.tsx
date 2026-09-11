@@ -113,7 +113,7 @@ export function Modal({
     </dialog>
   );
 }
-export function Countdown({ lead, now }: { lead: Lead; now: number }) {
+export function Countdown({ lead, now }: { lead: Pick<Lead, 'expires_at'>; now: number }) {
   const diff = Math.max(0, Math.ceil((new Date(lead.expires_at ?? 0).getTime() - now) / 1000));
   return (
     <span className={`countdown ${diff < 120 ? 'urgent' : ''}`}>

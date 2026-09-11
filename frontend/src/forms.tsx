@@ -124,6 +124,7 @@ export function LeadForm({
 }
 
 export function LeadDetail({
+  initialTab = 'cadastro',
   detail,
   connected,
   isManager,
@@ -135,6 +136,7 @@ export function LeadDetail({
   users,
 }: {
   detail: Detail;
+  initialTab?: string;
   connected: boolean;
   isManager: boolean;
   onClose: () => void;
@@ -146,7 +148,7 @@ export function LeadDetail({
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [tab, setTab] = useState('cadastro');
+  const [tab, setTab] = useState(initialTab);
   const formRef = useRef<HTMLFormElement>(null);
   const save = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();

@@ -40,7 +40,8 @@ import {
   IconButton,
   dateLabel,
 } from './components';
-import { LeadForm, LeadDetail, QueueSettings } from './forms';
+import { LeadForm, LeadDetail } from './forms';
+import { Distribution } from './distribution';
 import { Team, PasswordChange } from './operations';
 
 type Page =
@@ -57,10 +58,10 @@ type Page =
   | 'pool';
 const navItems: { id: Page; label: string; icon: typeof Users; group: string }[] = [
   { id: 'overview', label: 'Visão geral', icon: LayoutDashboard, group: 'workspace' },
+  { id: 'distribution', label: 'Distribuição', icon: Shuffle, group: 'workspace' },
   { id: 'leads', label: 'Leads', icon: Users, group: 'workspace' },
   { id: 'pipeline', label: 'Funil de vendas', icon: GitBranch, group: 'workspace' },
   { id: 'agenda', label: 'Agenda', icon: CalendarDays, group: 'workspace' },
-  { id: 'distribution', label: 'Distribuição', icon: Shuffle, group: 'workspace' },
   { id: 'meta', label: 'Meta Ads', icon: ChartNoAxesCombined, group: 'growth' },
   { id: 'google', label: 'Google Ads', icon: Search, group: 'growth' },
   { id: 'contracts', label: 'Contratos', icon: FileCheck2, group: 'growth' },
@@ -84,11 +85,13 @@ export function App() {
   const [notice, setNotice] = useState('');
   const [newLead, setNewLead] = useState(false);
   const [detail, setDetail] = useState<Detail | null>(null);
+  const [detailTab, setDetailTab] = useState('cadastro');
   const [detailLoading, setDetailLoading] = useState(false);
   const [notifications, setNotifications] = useState(false);
   const [whatsappUrl, setWhatsappUrl] = useState('');
   const [busyId, setBusyId] = useState('');
   const [now, setNow] = useState(Date.now());
+  const serverClock = useRef({ server: Date.now(), monotonic: performance.now() });
   const generation = useRef(0);
   const requestSeq = useRef(0);
   const appliedSeq = useRef(0);
@@ -103,6 +106,10 @@ export function App() {
       appliedSeq.current = sequence;
       setData(snapshot);
       setConnected(true);
+      serverClock.current = {
+        server: Date.parse(snapshot.server_time),
+        monotonic: performance.now(),
+      };
       setNow(new Date(snapshot.server_time).getTime());
     } catch (error) {
       if (epoch !== generation.current || sequence < appliedSeq.current) return;
@@ -149,7 +156,10 @@ export function App() {
     };
   }, [data?.user.id, refresh]);
   useEffect(() => {
-    const id = setInterval(() => setNow((n) => n + 1000), 1000);
+    const id = setInterval(
+      () => setNow(serverClock.current.server + performance.now() - serverClock.current.monotonic),
+      1000,
+    );
     return () => clearInterval(id);
   }, []);
   useEffect(() => {
@@ -162,13 +172,16 @@ export function App() {
     setMobileMenu(false);
     setSearch('');
   };
-  const openDetail = async (id: string) => {
+  const openDetail = async (id: string, history = false) => {
     const sequence = ++detailSeq.current;
     const epoch = generation.current;
     setDetailLoading(true);
     try {
       const result = await api<Detail>(`/opportunities/${id}`);
-      if (sequence === detailSeq.current && epoch === generation.current) setDetail(result);
+      if (sequence === detailSeq.current && epoch === generation.current) {
+        setDetailTab(history ? 'historico' : 'cadastro');
+        setDetail(result);
+      }
     } catch (error) {
       setNotice((error as Error).message);
     } finally {
@@ -810,87 +823,13 @@ export function App() {
           )}
 
           {activePage === 'distribution' && (
-            <>
-              <div className="distribution-hero">
-                <Shuffle size={20} />
-                <p>
-                  <strong>Regra ativa:</strong> rodízio sequencial com{' '}
-                  {data.settings.timeout_minutes} minutos para aceite; depois, o lead vai para o
-                  bolsão.
-                </p>
-                <div className="distribution-numbers">
-                  <strong>
-                    {reserved.length}
-                    <small>reservas</small>
-                  </strong>
-                  <strong>
-                    {pool.length}
-                    <small>no bolsão</small>
-                  </strong>
-                </div>
-              </div>
-              <div className="two-columns">
-                <QueueSettings
-                  data={data}
-                  connected={connected}
-                  onSaved={refresh}
-                  onNotice={setNotice}
-                />
-                <section className="panel">
-                  <div className="panel-heading">
-                    <div>
-                      <h2>Bolsão compartilhado</h2>
-                      <p>O aceite acontece no perfil da atendente.</p>
-                    </div>
-                    <Inbox size={21} />
-                  </div>
-                  {pool.length ? (
-                    <div className="pool-summary">
-                      {pool.map((lead) => (
-                        <button key={lead.id} onClick={() => void openDetail(lead.id)}>
-                          <Avatar name={lead.name} />
-                          <span>
-                            <strong>{lead.name}</strong>
-                            <small>{lead.source}</small>
-                          </span>
-                          <Badge state="POOL" />
-                          <ArrowUpRight size={16} />
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <Empty
-                      title="Bolsão em dia"
-                      description="As reservas vencidas aparecem aqui automaticamente."
-                    />
-                  )}
-                </section>
-              </div>
-              {leads.some((l) => l.state === 'PENDING' && !l.needs_review) && (
-                <div className="connection-banner">
-                  <Info size={18} />
-                  Há leads sem atendente. Habilite a equipe e salve a configuração para
-                  distribuí-los.
-                </div>
-              )}
-              {leads.some((l) => l.needs_review) && (
-                <section className="panel settings-extension-block">
-                  <div className="panel-heading">
-                    <div>
-                      <h2>Retornos aguardando revisão</h2>
-                      <p>
-                        Confira o histórico do contato e atribua a nova oportunidade pela ficha.
-                      </p>
-                    </div>
-                    <ShieldCheck size={20} />
-                  </div>
-                  {leadTable(
-                    leads.filter((l) => l.needs_review),
-                    true,
-                  )}
-                </section>
-              )}
-            </>
+            <Distribution
+              data={data}
+              connected={connected}
+              onSaved={refresh}
+              onNotice={setNotice}
+              onOpen={(id, history) => void openDetail(id, history)}
+            />
           )}
 
           {(activePage === 'mine' || activePage === 'pool') && (
@@ -1088,6 +1027,7 @@ export function App() {
       )}
       {detail && (
         <LeadDetail
+          initialTab={detailTab}
           detail={detail}
           users={data.users}
           connected={connected}

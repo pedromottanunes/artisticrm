@@ -15,6 +15,7 @@ import { buildApp } from '../src/app.js';
 import { WhatsAppCentral } from '../src/whatsapp.js';
 import { hashPassword } from '../src/auth.js';
 import type { User } from '../src/types.js';
+import { checkDistribution } from './distribution-checks.js';
 
 let replica: MongoMemoryReplSet, db: MongoStore, ops: MongoOperations, manager: User, users: User[];
 let now: Date;
@@ -123,6 +124,20 @@ const payload = (id = 'message-1') =>
   );
 const sign = (raw: Buffer) =>
   `sha256=${createHmac('sha256', config.appSecret).update(raw).digest('hex')}`;
+
+test('Mongo: painel de distribuição, paginação acima de 500, filtros, prazo e acesso', async () => {
+  await checkDistribution(
+    db,
+    ops,
+    manager,
+    users,
+    password,
+    () => now,
+    () => {
+      now = new Date(now.getTime() + 600000);
+    },
+  );
+});
 
 test('Mongo: rodízio sequencial 1→2→3→4→1 e prazo persistente', async () => {
   for (let i = 1; i <= 9; i++) {
@@ -497,13 +512,11 @@ test(
     });
     try {
       await root.connect();
-      await root
-        .db('admin')
-        .command({
-          createUser: 'crmTest',
-          pwd: 'testOnly',
-          roles: [{ role: 'readWrite', db: 'artisti' }],
-        });
+      await root.db('admin').command({
+        createUser: 'crmTest',
+        pwd: 'testOnly',
+        roles: [{ role: 'readWrite', db: 'artisti' }],
+      });
       const uri = new URL(secured.getUri());
       uri.username = 'crmTest';
       uri.password = 'testOnly';

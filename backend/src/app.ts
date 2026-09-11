@@ -9,6 +9,7 @@ import type { Database } from './db.js';
 import { Operations } from './operations.js';
 import { MongoOperations, publicUser } from './mongo-crm.js';
 import type { MongoStore } from './mongo-store.js';
+import { distributionBoard, distributionQuery } from './distribution.js';
 import { tokenHash, verifyPassword } from './auth.js';
 import { DomainError, requireManager, stages, type User } from './types.js';
 
@@ -265,6 +266,12 @@ export async function buildApp(
         }
       : { ...(await crm.snapshot(request.user)), demo: !options.production && db.kind !== 'mongo' },
   );
+  app.get('/api/v1/distribution/board', async (request) => {
+    requireManager(request.user);
+    const query = distributionQuery.parse(request.query);
+    await crm.expire();
+    return distributionBoard(db, request.user, query, () => crm.now());
+  });
   app.get('/api/v1/opportunities/:id', async (request) =>
     crm.detail(request.user, idParams.parse(request.params).id),
   );
