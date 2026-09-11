@@ -136,9 +136,6 @@
     padding-top: 10px;
     padding-bottom: 10px;
   }
-  .sidebar-bottom {
-    padding: 14px 20px;
-  }
 }
 @media (min-width: 1550px) {
   main {
@@ -149,17 +146,14 @@
     padding-left: 48px;
     padding-right: 48px;
   }
-  .page-heading h1 {
-    font-size: 40px;
-  }
   .stat-card {
-    padding: 25px;
+    padding: 17px 20px;
   }
   .overview-grid {
     grid-template-columns: 1.8fr 1fr;
   }
   .funnel-chart {
-    min-height: 228px;
+    min-height: 200px;
   }
 }
 @media (max-width: 1250px) {
@@ -170,7 +164,7 @@
     margin-left: 212px;
   }
   main {
-    padding: 0 24px 18px;
+    padding: 18px 24px;
   }
   .topbar {
     padding: 0 24px;
@@ -181,9 +175,6 @@
   .brand {
     padding-left: 15px;
     padding-right: 15px;
-  }
-  .page-heading h1 {
-    font-size: 31px;
   }
   .stat-card {
     padding: 18px 15px;
@@ -205,7 +196,7 @@
     gap: 16px;
   }
   .panel-heading {
-    padding: 21px 19px;
+    padding: 17px 19px;
   }
   .panel-heading h2 {
     font-size: 17px;
@@ -236,15 +227,12 @@
   .two-columns {
     gap: 17px;
   }
-  .distribution-hero h2 {
-    font-size: 21px;
-  }
   .distribution-numbers {
     gap: 17px;
   }
   .distribution-hero {
-    gap: 17px;
-    padding: 22px;
+    gap: 12px;
+    padding: 12px 14px;
   }
   .list-toolbar {
     flex-wrap: wrap;
@@ -285,29 +273,11 @@
   .funnel-value span {
     font-size: 13px;
   }
-  .page-heading {
-    align-items: flex-start;
-  }
-  .heading-break {
-    display: block;
-  }
-  .page-heading h1 {
-    font-size: 33px;
-  }
-  .heading-actions {
-    padding-top: 18px;
-  }
   .two-columns {
     grid-template-columns: 1fr;
   }
   .distribution-numbers {
     display: none;
-  }
-  .integration-hero {
-    flex-wrap: wrap;
-  }
-  .integration-hero > .badge {
-    margin-left: 0;
   }
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -382,60 +352,23 @@
     display: none;
   }
   main {
-    padding: 0 19px 25px;
-  }
-  .demo-strip {
-    font-size: 13px;
-    line-height: 1.8;
-    padding: 11px 0;
-  }
-  .demo-strip > span:last-child {
-    display: none;
-  }
-  .page-heading {
-    padding: 27px 0 24px;
-    gap: 15px;
-  }
-  .page-heading .eyebrow {
-    font-size: 12px;
-    letter-spacing: 1.3px;
-  }
-  .page-heading h1 {
-    font-size: 32px;
-    letter-spacing: -0.8px;
-    margin-top: 11px;
-  }
-  .page-heading p {
-    font-size: 15px;
-    line-height: 1.8;
-  }
-  .heading-actions {
-    padding-top: 28px;
-    gap: 10px;
-  }
-  .heading-actions .button {
-    font-size: 15px;
-    min-height: 38px;
-    padding: 10px 12px;
-  }
-  .today-label {
-    font-size: 12px;
+    padding: 15px 19px 25px;
   }
   .stats-grid {
     gap: 12px;
-    margin-bottom: 20px;
+    margin-bottom: 14px;
   }
   .stat-card {
-    padding: 19px;
+    padding: 15px;
   }
   .stat-card > strong {
     font-size: 37px;
   }
   .overview-grid {
-    margin-bottom: 20px;
+    margin-bottom: 14px;
   }
   .panel-heading {
-    padding: 20px;
+    padding: 16px 18px;
   }
   .panel-heading p {
     font-size: 14px;
@@ -446,11 +379,6 @@
   .queue-users {
     gap: 0 20px;
     padding: 0 20px 12px;
-  }
-  .page-footer {
-    gap: 16px;
-    line-height: 1.8;
-    font-size: 12px;
   }
   .lead-cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -482,8 +410,8 @@
     max-width: 135px;
   }
   .list-toolbar {
-    padding: 18px;
-    gap: 18px;
+    padding: 14px 16px;
+    gap: 14px;
   }
   .table-scroll {
     max-width: 100%;
@@ -493,23 +421,10 @@
     padding: 13px 17px;
   }
   .distribution-hero {
-    padding: 21px;
-  }
-  .round-robin-icon {
-    width: 46px;
-    height: 46px;
-  }
-  .distribution-hero .eyebrow {
-    font-size: 12px;
-  }
-  .distribution-hero h2 {
-    font-size: 20px;
-  }
-  .integration-hero {
-    padding: 24px;
+    padding: 12px 14px;
   }
   .feature-notice {
-    padding: 36px 24px;
+    padding: 24px 20px;
   }
   .feature-notice h2 {
     font-size: 22px;
@@ -526,9 +441,6 @@
   }
   .source-evidence {
     padding: 20px;
-  }
-  .integration-hero h2 {
-    font-size: 25px;
   }
   .mobile-bottom-nav {
     display: flex;
@@ -693,25 +605,21 @@
   .topbar-right > .avatar {
     display: none;
   }
-  .page-heading {
-    flex-wrap: wrap;
-    gap: 15px;
+  .breadcrumbs {
+    min-width: 0;
   }
-  .page-heading h1 {
-    font-size: 31px;
+  .breadcrumbs h1 {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .heading-break {
+  .header-primary-action {
+    width: 36px;
+    min-height: 36px;
+    padding: 7px;
+  }
+  .header-primary-action > span {
     display: none;
-  }
-  .heading-actions {
-    padding-top: 0;
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-  }
-  .heading-actions .today-label {
-    font-size: 13px;
   }
   .stat-card {
     padding: 17px 14px;
@@ -815,7 +723,7 @@
     font-size: 14px;
   }
   .attendant-summary {
-    padding: 18px;
+    padding: 13px 15px;
   }
   .attendant-summary strong {
     font-size: 16px;
@@ -850,11 +758,6 @@
   .appointment-card > div > span {
     font-size: 13px;
   }
-  .page-footer {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 10px;
-  }
   .form-grid {
     grid-template-columns: 1fr;
     gap: 19px;
@@ -882,42 +785,11 @@
   }
   .distribution-hero {
     align-items: flex-start;
-    gap: 14px;
-    padding: 18px;
-  }
-  .distribution-hero h2 {
-    font-size: 18px;
+    gap: 10px;
+    padding: 11px 12px;
   }
   .distribution-hero p {
     font-size: 14px;
-  }
-  .round-robin-icon {
-    height: 38px;
-    width: 38px;
-    flex-shrink: 0;
-  }
-  .round-robin-icon > svg {
-    width: 20px;
-  }
-  .distribution-hero .eyebrow {
-    font-size: 12px;
-  }
-  .integration-hero {
-    gap: 16px;
-  }
-  .integration-hero > div {
-    flex: 1;
-  }
-  .integration-hero .eyebrow {
-    font-size: 12px;
-  }
-  .integration-hero p {
-    font-size: 14px;
-  }
-  .integration-logo {
-    width: 50px;
-    height: 50px;
-    font-size: 38px;
   }
   .login-copy h1 {
     font-size: 35px;

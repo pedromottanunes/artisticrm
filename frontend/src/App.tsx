@@ -26,7 +26,6 @@ import {
   Info,
   X,
   Smartphone,
-  LockKeyhole,
 } from 'lucide-react';
 import { api, ApiError, stages, type Snapshot, type Lead, type Detail } from './api';
 import { CentralStatusPanel } from './central';
@@ -90,7 +89,6 @@ export function App() {
   const [whatsappUrl, setWhatsappUrl] = useState('');
   const [busyId, setBusyId] = useState('');
   const [now, setNow] = useState(Date.now());
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const generation = useRef(0);
   const requestSeq = useRef(0);
   const appliedSeq = useRef(0);
@@ -105,7 +103,6 @@ export function App() {
       appliedSeq.current = sequence;
       setData(snapshot);
       setConnected(true);
-      setLastUpdated(new Date());
       setNow(new Date(snapshot.server_time).getTime());
     } catch (error) {
       if (epoch !== generation.current || sequence < appliedSeq.current) return;
@@ -471,13 +468,6 @@ export function App() {
             </div>
           )}
         </nav>
-        <div className="sidebar-bottom">
-          <div className="local-label">
-            <span className="status-dot" />
-            {data.demo ? 'Ambiente de demonstração' : 'Ambiente de homologação'}
-            <small>Versão de homologação</small>
-          </div>
-        </div>
       </aside>
       <div className="main-shell">
         <header className="topbar">
@@ -489,11 +479,20 @@ export function App() {
             >
               <Menu size={20} />
             </button>
-            <span>Workspace</span>
-            <ChevronRight size={13} />
-            <strong>{title}</strong>
+            <h1>{activePage === 'mine' ? 'Meus atendimentos' : title}</h1>
           </div>
           <div className="topbar-right">
+            {isManager && (
+              <button
+                className="button gold compact header-primary-action"
+                aria-label="Novo lead"
+                onClick={() => setNewLead(true)}
+                disabled={!connected}
+              >
+                <Plus size={17} />
+                <span>Novo lead</span>
+              </button>
+            )}
             <span className={`sync-status ${connected ? '' : 'offline'}`}>
               <i />
               {connected ? 'Sincronizado' : 'Sem conexão'}
@@ -516,56 +515,6 @@ export function App() {
               suspensas.<button onClick={() => void refresh()}>Tentar novamente</button>
             </div>
           )}
-          <div className="demo-strip">
-            <span>
-              <Info size={13} />
-              {data.demo
-                ? 'Demonstração local com contatos fictícios.'
-                : 'Homologação: utilize apenas dados de teste.'}{' '}
-              Nenhuma mensagem ou campanha conectada.
-            </span>
-            <span>VERSÃO 0.1</span>
-          </div>
-          <section className="page-heading">
-            <div>
-              <h1>
-                {activePage === 'overview'
-                  ? 'Visão geral'
-                  : activePage === 'mine'
-                    ? 'Meus atendimentos'
-                    : title}
-              </h1>
-              <p>
-                {activePage === 'overview'
-                  ? 'Acompanhe os leads, atendimentos, avaliações e o rodízio da equipe.'
-                  : activePage === 'mine'
-                    ? 'Consulte suas reservas e os leads sob sua responsabilidade.'
-                    : activePage === 'pool'
-                      ? 'Oportunidades disponíveis. O primeiro aceite confirmado assume.'
-                      : ''}
-              </p>
-            </div>
-            <div className="heading-actions">
-              {isManager && !['meta', 'google', 'settings'].includes(activePage) && (
-                <button
-                  className="button gold"
-                  onClick={() => setNewLead(true)}
-                  disabled={!connected}
-                >
-                  <Plus size={17} />
-                  Novo lead
-                </button>
-              )}
-              <span className="today-label">
-                {new Intl.DateTimeFormat('pt-BR', {
-                  day: 'numeric',
-                  month: 'long',
-                  year: 'numeric',
-                }).format(new Date())}
-              </span>
-            </div>
-          </section>
-
           {activePage === 'overview' && (
             <>
               <div className="stats-grid">
@@ -863,18 +812,12 @@ export function App() {
           {activePage === 'distribution' && (
             <>
               <div className="distribution-hero">
-                <div className="round-robin-icon">
-                  <Shuffle size={28} />
-                </div>
-                <div>
-                  <h2>Configuração do rodízio</h2>
-                  <p>
-                    Rodízio sequencial. Após {data.settings.timeout_minutes} minutos sem aceite, a
-                    reserva vai para o bolsão, disponível para todas as atendentes com acesso ativo.
-                    A primeira que assumir fica responsável. O aceite não confirma envio no
-                    WhatsApp.
-                  </p>
-                </div>
+                <Shuffle size={20} />
+                <p>
+                  <strong>Regra ativa:</strong> rodízio sequencial com{' '}
+                  {data.settings.timeout_minutes} minutos para aceite; depois, o lead vai para o
+                  bolsão.
+                </p>
                 <div className="distribution-numbers">
                   <strong>
                     {reserved.length}
@@ -1028,13 +971,6 @@ export function App() {
           )}
           {activePage === 'contracts' && (
             <section className="panel">
-              <div className="panel-heading">
-                <div>
-                  <h2>Contratos e comissões</h2>
-                  <p>Etapa comercial em preparação.</p>
-                </div>
-                <LockKeyhole size={23} />
-              </div>
               <div className="feature-notice">
                 <FileCheck2 size={34} />
                 <h2>Funcionalidade ainda não disponível</h2>
@@ -1109,14 +1045,6 @@ export function App() {
               {isManager && <CentralStatusPanel />}
             </div>
           )}
-          <footer className="page-footer">
-            <span>
-              {lastUpdated
-                ? `Atualizado às ${lastUpdated.toLocaleTimeString('pt-BR')}`
-                : 'Aguardando sincronização'}{' '}
-              • Base local
-            </span>
-          </footer>
         </main>
       </div>
       {!isManager && (
@@ -1368,17 +1296,6 @@ function IntegrationPage({ platform, leads }: { platform: 'meta' | 'google'; lea
   const associated = leads.filter((l) => l.source === name);
   return (
     <>
-      <div className="integration-hero">
-        <span className={`integration-logo ${platform}`}>{platform === 'meta' ? '∞' : 'G'}</span>
-        <div>
-          <h2>{name}</h2>
-          <p>Métricas de mídia e resultados registrados no CRM.</p>
-        </div>
-        <span className="badge pending">
-          <i />
-          Não conectado
-        </span>
-      </div>
       <div className="stats-grid">
         {['Investimento', 'Impressões', 'Cliques no link', 'Custo por clique'].map((metric) => (
           <article className="stat-card disconnected" key={metric}>

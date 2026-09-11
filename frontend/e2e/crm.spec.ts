@@ -87,7 +87,8 @@ test('gestão navega, filtra e cadastra lead persistente', async ({ page }) => {
   await page.getByLabel('Buscar nome ou telefone').fill('Teste Navegador');
   await expect(page.getByRole('table').getByText('Teste Navegador').first()).toBeVisible();
   await page.getByRole('button', { name: 'Meta Ads', exact: true }).click();
-  await expect(page.getByText('Não conectado').first()).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Meta Ads' })).toBeVisible();
+  await expect(page.getByText('Integração ainda não configurada')).toBeVisible();
   expect(errors).toEqual([]);
 });
 test('atendimento móvel acessa bolsão e confirma aceite sem abrir contato fictício', async ({
