@@ -19,6 +19,8 @@ export default defineConfig({
       MONGODB_URI: '',
       DATABASE_URL: '',
       NODE_ENV: 'development',
+      WHATSAPP_ENABLED: 'false',
+      PUSH_ENABLED: 'false',
     },
   },
 });

@@ -157,6 +157,9 @@ export async function initializeMongo(db: MongoStore) {
   await db.collection('sessions').createIndex({ token_hash: 1 }, { unique: true });
   await db.collection('sessions').createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 });
   await db.collection('whatsapp_inbox').createIndex({ event_id: 1 }, { unique: true });
+  await db.collection('push_records').createIndex({ id: 1 }, { unique: true });
+  await db.collection('push_records').createIndex({ kind: 1, available_at: 1 });
+  await db.collection('push_records').createIndex({ expires_at: 1 });
   await db
     .collection('whatsapp_inbox')
     .createIndex({ phone_number_id: 1, processed_at: 1, available_at: 1 });

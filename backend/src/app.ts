@@ -11,6 +11,7 @@ import { MongoOperations, publicUser } from './mongo-crm.js';
 import type { MongoStore } from './mongo-store.js';
 import { distributionBoard, distributionQuery } from './distribution.js';
 import { tokenHash, verifyPassword } from './auth.js';
+import { registerPush, type PushConfig, type PushSender } from './push.js';
 import { DomainError, requireManager, stages, type User } from './types.js';
 
 declare module 'fastify' {
@@ -45,6 +46,8 @@ export async function buildApp(
     appOrigin?: string;
     staticRoot?: string;
     whatsapp?: WhatsAppConfig;
+    push?: PushConfig;
+    pushSender?: PushSender;
   } = {},
 ) {
   const app = Fastify({
@@ -70,7 +73,7 @@ export async function buildApp(
         .header('Strict-Transport-Security', 'max-age=31536000')
         .header(
           'Content-Security-Policy',
-          "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
+          "default-src 'self'; script-src 'self'; worker-src 'self'; manifest-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
         );
     if (!request.url.startsWith('/api/')) return;
     if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(request.method)) {
@@ -242,12 +245,7 @@ export async function buildApp(
     },
   );
   app.post('/api/v1/auth/logout', async (request, reply) => {
-    if (db.kind === 'mongo')
-      await db.remove('sessions', { token_hash: tokenHash(request.cookies.artisti_session!) });
-    else
-      await db.query('DELETE FROM sessions WHERE token_hash=$1', [
-        tokenHash(request.cookies.artisti_session!),
-      ]);
+    await push.logout(tokenHash(request.cookies.artisti_session!));
     reply.clearCookie('artisti_session', { path: '/' });
     return { ok: true };
   });
@@ -353,7 +351,10 @@ export async function buildApp(
     requireManager(request.user);
     return ['whatsapp', 'meta-ads', 'google-ads', 'web-push', 'gtm'].map((id) => ({
       id,
-      status: id === 'whatsapp' && options.whatsapp ? 'configured' : 'not_connected',
+      status:
+        (id === 'whatsapp' && options.whatsapp) || (id === 'web-push' && options.push)
+          ? 'configured'
+          : 'not_connected',
       last_sync: null,
     }));
   });
@@ -465,6 +466,14 @@ export async function buildApp(
     );
   });
   const central = await registerWhatsApp(app, crm, options.whatsapp, options.reconcile !== false);
+  const push = registerPush(
+    app,
+    db,
+    () => crm.now(),
+    options.push,
+    options.reconcile !== false,
+    options.pushSender,
+  );
   app.get('/api/v1/whatsapp/status', async (request) => {
     requireManager(request.user);
     return central.status();
@@ -497,5 +506,5 @@ export async function buildApp(
       return reply.status(404).send({ message: 'Não encontrado.' });
     });
   }
-  return { app, crm, central };
+  return { app, crm, central, push };
 }

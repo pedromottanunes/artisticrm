@@ -60,7 +60,11 @@ Leads, usuários, sessões, reservas, cursor do rodízio, auditoria e inbox What
 
 O Render Free dorme após 15 minutos sem tráfego e pode demorar para acordar. Enquanto dorme, os processadores não executam. O prazo original permanece no banco, e o bolsão é reconciliado ao retomar; não existe garantia de execução pontual no décimo minuto durante suspensão. Essa limitação também afeta a recepção imediata de webhooks. [Limites oficiais do Free](https://render.com/docs/free).
 
-Use dados de teste. Antes de operação real: homologar Meta e celulares, implementar push, definir backup/restauração e monitoramento, revisar capacidade/planos, segurança e regras comerciais. A migração de dados de outro CRM/PostgreSQL não é automática. [Detalhes técnicos MongoDB](MONGODB.md).
+Use dados de teste. Antes de operação real: homologar Meta e celulares, ativar e homologar push, definir backup/restauração e monitoramento, revisar capacidade/planos, segurança e regras comerciais. A migração de dados de outro CRM/PostgreSQL não é automática. [Detalhes técnicos MongoDB](MONGODB.md).
+
+## Aplicativo instalável e notificações
+
+O frontend inclui manifesto, ícones e service worker. A instalação PWA não exige variáveis extras. Para envio push, configure `PUSH_ENABLED`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` e `VAPID_SUBJECT` conforme [PWA.md](PWA.md). Não alterar as variáveis da central WhatsApp. O processador roda no Web Service, com fila persistida no banco; a suspensão do plano Free também suspende o processamento de push.
 
 ## Validação local e CI
 

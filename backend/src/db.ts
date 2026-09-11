@@ -58,6 +58,7 @@ export async function migrate(db: Database) {
       '002_inbound_fingerprint.sql',
       '003_operations.sql',
       '004_whatsapp.sql',
+      '005_push.sql',
     ]) {
       const version = file.split('_')[0];
       const done = await tx.query('SELECT version FROM schema_migrations WHERE version=$1', [

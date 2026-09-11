@@ -11,6 +11,7 @@ import { buildApp } from '../src/app.js';
 import { bootstrapManager } from '../src/bootstrap.js';
 import type { User, Opportunity } from '../src/types.js';
 import { checkDistribution } from './distribution-checks.js';
+import { checkPush } from './push-checks.js';
 
 let db: Database;
 let crm: CRM;
@@ -47,7 +48,7 @@ after(async () => {
 });
 beforeEach(async () => {
   await db.query(
-    'TRUNCATE whatsapp_inbox,claims,appointments,inbound_events,audit_events,opportunities,contacts,sessions',
+    'TRUNCATE push_records,whatsapp_inbox,claims,appointments,inbound_events,audit_events,opportunities,contacts,sessions',
   );
   await db.query('UPDATE distribution_settings SET last_position=0,timeout_minutes=10,version=1');
   await db.query("UPDATE users SET active=true,queue_enabled=(role='attendant')");
@@ -78,6 +79,21 @@ test('painel de distribuição: paginação acima de 500 leads, filtros, prazos 
       now = new Date(now.getTime() + 600000);
     },
   );
+});
+
+test('push: entrega privada, fila durável, concorrência, expiração e revogação em SQL', async () => {
+  await checkPush(
+    db,
+    crm,
+    manager,
+    users,
+    DEMO_PASSWORD,
+    () => now,
+    (ms) => {
+      now = new Date(now.getTime() + ms);
+    },
+  );
+  await db.query('UPDATE users SET auth_version=1');
 });
 
 test('oito novos contatos percorrem duas voltas exatas do rodízio', async () => {

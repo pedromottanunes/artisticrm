@@ -18,6 +18,17 @@ try {
   assert.equal(index.statusCode, 200);
   assert.match(index.body, /Artisti/);
   assert.match(index.headers['content-security-policy'] as string, /frame-ancestors 'none'/);
+  assert.match(index.headers['content-security-policy'] as string, /worker-src 'self'/);
+  assert.match(index.body, /manifest.webmanifest/);
+  const manifest = await app.inject('/manifest.webmanifest');
+  assert.equal(manifest.statusCode, 200);
+  assert.equal(manifest.json().display, 'standalone');
+  for (const icon of manifest.json().icons)
+    assert.equal((await app.inject(icon.src)).statusCode, 200);
+  const worker = await app.inject('/sw.js');
+  assert.equal(worker.statusCode, 200);
+  assert.match(worker.headers['content-type'] as string, /javascript/);
+  assert.equal((await app.inject('/offline.html')).statusCode, 200);
   const bundle = index.body.match(/src="([^"]+\.js)"/)!;
   const asset = await app.inject({ url: bundle[1] });
   assert.equal(asset.statusCode, 200);

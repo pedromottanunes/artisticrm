@@ -6,6 +6,7 @@ import { seedDemo } from './seed.js';
 import { buildApp } from './app.js';
 import { bootstrapManager } from './bootstrap.js';
 import { whatsappConfig } from './whatsapp.js';
+import { pushConfig } from './push.js';
 import { openMongo, initializeMongo, bootstrapMongo } from './mongo-store.js';
 
 const production = process.env.NODE_ENV === 'production';
@@ -51,6 +52,7 @@ if (db.kind === 'mongo') {
 const { app } = await buildApp(db, {
   production,
   whatsapp,
+  push: pushConfig(process.env),
   appOrigin,
   staticRoot: production
     ? fileURLToPath(new URL('../../frontend/dist', import.meta.url))

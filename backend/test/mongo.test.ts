@@ -16,6 +16,7 @@ import { WhatsAppCentral } from '../src/whatsapp.js';
 import { hashPassword } from '../src/auth.js';
 import type { User } from '../src/types.js';
 import { checkDistribution } from './distribution-checks.js';
+import { checkPush } from './push-checks.js';
 
 let replica: MongoMemoryReplSet, db: MongoStore, ops: MongoOperations, manager: User, users: User[];
 let now: Date;
@@ -86,6 +87,19 @@ const lose = {
   next_action: '',
 };
 const key = () => randomUUID();
+test('push: entrega privada, fila durável, concorrência, expiração e revogação em MongoDB', async () => {
+  await checkPush(
+    db,
+    ops,
+    manager,
+    users,
+    password,
+    () => now,
+    (ms) => {
+      now = new Date(now.getTime() + ms);
+    },
+  );
+});
 const headers = { 'x-artisti-client': 'web' };
 const config = {
   appSecret: 'test-secret-only-123456',

@@ -2,6 +2,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import type { Database, Sql } from './db.js';
 import { DomainError, requireManager, type Opportunity, type User } from './types.js';
 import { lockActor } from './access.js';
+import { enqueuePushEvent } from './push-store.js';
 
 const selectOpportunity = `SELECT o.*, c.name, c.phone, c.email, c.instagram, c.is_demo
   FROM opportunities o JOIN contacts c ON c.id = o.contact_id`;
@@ -33,15 +34,18 @@ export class CRM {
     description: string,
     details: unknown = {},
   ) {
+    const eventId = randomUUID();
+    const at = await this.now(tx);
     await tx.query('INSERT INTO audit_events VALUES ($1,$2,$3,$4,$5,$6,$7)', [
-      randomUUID(),
+      eventId,
       id,
       actor,
       kind,
       description,
-      await this.now(tx),
+      at,
       JSON.stringify(details),
     ]);
+    await enqueuePushEvent(tx, eventId, id, kind, at);
   }
   async ingest(
     input: LeadInput,

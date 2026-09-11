@@ -13,7 +13,6 @@ import {
   ArrowUpRight,
   Bell,
   LogOut,
-  Menu,
   ChevronRight,
   Clock3,
   Inbox,
@@ -43,6 +42,8 @@ import {
 import { LeadForm, LeadDetail } from './forms';
 import { Distribution } from './distribution';
 import { Team, PasswordChange } from './operations';
+import { MobileNavigation } from './mobile-navigation';
+import { DevicePanel, disconnectPush, PushBinding } from './pwa';
 
 type Page =
   | 'overview'
@@ -74,14 +75,18 @@ const salesNav = [
   { id: 'settings' as Page, label: 'Meu perfil', icon: Settings },
 ];
 
+const readPage = (): Page => {
+  const hash = window.location.hash.slice(1);
+  return [...navItems, ...salesNav].some((item) => item.id === hash) ? (hash as Page) : 'overview';
+};
+
 export function App() {
   const [data, setData] = useState<Snapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(true);
-  const [page, setPage] = useState<Page>('overview');
+  const [page, setPage] = useState<Page>(readPage);
   const [search, setSearch] = useState('');
   const [source, setSource] = useState('Todas as origens');
-  const [mobileMenu, setMobileMenu] = useState(false);
   const [notice, setNotice] = useState('');
   const [newLead, setNewLead] = useState(false);
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -144,22 +149,38 @@ export function App() {
     void refresh();
   }, [refresh]);
   useEffect(() => {
+    const changed = () => {
+      setPage(readPage());
+      setSearch('');
+      window.scrollTo(0, 0);
+    };
+    window.addEventListener('hashchange', changed);
+    return () => window.removeEventListener('hashchange', changed);
+  }, []);
+  useEffect(() => {
     if (!data) return;
-    const interval = setInterval(() => void refresh(), 5000);
+    const interval = setInterval(() => {
+      if (!document.hidden) void refresh();
+    }, 5000);
     const focus = () => void refresh();
     window.addEventListener('focus', focus);
     window.addEventListener('online', focus);
+    const visible = () => {
+      if (!document.hidden) void refresh();
+    };
+    document.addEventListener('visibilitychange', visible);
     return () => {
       clearInterval(interval);
       window.removeEventListener('focus', focus);
       window.removeEventListener('online', focus);
+      document.removeEventListener('visibilitychange', visible);
     };
   }, [data?.user.id, refresh]);
   useEffect(() => {
-    const id = setInterval(
-      () => setNow(serverClock.current.server + performance.now() - serverClock.current.monotonic),
-      1000,
-    );
+    const id = setInterval(() => {
+      if (!document.hidden)
+        setNow(serverClock.current.server + performance.now() - serverClock.current.monotonic);
+    }, 1000);
     return () => clearInterval(id);
   }, []);
   useEffect(() => {
@@ -169,7 +190,8 @@ export function App() {
   }, [notice]);
   const navigate = (next: Page) => {
     setPage(next);
-    setMobileMenu(false);
+    window.location.hash = next;
+    window.scrollTo(0, 0);
     setSearch('');
   };
   const openDetail = async (id: string, history = false) => {
@@ -234,6 +256,8 @@ export function App() {
   const logout = async () => {
     try {
       await api('/auth/logout', { method: 'POST', body: '{}' });
+      // Server revocation is authoritative; browser cleanup must not block logout.
+      void disconnectPush(true).catch(() => {});
       generation.current++;
       detailSeq.current++;
       setData(null);
@@ -275,7 +299,7 @@ export function App() {
         onLogin={async () => {
           generation.current++;
           await refresh();
-          setPage('overview');
+          setPage(readPage());
         }}
       />
     );
@@ -290,7 +314,11 @@ export function App() {
     );
   const isManager = data.user.role === 'manager';
   const activePage =
-    !isManager && !['mine', 'pool', 'agenda', 'settings'].includes(page) ? 'mine' : page;
+    !isManager && !['mine', 'pool', 'agenda', 'settings'].includes(page)
+      ? 'mine'
+      : isManager && ['mine', 'pool'].includes(page)
+        ? 'distribution'
+        : page;
   const leads = data.opportunities;
   const pool = leads.filter((l) => l.state === 'POOL');
   const reserved = leads.filter((l) => l.state === 'RESERVED');
@@ -366,7 +394,7 @@ export function App() {
         <tbody>
           {rows.map((lead) => (
             <tr key={lead.id}>
-              <td>
+              <td data-label="Contato">
                 <button className="contact-cell" onClick={() => void openDetail(lead.id)}>
                   <Avatar name={lead.name} />
                   <span>
@@ -375,15 +403,15 @@ export function App() {
                   </span>
                 </button>
               </td>
-              <td>
+              <td data-label="Origem">
                 <Source value={lead.source} />
               </td>
               {!compact && (
-                <td>
+                <td data-label="Etapa">
                   <span className="stage-pill">{stages[lead.stage]}</span>
                 </td>
               )}
-              <td>
+              <td data-label="Atendente">
                 {lead.owner_id || lead.state === 'RESERVED' ? (
                   <span className="owner-cell">
                     <Avatar
@@ -396,11 +424,11 @@ export function App() {
                   <span className="muted">—</span>
                 )}
               </td>
-              <td>
+              <td data-label="Situação">
                 <Badge state={lead.state} />
                 {lead.state === 'RESERVED' && <Countdown lead={lead} now={now} />}
               </td>
-              <td>{actionButton(lead)}</td>
+              <td data-label="Ações">{actionButton(lead)}</td>
             </tr>
           ))}
         </tbody>
@@ -415,14 +443,7 @@ export function App() {
   );
   return (
     <div className="app-shell">
-      {mobileMenu && (
-        <button
-          className="sidebar-scrim"
-          aria-label="Fechar menu"
-          onClick={() => setMobileMenu(false)}
-        />
-      )}
-      <aside className={`sidebar ${mobileMenu ? 'is-open' : ''}`}>
+      <aside className="sidebar">
         <div className="brand">
           <img src="/artisti-logo.webp" alt="Artisti Transplante Capilar" />
         </div>
@@ -485,13 +506,6 @@ export function App() {
       <div className="main-shell">
         <header className="topbar">
           <div className="breadcrumbs">
-            <button
-              className="icon-button mobile-toggle"
-              aria-label="Abrir menu"
-              onClick={() => setMobileMenu(true)}
-            >
-              <Menu size={20} />
-            </button>
             <h1>{activePage === 'mine' ? 'Meus atendimentos' : title}</h1>
           </div>
           <div className="topbar-right">
@@ -515,9 +529,11 @@ export function App() {
               <Bell size={19} />
             </IconButton>
             <Avatar user={data.user} small />
-            <IconButton label="Sair da conta" onClick={() => void logout()}>
-              <LogOut size={18} />
-            </IconButton>
+            <span className="desktop-logout">
+              <IconButton label="Sair da conta" onClick={() => void logout()}>
+                <LogOut size={18} />
+              </IconButton>
+            </span>
           </div>
         </header>
         <main>
@@ -957,28 +973,34 @@ export function App() {
                   <Link2 size={21} />
                 </div>
                 <div className="integration-list">
-                  {['Meta Ads', 'Google Ads', 'Google Tag Manager', 'Notificações push'].map(
-                    (name) => (
-                      <div key={name}>
-                        <span>{name}</span>
-                        <span className="badge pending">
-                          <i />
-                          Não conectado
-                        </span>
-                      </div>
-                    ),
-                  )}
+                  {['Meta Ads', 'Google Ads', 'Google Tag Manager'].map((name) => (
+                    <div key={name}>
+                      <span>{name}</span>
+                      <span className="badge pending">
+                        <i />
+                        Não conectado
+                      </span>
+                    </div>
+                  ))}
                 </div>
                 <div className="panel-footnote">
                   <Smartphone size={16} />
-                  Instalação PWA e push serão validados nos aparelhos reais. Esta versão usa
-                  atualização com a página aberta.
+                  Instalação e notificações disponíveis nas configurações deste aparelho.
                 </div>
               </section>
             </div>
           )}
           {activePage === 'settings' && (
             <div className="settings-extension">
+              <section className="panel device-panel">
+                <div className="panel-heading">
+                  <h2>Este aparelho</h2>
+                  <Smartphone size={22} />
+                </div>
+                <div className="modal-body">
+                  <DevicePanel userId={data.user.id} />
+                </div>
+              </section>
               <PasswordChange onDone={passwordDone} />
               {isManager && <Team data={data} connected={connected} onChanged={refresh} />}
               {isManager && <CentralStatusPanel />}
@@ -986,20 +1008,14 @@ export function App() {
           )}
         </main>
       </div>
-      {!isManager && (
-        <nav className="mobile-bottom-nav" aria-label="Atalhos de atendimento">
-          {salesNav.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              className={activePage === id ? 'active' : ''}
-              onClick={() => navigate(id)}
-            >
-              <Icon size={20} />
-              <span>{label}</span>
-            </button>
-          ))}
-        </nav>
-      )}
+      <PushBinding userId={data.user.id} />
+      <MobileNavigation
+        items={isManager ? navItems : salesNav}
+        active={activePage}
+        manager={isManager}
+        poolCount={pool.length}
+        onNavigate={navigate}
+      />
       {notice && (
         <div className="toast" role="status">
           <Info size={19} />
@@ -1077,13 +1093,7 @@ export function App() {
           onClose={() => setNotifications(false)}
         >
           <div className="modal-body">
-            <div className="inline-info">
-              <Bell size={20} />
-              <span>
-                Notificações push ainda não conectadas. Não haverá aviso com o aplicativo fechado
-                nesta versão.
-              </span>
-            </div>
+            <DevicePanel userId={data.user.id} />
             <div className="notification-line">
               <Inbox size={21} />
               <div>

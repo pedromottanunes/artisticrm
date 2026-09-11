@@ -4,6 +4,217 @@ import { test, expect, type Page, type BrowserContext } from '@playwright/test';
 // of every regression and would exhaust the real login rate limit for one IP.
 const demoSessions = new Map<string, Awaited<ReturnType<BrowserContext['cookies']>>>();
 
+test('push no aparelho: permissão somente por toque, teste e desativação', async ({ page }) => {
+  const publicKey = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 1)]).toString('base64url');
+  const calls: string[] = [];
+  await page.addInitScript(() => {
+    let permission: NotificationPermission = 'default';
+    let active = false;
+    const events: string[] = [];
+    (window as Window & { pushTestEvents?: string[] }).pushTestEvents = events;
+    Object.defineProperty(Notification, 'permission', {
+      get: () => permission,
+      configurable: true,
+    });
+    Object.defineProperty(Notification, 'requestPermission', {
+      value: async () => {
+        events.push('permission');
+        permission = 'granted';
+        return permission;
+      },
+      configurable: true,
+    });
+    const sub = {
+      endpoint: 'https://fcm.googleapis.com/fcm/send/browser-test',
+      options: { applicationServerKey: new Uint8Array([4, ...Array(64).fill(1)]).buffer },
+      toJSON: () => ({
+        endpoint: 'https://fcm.googleapis.com/fcm/send/browser-test',
+        keys: { p256dh: 'test', auth: 'test' },
+      }),
+      unsubscribe: async () => {
+        active = false;
+        events.push('unsubscribe');
+        return true;
+      },
+    };
+    const registration = {
+      active: {},
+      pushManager: {
+        getSubscription: async () => (active ? sub : null),
+        subscribe: async () => {
+          active = true;
+          events.push('subscribe');
+          return sub;
+        },
+      },
+    };
+    Object.defineProperty(navigator.serviceWorker, 'register', { value: async () => registration });
+    Object.defineProperty(navigator.serviceWorker, 'getRegistration', {
+      value: async () => registration,
+    });
+    Object.defineProperty(navigator.serviceWorker, 'ready', {
+      get: () => Promise.resolve(registration),
+    });
+  });
+  await page.route('**/api/v1/push/config', (route) =>
+    route.fulfill({ json: { enabled: true, publicKey } }),
+  );
+  await page.route('**/api/v1/push/subscriptions', (route) => {
+    calls.push(route.request().method());
+    return route.fulfill({ json: { ok: true } });
+  });
+  await page.route('**/api/v1/push/test', (route) => {
+    calls.push('test');
+    return route.fulfill({ json: { ok: true } });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  await page
+    .getByRole('navigation', { name: 'Atalhos de gestão' })
+    .getByRole('button', { name: 'Configurações' })
+    .click();
+  await expect(page.getByRole('button', { name: 'Ativar notificações' })).toBeVisible();
+  const events = () =>
+    page.evaluate(() => (window as Window & { pushTestEvents: string[] }).pushTestEvents);
+  expect(await events()).toEqual([]);
+  await page.getByRole('button', { name: 'Ativar notificações' }).click();
+  await expect(
+    page.getByText('Notificações ativadas neste aparelho', { exact: true }),
+  ).toBeVisible();
+  expect(await events()).toEqual(['permission', 'subscribe']);
+  await page.getByRole('button', { name: 'Testar aviso' }).click();
+  await expect(page.getByText('Teste colocado na fila.', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'Desativar', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Ativar notificações' })).toBeVisible();
+  expect(calls).toEqual(['POST', 'test', 'DELETE']);
+  expect(await events()).toEqual(['permission', 'subscribe', 'unsubscribe']);
+});
+
+test('gestão móvel: todas as telas pela barra inferior, cartões e formulário com teclado', async ({
+  page,
+}) => {
+  test.setTimeout(90000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const navigation = page.getByRole('navigation', { name: 'Atalhos de gestão' });
+  await expect(navigation).toBeVisible();
+  await expect(page.locator('.sidebar')).toBeHidden();
+  for (const width of [320, 390, 768, 1024]) {
+    await page.setViewportSize({ width, height: 844 });
+    for (const name of [
+      'Visão geral',
+      'Distribuição',
+      'Leads',
+      'Funil',
+      'Agenda',
+      'Meta Ads',
+      'Google Ads',
+      'Contratos',
+      'Configurações',
+    ]) {
+      const button = navigation.getByRole('button', { name: new RegExp(`^${name}`) });
+      await button.click();
+      await expect(button).toHaveAttribute('aria-current', 'page');
+      expect(
+        await page.evaluate(() => document.body.scrollWidth <= innerWidth),
+        `${name} at ${width}`,
+      ).toBe(true);
+      expect(
+        await navigation.evaluate((el) =>
+          Math.abs(el.getBoundingClientRect().bottom - innerHeight),
+        ),
+      ).toBeLessThan(2);
+      const box = await button.boundingBox();
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+    }
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await navigation.getByRole('button', { name: /^Leads/ }).click();
+  await expect(page.locator('.leads-table tbody tr').first()).toBeVisible();
+  expect(
+    (await page.getByLabel('Buscar nome ou telefone').boundingBox())!.height,
+  ).toBeLessThanOrEqual(60);
+  expect(
+    await page
+      .locator('.leads-table tbody tr')
+      .first()
+      .evaluate((el) => getComputedStyle(el).display),
+  ).toBe('grid');
+  await page.screenshot({ path: 'test-results/mobile-leads-cards.png', fullPage: true });
+  await page.getByRole('button', { name: 'Novo lead', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Nome do contato').fill('Teste Responsivo');
+  expect(
+    await dialog
+      .getByLabel('Nome do contato')
+      .evaluate((el) => parseFloat(getComputedStyle(el).fontSize)),
+  ).toBeGreaterThanOrEqual(16);
+  await page.setViewportSize({ width: 390, height: 410 });
+  await expect(dialog.getByRole('button', { name: 'Cadastrar e distribuir' })).toBeVisible();
+  await dialog.getByLabel('WhatsApp com país e DDD').fill('5548999990000');
+  const bounds = await dialog.boundingBox();
+  expect(bounds!.x).toBeGreaterThanOrEqual(0);
+  expect(bounds!.y).toBeGreaterThanOrEqual(0);
+  expect(bounds!.height).toBeLessThanOrEqual(410);
+  await page.screenshot({ path: 'test-results/mobile-form-keyboard.png' });
+  await dialog.getByRole('button', { name: 'Fechar janela' }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await navigation.getByRole('button', { name: 'Configurações', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Este aparelho' })).toBeVisible();
+  await page.getByRole('button', { name: 'Sair e acessar outro perfil' }).click();
+  await expect(page.getByRole('button', { name: 'Entrar no espaço de trabalho' })).toBeVisible();
+});
+
+test('PWA: manifesto, ícones, abertura por aviso e cache sem dados privados', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page, 'vanessa');
+  const manifestResponse = await page.request.get('/manifest.webmanifest');
+  const manifest = await manifestResponse.json();
+  expect(manifest.display).toBe('standalone');
+  for (const icon of manifest.icons) expect((await page.request.get(icon.src)).ok()).toBe(true);
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await page.goto('/#pool');
+  await expect(page.getByRole('heading', { level: 1, name: 'Bolsão' })).toBeVisible();
+  await page
+    .getByRole('navigation', { name: 'Atalhos de atendimento' })
+    .getByRole('button', { name: 'Meu perfil' })
+    .click();
+  await expect(page.getByRole('heading', { name: 'Este aparelho' })).toBeVisible();
+  await page.screenshot({ path: 'test-results/mobile-device-settings.png', fullPage: true });
+  const cachedPaths = await page.evaluate(async () => {
+    const result: string[] = [];
+    for (const name of await caches.keys())
+      for (const request of await (await caches.open(name)).keys())
+        result.push(new URL(request.url).pathname);
+    return result;
+  });
+  expect(cachedPaths).toContain('/offline.html');
+  expect(cachedPaths.every((path) => !path.startsWith('/api/') && path !== '/')).toBe(true);
+});
+
+test('PWA: queda de conexão mostra página pública e recupera o acesso', async ({
+  page,
+  context,
+  browserName,
+}) => {
+  test.skip(
+    browserName === 'webkit' && process.platform === 'win32',
+    'WebKit Windows falha em reload offline até com service worker mínimo sem cache; validar no iPhone real.',
+  );
+  await login(page, 'vanessa');
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await page.waitForFunction(() => !!navigator.serviceWorker.controller);
+  await page.goto('/#settings');
+  await expect(page.getByRole('heading', { level: 1, name: 'Meu perfil' })).toBeVisible();
+  await context.setOffline(true);
+  await page.reload();
+  await expect(page.getByRole('heading', { name: /conexão/i })).toBeVisible();
+  await expect(page.locator('.lead-card')).toHaveCount(0);
+  await context.setOffline(false);
+  await page.reload();
+  await expect(page.getByRole('heading', { level: 1, name: 'Meu perfil' })).toBeVisible();
+});
+
 test('gestão consulta central desligada em viewport móvel sem expor configuração', async ({
   page,
 }) => {
@@ -77,7 +288,7 @@ test('tipografia permanece legível em desktop amplo e celular', async ({ page }
   });
   expect(layout.bodyWidth).toBeLessThanOrEqual(layout.viewport);
   expect(layout.pageOverflowIsClipped).toBe(true);
-  expect(layout.tableCanScrollInternally).toBe(true);
+  expect(layout.tableCanScrollInternally).toBe(false); // Mobile rows are now readable cards.
 });
 test('gestão navega, filtra e cadastra lead persistente', async ({ page }) => {
   const errors: string[] = [];
@@ -166,9 +377,8 @@ test('painel móvel sem transbordamento e menu utilizável', async ({ page }) =>
         getComputedStyle(document.documentElement).overflowX === 'hidden',
     ),
   ).toBe(true);
-  await page.getByRole('button', { name: 'Abrir menu' }).click();
   await page
-    .getByRole('navigation', { name: 'Menu principal' })
+    .getByRole('navigation', { name: 'Atalhos de gestão' })
     .getByRole('button', { name: 'Google Ads', exact: true })
     .click();
   await expect(page.getByRole('heading', { level: 1, name: 'Google Ads' })).toBeVisible();

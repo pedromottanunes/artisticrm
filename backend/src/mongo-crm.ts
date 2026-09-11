@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { enqueuePushEvent } from './push-store.js';
 import { MongoStore, MongoTx, mongoUser } from './mongo-store.js';
 import { DomainError, requireManager, type User, type Opportunity } from './types.js';
 import type { CRM, LeadInput } from './crm.js';
@@ -65,15 +66,18 @@ export class MongoOperations {
     description: string,
     details: unknown = {},
   ) {
+    const eventId = randomUUID();
+    const at = await this.now(tx);
     await tx.insert('audit_events', {
-      id: randomUUID(),
+      id: eventId,
       opportunity_id: id,
       actor_id: actor,
       kind,
       description,
       details,
-      created_at: await this.now(tx),
+      created_at: at,
     });
+    await enqueuePushEvent(tx, eventId, id, kind, at);
   }
   async command<T>(
     tx: MongoTx,
@@ -251,6 +255,8 @@ export class MongoOperations {
           { $set: { state: 'POOL' }, $inc: { version: 1 } },
         );
         const recordedAt = await this.now(tx);
+        for (const row of rows)
+          await enqueuePushEvent(tx, randomUUID(), row.id, 'reservation.expired', recordedAt);
         await tx.collection('audit_events').insertMany(
           rows.map((row) => ({
             id: randomUUID(),

@@ -1,6 +1,6 @@
 # Artisti CRM
 
-Primeira versão executável do CRM: interface de gestão e atendimento, API e banco persistente. Ainda é uma **versão de desenvolvimento/homologação**, não está pronta para operar com pacientes. A integração da central WhatsApp está implementada, mas desligada e sem credenciais; Meta Ads, Google Ads, GTM e push ainda não estão conectados. Consulte [WHATSAPP.md](WHATSAPP.md) para ativar posteriormente no Render.
+Primeira versão executável do CRM: interface de gestão e atendimento, API e banco persistente. Ainda é uma **versão de desenvolvimento/homologação**, não está pronta para operar com pacientes. A central WhatsApp e as notificações push estão implementadas e dependem da configuração privada do ambiente; permanecem desligadas por padrão no desenvolvimento. Meta Ads, Google Ads e GTM ainda não estão conectados. Consulte [WHATSAPP.md](WHATSAPP.md) e [PWA.md](PWA.md).
 
 ## Distribuição e bolsão: fluxo acordado
 
@@ -10,11 +10,11 @@ Primeira versão executável do CRM: interface de gestão e atendimento, API e b
 - O primeiro aceite confirmado pelo banco ganha o lead. Cliques concorrentes não criam dois responsáveis; repetir a mesma solicitação após falha de rede não duplica o aceite.
 - Somente após assumir o contato é liberado para abrir o WhatsApp. Isso abre o contato na conta disponível no aparelho/Web; não transfere o histórico da central nem confirma envio de mensagem.
 - O processo periódico e as consultas reconciliam reservas vencidas; o próprio aceite também verifica o prazo. Reiniciar o servidor não reinicia o cronômetro.
-- A entrada da central tem webhook assinado, fila persistente, deduplicação e novas tentativas; permanece desligada até configurar a Meta e o ambiente. Notificações push ainda não estão implementadas. O fluxo pode ser verificado com cadastros manuais e testes automatizados, sem enviar mensagens.
+- A entrada da central tem webhook assinado, fila persistente, deduplicação e novas tentativas; depende da configuração da Meta e do ambiente. PWA e Web Push estão implementados; o envio push permanece desligado até configurar VAPID. Consulte [PWA.md](PWA.md). O fluxo pode ser verificado com cadastros manuais e testes automatizados, sem enviar mensagens.
 
 ### Painel operacional da gestão
 
-Abra **Distribuição** no menu lateral. O painel mostra reservas e tempo restante, bolsão, atendimentos assumidos e leads sem destino/revisão. Os cartões filtram a tabela; também é possível pesquisar nome/telefone e filtrar a responsável atual. Reservas com vencimento mais próximo aparecem primeiro.
+Abra **Distribuição** no menu lateral do computador ou na barra inferior do celular. O painel mostra reservas e tempo restante, bolsão, atendimentos assumidos e leads sem destino/revisão. Os cartões filtram a tabela; também é possível pesquisar nome/telefone e filtrar a responsável atual. Reservas com vencimento mais próximo aparecem primeiro.
 
 - Consulta própria (`GET /api/v1/distribution/board`), restrita à gestão, com 25 registros por página. Totais dos cartões e da equipe abrangem todas as oportunidades abertas, independentemente dos filtros e do limite de 500 da visão geral.
 - Equipe, cursor do rodízio, configuração, totais e leads são lidos na mesma transação. A central não combina sua lista com a fotografia independente da visão geral.
@@ -56,10 +56,11 @@ Abra **http://127.0.0.1:5173**. Escolha Cadu para gestão ou uma atendente para 
 - Remarcação, cancelamento e conclusão de avaliações com histórico. Avaliação futura não pode ser concluída; avaliação já encerrada não pode ser reescrita.
 - Retornos após oportunidade encerrada criam uma nova pendência de revisão. A gestão atribui essa oportunidade pela ficha; o histórico anterior permanece separado.
 - Reconciliação de reservas a cada 5 segundos e nas consultas; o aceite também valida o prazo, sem depender da rotina periódica.
-- Layout responsivo, logo original e tema azul-marinho/dourado da Artisti.
+- Navegação inferior deslizável, cartões e formulários adaptados ao celular nos dois perfis; menu lateral no desktop, logo original e tema azul-marinho/dourado.
+- PWA instalável e tela pública offline, sem cache de dados privados. Web Push opcional com permissão por aparelho, fila durável e revogação; configuração e limites em [PWA.md](PWA.md).
 - Áreas Meta Ads/Google Ads com estado **não conectado**, sem métricas de mídia inventadas.
 
-Não implementado: sincronização de anúncios, instrumentação do site/GTM, push/PWA, contratos e comissões, upload de documentos, recuperação autônoma de senha por e-mail, convites por link, MFA e administração de perfis de gestão. A central exige configuração e homologação com a Meta. A visão geral e a lista de Leads possuem limite de 500 oportunidades por consulta; a central de Distribuição já tem paginação e totais completos. Relatórios por período ainda precisam ser implementados. Não usar esta etapa como sistema de produção.
+Não implementado: sincronização de anúncios, instrumentação do site/GTM, contratos e comissões, upload de documentos, recuperação autônoma de senha por e-mail, convites por link, MFA e administração de perfis de gestão. A central exige configuração e homologação com a Meta; push exige chaves no servidor e homologação nos celulares. A visão geral e a lista de Leads possuem limite de 500 oportunidades por consulta; a central de Distribuição já tem paginação e totais completos. Relatórios por período ainda precisam ser implementados. Não usar esta etapa como sistema de produção.
 
 ### Regras operacionais implementadas, sujeitas à validação do cliente
 

@@ -87,8 +87,29 @@ export function Modal({
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = ref.current!;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const resize = () => {
+      const viewport = window.visualViewport;
+      dialog.style.setProperty(
+        '--dialog-max-height',
+        `${(viewport?.height ?? window.innerHeight) - 12}px`,
+      );
+      dialog.style.setProperty(
+        '--dialog-keyboard-offset',
+        `${Math.max(0, window.innerHeight - (viewport?.height ?? window.innerHeight) - (viewport?.offsetTop ?? 0))}px`,
+      );
+    };
+    resize();
+    window.visualViewport?.addEventListener('resize', resize);
+    window.visualViewport?.addEventListener('scroll', resize);
     dialog.showModal();
-    return () => dialog.close();
+    return () => {
+      dialog.close();
+      document.body.style.overflow = previous;
+      window.visualViewport?.removeEventListener('resize', resize);
+      window.visualViewport?.removeEventListener('scroll', resize);
+    };
   }, []);
   return (
     <dialog
