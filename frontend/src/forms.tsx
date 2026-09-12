@@ -7,6 +7,7 @@ import {
   MessageCircle,
   Clock3,
   ShieldCheck,
+  Trash2,
 } from 'lucide-react';
 import { api, stages, type Detail, type Snapshot, type User } from './api';
 import { Transfer, AppointmentEditor } from './operations';
@@ -130,6 +131,7 @@ export function LeadDetail({
   isManager,
   onClose,
   onSaved,
+  onDeleted,
   onClaim,
   onWhatsApp,
   busy,
@@ -141,6 +143,7 @@ export function LeadDetail({
   isManager: boolean;
   onClose: () => void;
   onSaved: () => Promise<void>;
+  onDeleted: () => Promise<void>;
   onClaim: () => void;
   onWhatsApp: () => void;
   busy: boolean;
@@ -149,6 +152,30 @@ export function LeadDetail({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [tab, setTab] = useState(initialTab);
+  const [confirmation, setConfirmation] = useState('');
+  const deleteCommand = useRef<{ key: string; version: number } | null>(null);
+  const deleting = useRef(false);
+  const remove = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (deleting.current || saving || !connected || confirmation !== 'EXCLUIR') return;
+    deleting.current = true;
+    setSaving(true);
+    setError('');
+    deleteCommand.current ??= { key: crypto.randomUUID(), version: detail.version };
+    try {
+      await api(`/opportunities/${detail.id}`, {
+        method: 'DELETE',
+        headers: { 'Idempotency-Key': deleteCommand.current.key },
+        body: JSON.stringify({ expected_version: deleteCommand.current.version, confirmation }),
+      });
+      await onDeleted();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      deleting.current = false;
+      setSaving(false);
+    }
+  };
   const formRef = useRef<HTMLFormElement>(null);
   const save = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -195,7 +222,9 @@ export function LeadDetail({
     <Modal
       title={detail.name}
       description={detail.interest || 'Interesse a identificar'}
-      onClose={onClose}
+      onClose={() => {
+        if (!deleting.current) onClose();
+      }}
       wide
     >
       <div className="detail-summary">
@@ -208,11 +237,14 @@ export function LeadDetail({
           'cadastro',
           ...(detail.can_edit ? ['agendar', 'avaliacoes', 'historico'] : []),
           ...(isManager ? ['transferir'] : []),
+          ...(detail.can_edit ? ['excluir'] : []),
         ].map((item) => (
           <button
             className={tab === item ? 'active' : ''}
+            disabled={saving}
             onClick={() => {
               setTab(item);
+              setConfirmation('');
               setError('');
             }}
             key={item}
@@ -225,10 +257,69 @@ export function LeadDetail({
                   ? 'Avaliações'
                   : item === 'transferir'
                     ? 'Atribuir / transferir'
-                    : 'Histórico'}
+                    : item === 'excluir'
+                      ? 'Excluir lead'
+                      : 'Histórico'}
           </button>
         ))}
       </div>
+      {tab === 'excluir' && detail.can_edit && (
+        <form onSubmit={remove}>
+          <div className="modal-body form-grid">
+            <div className="delete-warning full" id="delete-warning">
+              <h3>Excluir permanentemente {detail.name}?</h3>
+              <p>
+                Sem lixeira e sem opção de desfazer. O lead, seu histórico e todos os seus
+                agendamentos serão apagados do CRM.
+              </p>
+              <p>
+                Se houver outro atendimento do mesmo contato, ele será preservado. Esta ação não
+                apaga conversas no WhatsApp.
+              </p>
+              <p>Para apenas encerrar o atendimento e manter o histórico, não use a exclusão.</p>
+            </div>
+            <label className="full">
+              Digite EXCLUIR para confirmar
+              <input
+                value={confirmation}
+                onChange={(e) => setConfirmation(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                aria-describedby="delete-warning"
+                disabled={saving || !connected}
+                required
+                pattern="EXCLUIR"
+              />
+            </label>
+            {error && (
+              <p className="form-error full" role="alert">
+                {error}
+              </p>
+            )}
+          </div>
+          <div className="modal-actions">
+            <button
+              type="button"
+              className="button outline"
+              disabled={saving}
+              onClick={() => {
+                setTab('cadastro');
+                setConfirmation('');
+                setError('');
+              }}
+            >
+              Cancelar
+            </button>
+            <button
+              className="button danger"
+              disabled={saving || !connected || confirmation !== 'EXCLUIR'}
+            >
+              <Trash2 size={16} />
+              {saving ? 'Excluindo…' : 'Excluir permanentemente'}
+            </button>
+          </div>
+        </form>
+      )}
       {tab === 'cadastro' && (
         <form ref={formRef} onSubmit={save} key={detail.id + ':' + detail.version}>
           <fieldset

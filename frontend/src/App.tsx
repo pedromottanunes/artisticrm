@@ -5,7 +5,6 @@ import {
   GitBranch,
   CalendarDays,
   Shuffle,
-  ChartNoAxesCombined,
   Settings,
   Search,
   Plus,
@@ -63,8 +62,6 @@ const navItems: { id: Page; label: string; icon: typeof Users; group: string }[]
   { id: 'leads', label: 'Leads', icon: Users, group: 'workspace' },
   { id: 'pipeline', label: 'Funil de vendas', icon: GitBranch, group: 'workspace' },
   { id: 'agenda', label: 'Agenda', icon: CalendarDays, group: 'workspace' },
-  { id: 'meta', label: 'Meta Ads', icon: ChartNoAxesCombined, group: 'growth' },
-  { id: 'google', label: 'Google Ads', icon: Search, group: 'growth' },
   { id: 'contracts', label: 'Contratos', icon: FileCheck2, group: 'growth' },
   { id: 'settings', label: 'Configurações', icon: Settings, group: 'system' },
 ];
@@ -92,6 +89,7 @@ export function App() {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [detailTab, setDetailTab] = useState('cadastro');
   const [detailLoading, setDetailLoading] = useState(false);
+  const [leadRevision, setLeadRevision] = useState(0);
   const [notifications, setNotifications] = useState(false);
   const [whatsappUrl, setWhatsappUrl] = useState('');
   const [busyId, setBusyId] = useState('');
@@ -446,15 +444,6 @@ export function App() {
       <aside className="sidebar">
         <div className="brand">
           <img src="/artisti-logo.webp" alt="Artisti Transplante Capilar" />
-        </div>
-        <div className="workspace-label">
-          <span className="workspace-icon">
-            <GitBranch size={17} />
-          </span>
-          <div>
-            <strong>Artisti CRM</strong>
-          </div>
-          <ChevronRight size={15} />
         </div>
         <nav aria-label="Menu principal">
           {isManager ? (
@@ -840,6 +829,7 @@ export function App() {
 
           {activePage === 'distribution' && (
             <Distribution
+              leadRevision={leadRevision}
               data={data}
               connected={connected}
               onSaved={refresh}
@@ -1043,6 +1033,7 @@ export function App() {
       )}
       {detail && (
         <LeadDetail
+          key={detail.id}
           initialTab={detailTab}
           detail={detail}
           users={data.users}
@@ -1055,6 +1046,24 @@ export function App() {
           onSaved={async () => {
             await refresh();
             await openDetail(detail.id);
+          }}
+          onDeleted={async () => {
+            detailSeq.current++;
+            appliedSeq.current = ++requestSeq.current;
+            claims.current.delete(detail.id);
+            setDetail(null);
+            setWhatsappUrl('');
+            setLeadRevision((value) => value + 1);
+            setData((current) =>
+              current
+                ? {
+                    ...current,
+                    opportunities: current.opportunities.filter((lead) => lead.id !== detail.id),
+                  }
+                : current,
+            );
+            setNotice('Lead excluído permanentemente. Não há opção de desfazer.');
+            await refresh();
           }}
           onClaim={() => void claim(detail)}
           onWhatsApp={() => void openWhatsApp(detail)}

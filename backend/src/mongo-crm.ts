@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { enqueuePushEvent } from './push-store.js';
+import { deleteLeadData, wasDeleted, type DeleteLeadInput } from './lead-deletion.js';
 import { MongoStore, MongoTx, mongoUser } from './mongo-store.js';
 import { DomainError, requireManager, type User, type Opportunity } from './types.js';
 import type { CRM, LeadInput } from './crm.js';
@@ -39,6 +40,14 @@ export function publicUser(user: Document): User {
 }
 
 export class MongoOperations {
+  async deleteLead(actor: User, id: string, input: DeleteLeadInput, key: string) {
+    return this.db.atomic(async (tx) => {
+      await this.actor(tx, actor);
+      return this.command(tx, actor, key, { kind: 'lead.delete', id, ...input }, () =>
+        deleteLeadData(tx, actor, id, input),
+      );
+    });
+  }
   constructor(
     public db: MongoStore,
     private clock?: () => Date,
@@ -135,6 +144,12 @@ export class MongoOperations {
     });
     return this.db.atomic(async (tx) => {
       if (authenticatedUser) await this.actor(tx, authenticatedUser);
+      if (await wasDeleted(tx, externalId))
+        throw new DomainError(
+          'EVENT_DELETED',
+          'Esta entrada pertence a um lead excluído permanentemente.',
+          410,
+        );
       const prior = await tx.one('inbound_events', { external_id: externalId });
       if (prior) {
         if (prior.fingerprint !== fingerprint)

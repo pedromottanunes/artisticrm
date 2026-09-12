@@ -164,32 +164,6 @@ em {
   height: 68px;
   object-fit: contain;
 }
-.workspace-label {
-  margin: 0 19px 12px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  display: flex;
-  align-items: center;
-  padding: 12px 9px;
-  gap: 10px;
-}
-.workspace-icon {
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  background: #edb25a13;
-  color: var(--gold);
-  border-radius: 7px;
-}
-.workspace-label strong {
-  font-size: 16px;
-  font-weight: 600;
-}
-.workspace-label > svg {
-  margin-left: auto;
-  color: #73849a;
-}
 .sidebar nav {
   overflow-y: auto;
   padding: 0 13px;
@@ -1470,6 +1444,29 @@ fieldset.form-grid {
   color: #b4a589;
   font-size: 15px;
   line-height: 1.8;
+}
+.button.danger {
+  background: #a52530;
+  color: #fff;
+  border: 1px solid #eb7b84;
+}
+.button.danger:hover:not(:disabled) {
+  background: #86202a;
+}
+.delete-warning {
+  border: 1px solid #eb7b84;
+  background: #351c29;
+  color: #ffe3e5;
+  padding: 16px;
+  border-radius: 12px;
+  overflow-wrap: anywhere;
+}
+.delete-warning h3 {
+  margin-top: 0;
+}
+.delete-warning p {
+  line-height: 1.6;
+  margin: 10px 0 0;
 }
 .form-error {
   font-size: 16px;

@@ -3,6 +3,12 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { openDatabase, migrate, type Database } from '../src/db.js';
 import { Operations } from '../src/operations.js';
+import {
+  checkDeletePermissions,
+  checkDeleteCleanup,
+  checkDeleteShared,
+  checkDeleteWebhook,
+} from './deletion-checks.js';
 import { seedDemo, DEMO_PASSWORD } from '../src/seed.js';
 import { buildApp } from '../src/app.js';
 import type { User, Opportunity } from '../src/types.js';
@@ -26,7 +32,7 @@ before(async () => {
 });
 beforeEach(async () => {
   await db.query(
-    'TRUNCATE whatsapp_inbox,operation_receipts,claims,appointments,inbound_events,audit_events,opportunities,contacts,sessions',
+    'TRUNCATE deleted_inbound_events,push_records,whatsapp_inbox,operation_receipts,claims,appointments,inbound_events,audit_events,opportunities,contacts,sessions',
   );
   await db.query("DELETE FROM users WHERE email NOT LIKE '%@demo.artisti.local'");
   const { hashPassword } = await import('../src/auth.js');
@@ -72,6 +78,15 @@ const update = {
   stage: 'LOST',
   next_action: '',
 };
+
+test('exclusão SQL: autorização, confirmação, versão e API idempotente', () =>
+  checkDeletePermissions(ops, manager, users, DEMO_PASSWORD, () => now));
+test('exclusão SQL: remove dados relacionados e preserva outros leads', () =>
+  checkDeleteCleanup(ops, manager, users, () => now));
+test('exclusão SQL: contato compartilhado e atendimento encerrado', () =>
+  checkDeleteShared(ops, manager, users));
+test('exclusão SQL: reentrega WhatsApp não recria lead excluído', () =>
+  checkDeleteWebhook(ops, manager));
 
 test('transferência é auditada, idempotente e não muda cursor nem marca aceite', async () => {
   const { id } = await lead();

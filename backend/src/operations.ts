@@ -1,5 +1,6 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { CRM } from './crm.js';
+import { deleteLeadData, type DeleteLeadInput } from './lead-deletion.js';
 import type { Sql } from './db.js';
 import { lockActor } from './access.js';
 import { hashPassword, verifyPassword } from './auth.js';
@@ -14,6 +15,15 @@ export interface AppointmentRow {
   version: number;
 }
 export class Operations extends CRM {
+  async deleteLead(actor: User, id: string, input: DeleteLeadInput, key: string) {
+    return this.db.transaction(async (tx) => {
+      await tx.query('SELECT id FROM distribution_settings WHERE id=1 FOR UPDATE');
+      await lockActor(tx, actor, true);
+      return this.command(tx, actor, key, { kind: 'lead.delete', id, ...input }, () =>
+        deleteLeadData(tx, actor, id, input),
+      );
+    });
+  }
   async command<T>(
     tx: Sql,
     user: User,

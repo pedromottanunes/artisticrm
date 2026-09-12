@@ -3,6 +3,7 @@ import type { Database, Sql } from './db.js';
 import { DomainError, requireManager, type Opportunity, type User } from './types.js';
 import { lockActor } from './access.js';
 import { enqueuePushEvent } from './push-store.js';
+import { wasDeleted } from './lead-deletion.js';
 
 const selectOpportunity = `SELECT o.*, c.name, c.phone, c.email, c.instagram, c.is_demo
   FROM opportunities o JOIN contacts c ON c.id = o.contact_id`;
@@ -74,6 +75,12 @@ export class CRM {
         )
       ).rows[0];
       if (authenticatedUser) await lockActor(tx, authenticatedUser);
+      if (await wasDeleted(tx, externalId))
+        throw new DomainError(
+          'EVENT_DELETED',
+          'Esta entrada pertence a um lead excluído permanentemente.',
+          410,
+        );
       const duplicate = (
         await tx.query<{ opportunity_id: string; fingerprint: string }>(
           'SELECT opportunity_id,fingerprint FROM inbound_events WHERE external_id=$1',

@@ -297,6 +297,18 @@ export async function buildApp(
     const key = z.string().min(8).max(100).parse(request.headers['idempotency-key']);
     return crm.claim(request.user, id, body.mode, body.expected_version, key);
   });
+  app.delete('/api/v1/opportunities/:id', async (request) => {
+    const { id } = idParams.parse(request.params);
+    const body = z
+      .object({
+        expected_version: z.number().int().positive(),
+        confirmation: z.literal('EXCLUIR'),
+      })
+      .strict()
+      .parse(request.body);
+    const key = z.string().min(8).max(100).parse(request.headers['idempotency-key']);
+    return crm.deleteLead(request.user, id, body, key);
+  });
   app.post('/api/v1/opportunities/:id/whatsapp-link', async (request) => {
     const row = await crm.detail(request.user, idParams.parse(request.params).id);
     if (row.owner_id !== request.user.id)

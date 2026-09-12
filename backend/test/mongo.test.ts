@@ -17,6 +17,12 @@ import { hashPassword } from '../src/auth.js';
 import type { User } from '../src/types.js';
 import { checkDistribution } from './distribution-checks.js';
 import { checkPush } from './push-checks.js';
+import {
+  checkDeletePermissions,
+  checkDeleteCleanup,
+  checkDeleteShared,
+  checkDeleteWebhook,
+} from './deletion-checks.js';
 
 let replica: MongoMemoryReplSet, db: MongoStore, ops: MongoOperations, manager: User, users: User[];
 let now: Date;
@@ -76,6 +82,14 @@ const input = (n = 1) => ({
   source: 'Cadastro manual',
 });
 const lead = (n = 1) => ops.ingest(input(n), `event-${n}`, manager.id);
+test('exclusão Mongo: autorização, confirmação, versão e API idempotente', () =>
+  checkDeletePermissions(ops, manager, users, password, () => now));
+test('exclusão Mongo: remove dados relacionados e preserva outros leads', () =>
+  checkDeleteCleanup(ops, manager, users, () => now));
+test('exclusão Mongo: contato compartilhado e atendimento encerrado', () =>
+  checkDeleteShared(ops, manager, users));
+test('exclusão Mongo: reentrega WhatsApp não recria lead excluído', () =>
+  checkDeleteWebhook(ops, manager));
 const row = async (id: string) => (await db.one('opportunities', { id }))!;
 const lose = {
   name: 'Contato Teste',

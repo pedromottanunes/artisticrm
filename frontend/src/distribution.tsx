@@ -55,12 +55,14 @@ const dateTime = (value: string) =>
   });
 
 export function Distribution({
+  leadRevision,
   data,
   connected,
   onSaved,
   onNotice,
   onOpen,
 }: {
+  leadRevision: number;
   data: Snapshot;
   connected: boolean;
   onSaved: () => Promise<void>;
@@ -160,7 +162,7 @@ export function Distribution({
       window.removeEventListener('online', resume);
       document.removeEventListener('visibilitychange', resume);
     };
-  }, [query, revision]);
+  }, [query, revision, leadRevision]);
 
   const members = (board?.users ?? []).filter((u) => u.role === 'attendant');
   const ordered = members

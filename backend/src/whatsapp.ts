@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { CRM, LeadInput } from './crm.js';
 import type { MongoOperations } from './mongo-crm.js';
 import { DomainError } from './types.js';
+import { wasDeleted } from './lead-deletion.js';
 
 export interface WhatsAppConfig {
   appSecret: string;
@@ -133,7 +134,8 @@ export class WhatsAppCentral {
     if (db.kind === 'mongo')
       await db.atomic(async (tx) => {
         const now = await tx.now();
-        for (const event of events)
+        for (const event of events) {
+          if (await wasDeleted(tx, event.id)) continue;
           await tx.collection('whatsapp_inbox').updateOne(
             { event_id: event.id },
             {
@@ -151,15 +153,19 @@ export class WhatsAppCentral {
             },
             { upsert: true, session: tx.session },
           );
+        }
       });
     else
       await db.transaction(async (tx) => {
-        for (const event of events)
+        await tx.query('SELECT id FROM distribution_settings WHERE id=1 FOR UPDATE');
+        for (const event of events) {
+          if (await wasDeleted(tx, event.id)) continue;
           await tx.query(
             `INSERT INTO whatsapp_inbox(event_id,phone_number_id,lead)
           VALUES ($1,$2,$3) ON CONFLICT (event_id) DO NOTHING`,
             [event.id, config.phoneNumberId, JSON.stringify(event.lead)],
           );
+        }
       });
   }
 

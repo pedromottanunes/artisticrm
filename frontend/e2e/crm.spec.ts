@@ -107,8 +107,6 @@ test('gestão móvel: todas as telas pela barra inferior, cartões e formulário
       'Leads',
       'Funil',
       'Agenda',
-      'Meta Ads',
-      'Google Ads',
       'Contratos',
       'Configurações',
     ]) {
@@ -128,6 +126,9 @@ test('gestão móvel: todas as telas pela barra inferior, cartões e formulário
       expect(box!.height).toBeGreaterThanOrEqual(44);
     }
   }
+  await expect(navigation.getByRole('button', { name: 'Meta Ads' })).toHaveCount(0);
+  await expect(navigation.getByRole('button', { name: 'Google Ads' })).toHaveCount(0);
+  await expect(page.locator('.sidebar .workspace-label')).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
   await navigation.getByRole('button', { name: /^Leads/ }).click();
   await expect(page.locator('.leads-table tbody tr').first()).toBeVisible();
@@ -163,6 +164,51 @@ test('gestão móvel: todas as telas pela barra inferior, cartões e formulário
   await expect(page.getByRole('heading', { name: 'Este aparelho' })).toBeVisible();
   await page.getByRole('button', { name: 'Sair e acessar outro perfil' }).click();
   await expect(page.getByRole('button', { name: 'Entrar no espaço de trabalho' })).toBeVisible();
+});
+
+test('exclusão permanente: confirmação explícita e atualização imediata no celular', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const name = `Exclusão E2E ${Date.now()}`;
+  const created = await page.request.post('/api/v1/opportunities', {
+    headers: {
+      'X-Artisti-Client': 'web',
+      'Idempotency-Key': `e2e-delete-${Date.now()}`,
+    },
+    data: {
+      name,
+      phone: `554897${String(Date.now()).slice(-7)}`,
+      interest: 'Teste isolado',
+      unit: 'Teste',
+      source: 'Cadastro manual',
+    },
+  });
+  expect(created.status()).toBe(201);
+  const { id } = await created.json();
+  await page.reload();
+  await page
+    .getByRole('navigation', { name: 'Atalhos de gestão' })
+    .getByRole('button', { name: /^Leads/ })
+    .click();
+  const row = page.locator('.leads-table tbody tr').filter({ hasText: name });
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: `Abrir ficha de ${name}`, exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Excluir lead' }).click();
+  const permanent = dialog.getByRole('button', { name: 'Excluir permanentemente' });
+  await expect(permanent).toBeDisabled();
+  await dialog.getByLabel('Digite EXCLUIR para confirmar').fill('EXCLUIR');
+  await expect(permanent).toBeEnabled();
+  await permanent.click();
+  await expect(dialog).toBeHidden();
+  await expect(
+    page.getByText('Lead excluído permanentemente. Não há opção de desfazer.'),
+  ).toBeVisible();
+  await expect(row).toHaveCount(0);
+  expect((await page.request.get(`/api/v1/opportunities/${id}`)).status()).toBe(404);
+  expect(await page.evaluate(() => document.body.scrollWidth <= innerWidth)).toBe(true);
 });
 
 test('PWA: manifesto, ícones, abertura por aviso e cache sem dados privados', async ({ page }) => {
@@ -308,9 +354,8 @@ test('gestão navega, filtra e cadastra lead persistente', async ({ page }) => {
     .click();
   await page.getByLabel('Buscar nome ou telefone').fill('Teste Navegador');
   await expect(page.getByRole('table').getByText('Teste Navegador').first()).toBeVisible();
-  await page.getByRole('button', { name: 'Meta Ads', exact: true }).click();
-  await expect(page.getByRole('heading', { level: 1, name: 'Meta Ads' })).toBeVisible();
-  await expect(page.getByText('Integração ainda não configurada')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Meta Ads', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Google Ads', exact: true })).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 test('atendimento móvel acessa bolsão e confirma aceite sem abrir contato fictício', async ({
@@ -379,9 +424,9 @@ test('painel móvel sem transbordamento e menu utilizável', async ({ page }) =>
   ).toBe(true);
   await page
     .getByRole('navigation', { name: 'Atalhos de gestão' })
-    .getByRole('button', { name: 'Google Ads', exact: true })
+    .getByRole('button', { name: 'Contratos', exact: true })
     .click();
-  await expect(page.getByRole('heading', { level: 1, name: 'Google Ads' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Contratos' })).toBeVisible();
   expect(
     await page.evaluate(
       () =>
