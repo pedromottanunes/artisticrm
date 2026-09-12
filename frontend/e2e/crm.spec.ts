@@ -293,6 +293,58 @@ async function login(page: Page, profile = 'cadu') {
   demoSessions.set(profile, await page.context().cookies());
 }
 
+test('design operacional: quadro, lista e cartões responsivos preservam os mesmos leads', async ({
+  page,
+}) => {
+  await login(page);
+  await page.goto('/#distribution');
+  await expect(page.locator('.operational-card').first()).toBeVisible();
+  const firstName = await page.locator('.operational-contact strong').first().innerText();
+  const cardCount = await page.locator('.operational-card').count();
+  await expect(page.getByRole('button', { name: 'Quadro', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await page.getByRole('button', { name: 'Lista', exact: true }).click();
+  await expect(page.locator('.distribution-table tbody tr')).toHaveCount(cardCount);
+  await expect(page.locator('.distribution-table')).toContainText(firstName);
+  await page.getByRole('button', { name: 'Quadro', exact: true }).click();
+  await expect(page.locator('.operational-card')).toHaveCount(cardCount);
+  for (const width of [320, 390, 768, 1024, 1440, 1920]) {
+    await page.setViewportSize({ width, height: 1000 });
+    const overflow = await page
+      .locator('.operational-card, .operational-lane, .distribution-results, .distribution-history')
+      .evaluateAll((elements) =>
+        elements
+          .filter((element) => {
+            const box = element.getBoundingClientRect();
+            return box.left < 0 || box.right > innerWidth + 1;
+          })
+          .map((element) => element.className),
+      );
+    expect(overflow, `overflow at ${width}px`).toEqual([]);
+    if (width === 390) {
+      const summary = page.locator('.distribution-overview > summary');
+      await expect(page.getByLabel('Resumo da distribuição')).not.toBeVisible();
+      await summary.click();
+      await expect(page.getByLabel('Resumo da distribuição')).toBeVisible();
+      await summary.click();
+      await expect(page.getByLabel('Resumo da distribuição')).not.toBeVisible();
+      await page.evaluate(() => window.scrollTo(0, 0));
+    }
+    if (width === 390 || width === 1920) {
+      await page.screenshot({
+        path: `test-results/artisti-operacional-${width}.png`,
+        fullPage: true,
+      });
+    }
+    if (width <= 1024)
+      await expect(page.getByRole('navigation', { name: 'Atalhos de gestão' })).toBeVisible();
+  }
+  await page.getByRole('button', { name: `Gerenciar ${firstName}`, exact: true }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+});
+
 test('tipografia permanece legível em desktop amplo e celular', async ({ page }) => {
   const unreadableText = async () =>
     page.evaluate(() =>
@@ -493,11 +545,9 @@ test('central de distribuição acompanha reservas, histórico e aceite por outr
     .getByRole('button', { name: 'Distribuição', exact: true })
     .click();
   await expect(page.getByRole('heading', { level: 1, name: 'Distribuição' })).toBeVisible();
-  await expect(page.locator('.distribution-table tbody tr').first()).toBeVisible();
+  await expect(page.locator('.operational-card').first()).toBeVisible();
   await page.getByLabel('Buscar na distribuição').fill('Eduardo Ribeiro');
-  const reservation = page
-    .locator('.distribution-table tbody tr')
-    .filter({ hasText: 'Eduardo Ribeiro' });
+  const reservation = page.locator('.operational-card').filter({ hasText: 'Eduardo Ribeiro' });
   await expect(reservation.locator('.countdown')).toHaveText(/\d{2}:\d{2}/);
   await page.getByRole('button', { name: 'Histórico de Eduardo Ribeiro' }).click();
   const dialog = page.getByRole('dialog');
@@ -508,7 +558,7 @@ test('central de distribuição acompanha reservas, histórico e aceite por outr
     .getByLabel('Situação dos leads')
     .getByRole('button', { name: /^Bolsão/ })
     .click();
-  await expect(page.locator('.distribution-table').getByText('Daniel Rocha')).toBeVisible();
+  await expect(page.locator('.operational-columns').getByText('Daniel Rocha')).toBeVisible();
   const response = await page.request.get('/api/v1/distribution/board?state=POOL');
   const lead = (await response.json()).rows.find(
     (r: { name: string }) => r.name === 'Daniel Rocha',
@@ -522,16 +572,14 @@ test('central de distribuição acompanha reservas, histórico e aceite por outr
       data: { mode: 'pool', expected_version: lead.version },
     });
     expect(claim.status()).toBe(200);
-    await expect(page.locator('.distribution-table').getByText('Daniel Rocha')).toHaveCount(0, {
+    await expect(page.locator('.operational-columns').getByText('Daniel Rocha')).toHaveCount(0, {
       timeout: 12000,
     });
     await page
       .getByLabel('Situação dos leads')
       .getByRole('button', { name: /^Em atendimento/ })
       .click();
-    const assigned = page
-      .locator('.distribution-table tbody tr')
-      .filter({ hasText: 'Daniel Rocha' });
+    const assigned = page.locator('.operational-card').filter({ hasText: 'Daniel Rocha' });
     await expect(assigned.locator('.distribution-owner')).toContainText('Vanessa');
     await page.getByRole('button', { name: 'Histórico de Daniel Rocha' }).click();
     await expect(dialog.getByText(/Lead assumido por Vanessa/)).toBeVisible();
@@ -581,7 +629,7 @@ test('distribuição aceita consulta lenta e usa a mesma fotografia para equipe 
     .getByRole('navigation', { name: 'Menu principal' })
     .getByRole('button', { name: 'Distribuição', exact: true })
     .click();
-  await expect(page.locator('.distribution-table tbody tr').first()).toBeVisible({
+  await expect(page.locator('.operational-card').first()).toBeVisible({
     timeout: 12000,
   });
   // React StrictMode can mount twice, but a slow request must finish rather than
@@ -589,7 +637,7 @@ test('distribuição aceita consulta lenta e usa a mesma fotografia para equipe 
   expect(calls).toBeLessThanOrEqual(2);
   await expect(page.locator('.distribution-rule')).toContainText('10 min');
   await expect(
-    page.locator('.distribution-table tbody tr').first().locator('.distribution-owner'),
+    page.locator('.operational-card').first().locator('.distribution-owner'),
   ).toContainText(firstUser.name);
 });
 
@@ -627,7 +675,7 @@ test('distribuição recupera falhas e descarta respostas de filtros anteriores'
     .click();
   await expect(page.getByRole('alert')).toContainText('Falha temporária');
   unavailable = false;
-  await expect(page.locator('.distribution-table tbody tr').first()).toBeVisible({
+  await expect(page.locator('.operational-card').first()).toBeVisible({
     timeout: 12000,
   });
   await expect(page.getByRole('alert')).toHaveCount(0);

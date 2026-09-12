@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, Clock3, RefreshCw, Search, Settings, Shuffle } from 'lucide-react';
+import {
+  ArrowUpRight,
+  Clock3,
+  RefreshCw,
+  Search,
+  Settings,
+  Shuffle,
+  Columns3,
+  List,
+} from 'lucide-react';
 import { api, type Lead, type Snapshot } from './api';
 import { Avatar, Badge, Countdown, Empty, Modal } from './components';
 import { QueueSettings } from './forms';
@@ -42,8 +51,8 @@ interface Board {
 const tabs = [
   ['ALL', 'Todos'],
   ['RESERVED', 'Aguardando aceite'],
-  ['POOL', 'Bolsão'],
   ['CLAIMED', 'Em atendimento'],
+  ['POOL', 'Bolsão'],
   ['PENDING', 'Sem destino'],
 ] as const;
 const dateTime = (value: string) =>
@@ -71,6 +80,16 @@ export function Distribution({
 }) {
   const [board, setBoard] = useState<Board | null>(null);
   const [state, setState] = useState('ALL');
+  const [view, setView] = useState<'board' | 'list'>('board');
+  const [overviewExpanded, setOverviewExpanded] = useState(
+    () => window.matchMedia('(min-width: 761px)').matches,
+  );
+  useEffect(() => {
+    const viewport = window.matchMedia('(min-width: 761px)');
+    const update = () => setOverviewExpanded(viewport.matches);
+    viewport.addEventListener('change', update);
+    return () => viewport.removeEventListener('change', update);
+  }, []);
   const [attendant, setAttendant] = useState('');
   const [search, setSearch] = useState('');
   const [term, setTerm] = useState('');
@@ -186,6 +205,21 @@ export function Distribution({
 
   return (
     <div className="distribution-board">
+      <div className="workspace-intro">
+        <div>
+          <span className="eyebrow">CENTRAL DE ATENDIMENTOS</span>
+          <h2>Leads, equipe e próximos passos.</h2>
+          <p>Acompanhe as reservas e veja quem está cuidando de cada oportunidade.</p>
+        </div>
+        <div className="view-switch" role="group" aria-label="Visualização da distribuição">
+          <button aria-pressed={view === 'board'} onClick={() => setView('board')}>
+            <Columns3 size={17} /> Quadro
+          </button>
+          <button aria-pressed={view === 'list'} onClick={() => setView('list')}>
+            <List size={17} /> Lista
+          </button>
+        </div>
+      </div>
       <div className="distribution-controls">
         <span className="distribution-rule">
           <Clock3 size={16} /> {board?.settings.timeout_minutes ?? '—'} min para aceite
@@ -221,240 +255,281 @@ export function Distribution({
           {error} Os dados exibidos podem estar desatualizados.
         </div>
       )}
-      <div className="distribution-metrics" aria-label="Resumo da distribuição">
-        {tabs.slice(1).map(([key, label]) => (
-          <button
-            key={key}
-            className={state === key ? 'selected' : ''}
-            onClick={() => changeState(key)}
-            aria-pressed={state === key}
-          >
-            <span>{label}</span>
-            <strong>{count(key)}</strong>
-          </button>
-        ))}
-      </div>
-      <section className="panel distribution-queue" aria-label="Ordem do rodízio">
-        <span>
-          <Shuffle size={18} /> Próximas da fila
-        </span>
-        {ordered.length ? (
-          <ol>
-            {ordered.map((u, i) => (
-              <li key={u.id}>
-                <span className={i === 0 ? 'next-tag' : 'muted'}>
-                  {i === 0 ? 'PRÓXIMA' : i + 1}
-                </span>
-                <Avatar user={u} small />
-                <strong>{u.name}</strong>
-                <small>
-                  {board
-                    ? (board.team.find((t) => t.user_id === u.id && t.state === 'RESERVED')
-                        ?.count ?? 0)
-                    : '—'}{' '}
-                  reservas ·{' '}
-                  {board
-                    ? (board.team.find((t) => t.user_id === u.id && t.state === 'CLAIMED')?.count ??
-                      0)
-                    : '—'}{' '}
-                  atendimentos
-                </small>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p>
-            {board
-              ? 'Nenhuma atendente habilitada. Configure o rodízio para distribuir os próximos leads.'
-              : 'Carregando equipe…'}
-          </p>
-        )}
-      </section>
-      <section className="panel">
-        <div className="distribution-tabs" aria-label="Situação dos leads">
-          {tabs.map(([key, label]) => (
-            <button key={key} aria-pressed={state === key} onClick={() => changeState(key)}>
-              {label} <span>{count(key)}</span>
+      <details
+        className="distribution-overview"
+        open={overviewExpanded}
+        onToggle={(event) => setOverviewExpanded(event.currentTarget.open)}
+      >
+        <summary>
+          Resumo e equipe <span>{count('ALL')} leads abertos</span>
+        </summary>
+        <div className="distribution-metrics" aria-label="Resumo da distribuição">
+          {tabs.slice(1).map(([key, label]) => (
+            <button
+              key={key}
+              className={state === key ? 'selected' : ''}
+              onClick={() => changeState(key)}
+              aria-pressed={state === key}
+            >
+              <span>{label}</span>
+              <strong>{count(key)}</strong>
             </button>
           ))}
         </div>
-        <div className="distribution-filters">
-          <label className="search-field">
-            <Search size={17} />
-            <input
-              aria-label="Buscar na distribuição"
-              placeholder="Nome ou telefone"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              maxLength={100}
-            />
-          </label>
-          <select
-            aria-label="Filtrar responsável na distribuição"
-            value={attendant}
-            onChange={(e) => {
-              setAttendant(e.target.value);
-              setPage(1);
-            }}
-          >
-            <option value="">Todas as atendentes</option>
-            {members.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name}
-                {!u.active ? ' (inativa)' : !u.queue_enabled ? ' (pausada)' : ''}
-              </option>
-            ))}
-          </select>
-        </div>
-        {!board ? (
-          <p className="distribution-loading" role="status">
-            {error ? 'Não foi possível carregar a distribuição.' : 'Carregando leads…'}
-          </p>
-        ) : (
-          <>
-            <div className="table-scroll">
-              <table className="leads-table distribution-table">
-                <thead>
-                  <tr>
-                    <th>Lead / origem</th>
-                    <th>Recebido</th>
-                    <th>Responsável</th>
-                    <th>Prazo / situação</th>
-                    <th>Ações</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {board.rows.map((lead) => {
-                    const responsible =
-                      lead.state === 'RESERVED'
-                        ? lead.reserved_to
-                        : lead.state === 'CLAIMED'
-                          ? lead.owner_id
-                          : null;
-                    const user = board.users.find((u) => u.id === responsible);
-                    return (
-                      <tr key={lead.id}>
-                        <td data-label="Lead / origem">
-                          <button className="distribution-contact" onClick={() => onOpen(lead.id)}>
-                            <strong>{lead.name}</strong>
-                            <small>{lead.source}</small>
-                          </button>
-                        </td>
-                        <td data-label="Recebido">
-                          <time dateTime={lead.created_at}>{dateTime(lead.created_at)}</time>
-                        </td>
-                        <td data-label="Responsável">
-                          {user ? (
-                            <span className="distribution-owner">
-                              <Avatar user={user} small />
-                              {user.name}
-                            </span>
-                          ) : lead.state === 'POOL' ? (
-                            'Disponível para a equipe'
-                          ) : (
-                            'Aguardando atribuição'
-                          )}
-                          {lead.needs_review && (
-                            <small className="distribution-review">Revisão da gestão</small>
-                          )}
-                        </td>
-                        <td data-label="Prazo / situação">
-                          <Badge state={lead.state} />
-                          {lead.state === 'RESERVED' &&
-                            (Date.parse(lead.expires_at!) <= now ? (
-                              <small className="distribution-review">
-                                Prazo encerrado · atualizando
-                              </small>
-                            ) : (
-                              <Countdown lead={lead} now={now} />
-                            ))}
-                          {lead.state === 'CLAIMED' && (
-                            <small className="distribution-claimed">
-                              {lead.claimed_at
-                                ? `Aceito ${dateTime(lead.claimed_at)}`
-                                : 'Atribuído pela gestão'}
-                            </small>
-                          )}
-                        </td>
-                        <td data-label="Ações">
-                          <button
-                            className="text-link"
-                            onClick={() => onOpen(lead.id, true)}
-                            aria-label={`Histórico de ${lead.name}`}
-                          >
-                            Histórico <ArrowUpRight size={15} />
-                          </button>
-                          <button
-                            className="text-link distribution-open"
-                            onClick={() => onOpen(lead.id)}
-                            aria-label={`Gerenciar ${lead.name}`}
-                          >
-                            Gerenciar
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {!board.rows.length && (
-              <Empty
-                title="Nenhum lead nesta seleção"
-                description="Novos leads e mudanças de situação aparecem automaticamente."
-              />
-            )}
-            <div className="distribution-pagination">
-              <span>
-                {board.total ? (board.page - 1) * board.page_size + 1 : 0}–
-                {Math.min(board.page * board.page_size, board.total)} de {board.total} leads
-              </span>
-              <button
-                className="button outline compact"
-                disabled={busy || board.page <= 1}
-                onClick={() => setPage(board.page - 1)}
-              >
-                Anterior
-              </button>
-              <span>
-                {board.page} / {Math.max(1, Math.ceil(board.total / board.page_size))}
-              </span>
-              <button
-                className="button outline compact"
-                disabled={busy || board.page * board.page_size >= board.total}
-                onClick={() => setPage(board.page + 1)}
-              >
-                Próxima
-              </button>
-            </div>
-          </>
-        )}
-      </section>
-      <details className="panel distribution-history">
-        <summary>
-          Últimas movimentações <span>20 mais recentes · toda a central</span>
-        </summary>
-        <ol>
-          {board?.events.map((event) => (
-            <li key={event.id}>
-              <time dateTime={event.created_at}>{dateTime(event.created_at)}</time>
-              <div>
-                {event.opportunity_id ? (
-                  <button className="text-link" onClick={() => onOpen(event.opportunity_id!, true)}>
-                    {event.name ?? 'Lead'} <ArrowUpRight size={14} />
+        <p className="distribution-scope">
+          Indicadores e equipe: todos os leads abertos. Busca e filtros alteram os cartões e a
+          lista.
+        </p>
+        <section className="panel distribution-queue" aria-label="Ordem do rodízio">
+          <span>
+            <Shuffle size={18} /> Próximas da fila
+          </span>
+          {ordered.length ? (
+            <ol>
+              {ordered.map((u, i) => (
+                <li key={u.id}>
+                  <span className={i === 0 ? 'next-tag' : 'muted'}>
+                    {i === 0 ? 'PRÓXIMA' : i + 1}
+                  </span>
+                  <Avatar user={u} small />
+                  <button
+                    className="team-filter"
+                    aria-label={`Filtrar atendimentos de ${u.name}`}
+                    aria-pressed={attendant === u.id}
+                    onClick={() => {
+                      setAttendant(attendant === u.id ? '' : u.id);
+                      setPage(1);
+                    }}
+                  >
+                    {u.name}
                   </button>
-                ) : (
-                  <strong>Configuração da equipe</strong>
-                )}
-                <p>{event.description}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
-        {board && !board.events.length && (
-          <p className="distribution-loading">Nenhuma movimentação registrada.</p>
-        )}
+                  <small>
+                    {board
+                      ? (board.team.find((t) => t.user_id === u.id && t.state === 'RESERVED')
+                          ?.count ?? 0)
+                      : '—'}{' '}
+                    reservas ·{' '}
+                    {board
+                      ? (board.team.find((t) => t.user_id === u.id && t.state === 'CLAIMED')
+                          ?.count ?? 0)
+                      : '—'}{' '}
+                    atendimentos
+                  </small>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p>
+              {board
+                ? 'Nenhuma atendente habilitada. Configure o rodízio para distribuir os próximos leads.'
+                : 'Carregando equipe…'}
+            </p>
+          )}
+        </section>
       </details>
+      <div className={`distribution-workspace ${view === 'board' ? 'is-board' : ''}`}>
+        <section className="panel distribution-results" aria-label="Leads da distribuição">
+          <div className="distribution-tabs" aria-label="Situação dos leads">
+            {tabs.map(([key, label]) => (
+              <button key={key} aria-pressed={state === key} onClick={() => changeState(key)}>
+                {label} <span>{count(key)}</span>
+              </button>
+            ))}
+          </div>
+          <div className="distribution-filters">
+            <label className="search-field">
+              <Search size={17} />
+              <input
+                aria-label="Buscar na distribuição"
+                placeholder="Nome ou telefone"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                maxLength={100}
+              />
+            </label>
+            <select
+              aria-label="Filtrar responsável na distribuição"
+              value={attendant}
+              onChange={(e) => {
+                setAttendant(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">Todas as atendentes</option>
+              {members.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                  {!u.active ? ' (inativa)' : !u.queue_enabled ? ' (pausada)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+          {!board ? (
+            <p className="distribution-loading" role="status">
+              {error ? 'Não foi possível carregar a distribuição.' : 'Carregando leads…'}
+            </p>
+          ) : (
+            <>
+              {view === 'board' ? (
+                <OperationalColumns
+                  board={board}
+                  state={state}
+                  now={now}
+                  onOpen={onOpen}
+                  onSelect={changeState}
+                />
+              ) : (
+                <div className="table-scroll">
+                  <table className="leads-table distribution-table">
+                    <thead>
+                      <tr>
+                        <th>Lead / origem</th>
+                        <th>Recebido</th>
+                        <th>Responsável</th>
+                        <th>Prazo / situação</th>
+                        <th>Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {board.rows.map((lead) => {
+                        const responsible =
+                          lead.state === 'RESERVED'
+                            ? lead.reserved_to
+                            : lead.state === 'CLAIMED'
+                              ? lead.owner_id
+                              : null;
+                        const user = board.users.find((u) => u.id === responsible);
+                        return (
+                          <tr key={lead.id}>
+                            <td data-label="Lead / origem">
+                              <button
+                                className="distribution-contact"
+                                onClick={() => onOpen(lead.id)}
+                              >
+                                <strong>{lead.name}</strong>
+                                <small>{lead.source}</small>
+                              </button>
+                            </td>
+                            <td data-label="Recebido">
+                              <time dateTime={lead.created_at}>{dateTime(lead.created_at)}</time>
+                            </td>
+                            <td data-label="Responsável">
+                              {user ? (
+                                <span className="distribution-owner">
+                                  <Avatar user={user} small />
+                                  {user.name}
+                                </span>
+                              ) : lead.state === 'POOL' ? (
+                                'Disponível para a equipe'
+                              ) : (
+                                'Aguardando atribuição'
+                              )}
+                              {lead.needs_review && (
+                                <small className="distribution-review">Revisão da gestão</small>
+                              )}
+                            </td>
+                            <td data-label="Prazo / situação">
+                              <Badge state={lead.state} />
+                              {lead.state === 'RESERVED' &&
+                                (Date.parse(lead.expires_at!) <= now ? (
+                                  <small className="distribution-review">
+                                    Prazo encerrado · atualizando
+                                  </small>
+                                ) : (
+                                  <Countdown lead={lead} now={now} />
+                                ))}
+                              {lead.state === 'CLAIMED' && (
+                                <small className="distribution-claimed">
+                                  {lead.claimed_at
+                                    ? `Aceito ${dateTime(lead.claimed_at)}`
+                                    : 'Atribuído pela gestão'}
+                                </small>
+                              )}
+                            </td>
+                            <td data-label="Ações">
+                              <button
+                                className="text-link"
+                                onClick={() => onOpen(lead.id, true)}
+                                aria-label={`Histórico de ${lead.name}`}
+                              >
+                                Histórico <ArrowUpRight size={15} />
+                              </button>
+                              <button
+                                className="text-link distribution-open"
+                                onClick={() => onOpen(lead.id)}
+                                aria-label={`Gerenciar ${lead.name}`}
+                              >
+                                Gerenciar
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {view === 'list' && !board.rows.length && (
+                <Empty
+                  title="Nenhum lead nesta seleção"
+                  description="Novos leads e mudanças de situação aparecem automaticamente."
+                />
+              )}
+              <div className="distribution-pagination">
+                <span>
+                  {board.total ? (board.page - 1) * board.page_size + 1 : 0}–
+                  {Math.min(board.page * board.page_size, board.total)} de {board.total} leads
+                </span>
+                <button
+                  className="button outline compact"
+                  disabled={busy || board.page <= 1}
+                  onClick={() => setPage(board.page - 1)}
+                >
+                  Anterior
+                </button>
+                <span>
+                  {board.page} / {Math.max(1, Math.ceil(board.total / board.page_size))}
+                </span>
+                <button
+                  className="button outline compact"
+                  disabled={busy || board.page * board.page_size >= board.total}
+                  onClick={() => setPage(board.page + 1)}
+                >
+                  Próxima
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+        <details className="panel distribution-history" open>
+          <summary>
+            Últimas movimentações <span>20 mais recentes · toda a central</span>
+          </summary>
+          <ol>
+            {board?.events.map((event) => (
+              <li key={event.id}>
+                <time dateTime={event.created_at}>{dateTime(event.created_at)}</time>
+                <div>
+                  {event.opportunity_id ? (
+                    <button
+                      className="text-link"
+                      onClick={() => onOpen(event.opportunity_id!, true)}
+                    >
+                      {event.name ?? 'Lead'} <ArrowUpRight size={14} />
+                    </button>
+                  ) : (
+                    <strong>Configuração da equipe</strong>
+                  )}
+                  <p>{event.description}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+          {board && !board.events.length && (
+            <p className="distribution-loading">Nenhuma movimentação registrada.</p>
+          )}
+        </details>
+      </div>
       <p className="distribution-caption">
         Atualização a cada 5 segundos. Aceite no CRM não confirma envio de mensagem no WhatsApp.
       </p>
@@ -472,6 +547,141 @@ export function Distribution({
           />
         </Modal>
       )}
+    </div>
+  );
+}
+
+function OperationalColumns({
+  board,
+  state,
+  now,
+  onOpen,
+  onSelect,
+}: {
+  board: Board;
+  state: string;
+  now: number;
+  onOpen: (id: string, history?: boolean) => void;
+  onSelect: (state: string) => void;
+}) {
+  const columns = [
+    ['RESERVED', 'Aguardando aceite', 'Reservas com prazo para assumir'],
+    ['CLAIMED', 'Em atendimento', 'Oportunidades com responsável'],
+    ['POOL', 'Bolsão', 'Disponíveis para a equipe'],
+    ['PENDING', 'Sem destino', 'Precisam de atenção da gestão'],
+  ].filter(([key]) =>
+    state === 'ALL' ? key !== 'PENDING' || board.counts.PENDING > 0 : key === state,
+  );
+  return (
+    <div className={`operational-columns ${state !== 'ALL' ? 'single-column' : ''}`}>
+      {columns.map(([key, title, subtitle]) => {
+        const rows = board.rows.filter((lead) => lead.state === key);
+        return (
+          <section
+            className={`operational-lane lane-${key.toLowerCase()}`}
+            key={key}
+            aria-label={title}
+          >
+            <header className="lane-heading">
+              <div>
+                <h3>{title}</h3>
+                <p>{subtitle}</p>
+              </div>
+              <span aria-label={`${rows.length} nesta página`}>{rows.length}</span>
+            </header>
+            <div className="lane-cards" role="region" aria-label={`Cartões: ${title}`} tabIndex={0}>
+              {rows.map((lead) => {
+                const user = board.users.find(
+                  (u) => u.id === (lead.state === 'RESERVED' ? lead.reserved_to : lead.owner_id),
+                );
+                return (
+                  <article className={`operational-card card-${key.toLowerCase()}`} key={lead.id}>
+                    <div className="operational-card-status">
+                      <Badge state={lead.state} />
+                      {lead.state === 'RESERVED' &&
+                        (Date.parse(lead.expires_at!) <= now ? (
+                          <small className="distribution-review">
+                            Prazo encerrado · atualizando
+                          </small>
+                        ) : (
+                          <Countdown lead={lead} now={now} />
+                        ))}
+                    </div>
+                    <button
+                      className="distribution-contact operational-contact"
+                      onClick={() => onOpen(lead.id)}
+                    >
+                      <Avatar name={lead.name} />
+                      <span>
+                        <strong>{lead.name}</strong>
+                        <small>{lead.source}</small>
+                      </span>
+                    </button>
+                    <div className="operational-card-meta">
+                      <span>
+                        Recebido <time dateTime={lead.created_at}>{dateTime(lead.created_at)}</time>
+                      </span>
+                      {user ? (
+                        <span className="distribution-owner">
+                          <Avatar user={user} small />
+                          {user.name}
+                        </span>
+                      ) : (
+                        <span>
+                          {lead.state === 'POOL'
+                            ? 'Disponível para a equipe'
+                            : 'Aguardando atribuição'}
+                        </span>
+                      )}
+                      {lead.needs_review && (
+                        <small className="distribution-review">Revisão da gestão</small>
+                      )}
+                      {lead.state === 'CLAIMED' && (
+                        <small>
+                          {lead.claimed_at
+                            ? `Aceito ${dateTime(lead.claimed_at)}`
+                            : 'Atribuído pela gestão'}
+                        </small>
+                      )}
+                    </div>
+                    <footer>
+                      <button
+                        className="text-link"
+                        onClick={() => onOpen(lead.id, true)}
+                        aria-label={`Histórico de ${lead.name}`}
+                      >
+                        Histórico
+                      </button>
+                      <button
+                        className="button outline compact"
+                        onClick={() => onOpen(lead.id)}
+                        aria-label={`Gerenciar ${lead.name}`}
+                      >
+                        Gerenciar <ArrowUpRight size={15} />
+                      </button>
+                    </footer>
+                  </article>
+                );
+              })}
+              {!rows.length && (
+                <p className="lane-empty">
+                  {board.counts[key] > 0
+                    ? 'Nenhum lead desta situação nesta página ou filtro.'
+                    : 'Nenhum lead nesta situação.'}
+                </p>
+              )}
+              {state === 'ALL' && board.counts[key] > rows.length && (
+                <button className="lane-see-all" onClick={() => onSelect(key)}>
+                  Ver esta situação <ArrowUpRight size={14} />
+                </button>
+              )}
+            </div>
+          </section>
+        );
+      })}
+      <p className="board-page-note">
+        Cartões desta página · use os filtros ou a paginação para consultar os demais leads.
+      </p>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, type FormEvent } from 'react';
+import { Fragment, useState, useEffect, useCallback, useRef, type FormEvent } from 'react';
 import {
   LayoutDashboard,
   Users,
@@ -535,6 +535,16 @@ export function App() {
           )}
           {activePage === 'overview' && (
             <>
+              <div className="workspace-intro">
+                <div>
+                  <span className="eyebrow">GESTÃO COMERCIAL</span>
+                  <h2>Sua operação em um olhar.</h2>
+                  <p>Oportunidades, atendimentos e distribuição da equipe.</p>
+                </div>
+                <button className="button outline" onClick={() => navigate('distribution')}>
+                  <Shuffle size={17} /> Abrir central de atendimentos <ArrowUpRight size={16} />
+                </button>
+              </div>
               <div className="stats-grid">
                 {[
                   {
@@ -856,44 +866,70 @@ export function App() {
                 </p>
               </div>
               <div className="lead-cards">
-                {(activePage === 'pool' ? pool : owned).map((lead) => (
-                  <article
-                    className={`lead-card ${lead.state === 'RESERVED' ? 'reserved-card' : ''}`}
-                    key={lead.id}
-                  >
-                    <div className="lead-card-top">
-                      <Badge state={lead.state} />
-                      {lead.state === 'RESERVED' ? (
-                        <Countdown lead={lead} now={now} />
-                      ) : (
-                        <span className="muted">{dateLabel(lead.created_at)}</span>
-                      )}
-                    </div>
-                    <button className="lead-card-identity" onClick={() => void openDetail(lead.id)}>
-                      <Avatar name={lead.name} />
-                      <span>
-                        <h2>{lead.name}</h2>
-                        <p>{lead.interest || 'Interesse a identificar'}</p>
-                      </span>
-                      <ArrowUpRight size={17} />
-                    </button>
-                    <div className="lead-card-info">
-                      <Source value={lead.source} />
-                      <span>{lead.unit}</span>
-                    </div>
-                    {lead.next_action && (
-                      <p className="next-action">
-                        <Clock3 size={14} />
-                        {lead.next_action}
-                      </p>
+                {(activePage === 'pool'
+                  ? pool
+                  : [...owned].sort(
+                      (a, b) =>
+                        Number(b.state === 'RESERVED') - Number(a.state === 'RESERVED') ||
+                        (a.state === 'RESERVED' && b.state === 'RESERVED'
+                          ? Date.parse(a.expires_at!) - Date.parse(b.expires_at!)
+                          : 0),
+                    )
+                ).map((lead, index, items) => (
+                  <Fragment key={lead.id}>
+                    {(index === 0 ||
+                      (items[index - 1].state === 'RESERVED') !== (lead.state === 'RESERVED')) && (
+                      <div className="lead-section-heading">
+                        <h2>
+                          {activePage === 'pool'
+                            ? 'Oportunidades disponíveis'
+                            : lead.state === 'RESERVED'
+                              ? 'Prioridade para você'
+                              : 'Seus atendimentos'}
+                        </h2>
+                      </div>
                     )}
-                    <footer>
-                      <button className="text-link" onClick={() => void openDetail(lead.id)}>
-                        Ver ficha
+                    <article
+                      className={`lead-card ${lead.state === 'RESERVED' ? 'reserved-card' : ''}`}
+                      key={lead.id}
+                    >
+                      <div className="lead-card-top">
+                        <Badge state={lead.state} />
+                        {lead.state === 'RESERVED' ? (
+                          <Countdown lead={lead} now={now} />
+                        ) : (
+                          <span className="muted">{dateLabel(lead.created_at)}</span>
+                        )}
+                      </div>
+                      <button
+                        className="lead-card-identity"
+                        onClick={() => void openDetail(lead.id)}
+                      >
+                        <Avatar name={lead.name} />
+                        <span>
+                          <h2>{lead.name}</h2>
+                          <p>{lead.interest || 'Interesse a identificar'}</p>
+                        </span>
+                        <ArrowUpRight size={17} />
                       </button>
-                      {actionButton(lead)}
-                    </footer>
-                  </article>
+                      <div className="lead-card-info">
+                        <Source value={lead.source} />
+                        <span>{lead.unit}</span>
+                      </div>
+                      {lead.next_action && (
+                        <p className="next-action">
+                          <Clock3 size={14} />
+                          {lead.next_action}
+                        </p>
+                      )}
+                      <footer>
+                        <button className="text-link" onClick={() => void openDetail(lead.id)}>
+                          Ver ficha
+                        </button>
+                        {actionButton(lead)}
+                      </footer>
+                    </article>
+                  </Fragment>
                 ))}
               </div>
               {!(activePage === 'pool' ? pool : owned).length && (
