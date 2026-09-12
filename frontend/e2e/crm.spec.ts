@@ -345,6 +345,55 @@ test('design operacional: quadro, lista e cartões responsivos preservam os mesm
   await expect(page.getByRole('dialog')).toBeVisible();
 });
 
+test('distribuição mantém a estrutura visível enquanto troca os resultados', async ({ page }) => {
+  await login(page);
+  await page.goto('/#distribution');
+  await expect(page.locator('.operational-card').first()).toBeVisible();
+
+  const previousName = await page.locator('.operational-contact strong').first().innerText();
+  const previousCardCount = await page.locator('.operational-card').count();
+  await page.locator('.workspace-intro').evaluate((element) => {
+    element.setAttribute('data-stability-check', 'preserved');
+  });
+
+  let releaseResults!: () => void;
+  const resultsGate = new Promise<void>((resolve) => {
+    releaseResults = resolve;
+  });
+  await page.route('**/api/v1/distribution/board?*', async (route) => {
+    const requestedState = new URL(route.request().url()).searchParams.get('state');
+    if (requestedState !== 'POOL') {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    await resultsGate;
+    await route.fulfill({ response });
+  });
+
+  const requested = page.waitForRequest(
+    (request) => new URL(request.url()).searchParams.get('state') === 'POOL',
+  );
+  await page
+    .getByLabel('Situação dos leads')
+    .getByRole('button', { name: /^Bolsão/ })
+    .click();
+  await requested;
+
+  await expect(page.getByText('Atualizando resultados…', { exact: true })).toBeVisible();
+  await expect(page.locator('.workspace-intro')).toHaveAttribute(
+    'data-stability-check',
+    'preserved',
+  );
+  await expect(page.locator('.operational-card')).toHaveCount(previousCardCount);
+  await expect(page.locator('.operational-contact strong').first()).toHaveText(previousName);
+
+  releaseResults();
+  await expect(page.getByText('Atualizando resultados…', { exact: true })).toHaveCount(0);
+  await expect(page.locator('.operational-lane')).toHaveAttribute('aria-label', 'Bolsão');
+  await expect(page.locator('.operational-card').first()).toBeVisible();
+});
+
 test('tipografia permanece legível em desktop amplo e celular', async ({ page }) => {
   const unreadableText = async () =>
     page.evaluate(() =>

@@ -80,6 +80,8 @@ export function Distribution({
 }) {
   const [board, setBoard] = useState<Board | null>(null);
   const [state, setState] = useState('ALL');
+  const [displayState, setDisplayState] = useState('ALL');
+  const [loadedQuery, setLoadedQuery] = useState('');
   const [view, setView] = useState<'board' | 'list'>('board');
   const [overviewExpanded, setOverviewExpanded] = useState(
     () => window.matchMedia('(min-width: 761px)').matches,
@@ -100,7 +102,6 @@ export function Distribution({
   const [settings, setSettings] = useState<Snapshot | null>(null);
   const [now, setNow] = useState(0);
   const clock = useRef({ server: 0, monotonic: 0 });
-  const lastQuery = useRef('');
   const query = new URLSearchParams({
     state,
     attendant,
@@ -126,8 +127,6 @@ export function Distribution({
     let controller: AbortController | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let deadline: ReturnType<typeof setTimeout> | undefined;
-    if (lastQuery.current !== query) setBoard(null);
-    lastQuery.current = query;
     const load = async () => {
       if (disposed || inFlight) return;
       clearTimeout(timer);
@@ -145,6 +144,8 @@ export function Distribution({
         });
         if (disposed) return;
         setBoard(result);
+        setDisplayState(state);
+        setLoadedQuery(query);
         setError('');
         clock.current = { server: Date.parse(result.server_time), monotonic: performance.now() };
         setNow(clock.current.server);
@@ -202,6 +203,7 @@ export function Distribution({
     setState(value);
     setPage(1);
   };
+  const resultsUpdating = !!board && loadedQuery !== query;
 
   return (
     <div className="distribution-board">
@@ -328,7 +330,16 @@ export function Distribution({
         </section>
       </details>
       <div className={`distribution-workspace ${view === 'board' ? 'is-board' : ''}`}>
-        <section className="panel distribution-results" aria-label="Leads da distribuição">
+        <section
+          className="panel distribution-results"
+          aria-label="Leads da distribuição"
+          aria-busy={resultsUpdating}
+        >
+          {resultsUpdating && (
+            <span className="results-updating" role="status">
+              Atualizando resultados…
+            </span>
+          )}
           <div className="distribution-tabs" aria-label="Situação dos leads">
             {tabs.map(([key, label]) => (
               <button key={key} aria-pressed={state === key} onClick={() => changeState(key)}>
@@ -373,7 +384,7 @@ export function Distribution({
               {view === 'board' ? (
                 <OperationalColumns
                   board={board}
-                  state={state}
+                  state={displayState}
                   now={now}
                   onOpen={onOpen}
                   onSelect={changeState}

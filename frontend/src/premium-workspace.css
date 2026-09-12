@@ -233,6 +233,22 @@
 }
 .distribution-results {
   background: transparent;
+  position: relative;
+}
+.results-updating {
+  position: absolute;
+  z-index: 4;
+  top: 11px;
+  right: 14px;
+  padding: 7px 10px;
+  border: 1px solid #edb25a40;
+  border-radius: 5px;
+  background: #081b2af2;
+  color: #e9c48c;
+  font-size: 12px;
+  line-height: 1.3;
+  box-shadow: 0 8px 22px #020b1366;
+  pointer-events: none;
 }
 .distribution-tabs {
   padding: 8px;
@@ -657,6 +673,11 @@
   }
   .distribution-results {
     border: 0;
+  }
+  .results-updating {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 66px);
+    right: 12px;
   }
   .distribution-tabs {
     padding: 0 0 12px;
