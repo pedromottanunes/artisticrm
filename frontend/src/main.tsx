@@ -9,6 +9,7 @@ import './styles.css';
 import './responsive.css';
 import './mobile-app.css';
 import './premium-workspace.css';
+import './attendant-leads.css';
 import { registerDeviceWorker } from './pwa';
 void registerDeviceWorker();
 ReactDOM.createRoot(document.getElementById('root')!).render(

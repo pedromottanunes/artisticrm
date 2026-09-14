@@ -101,6 +101,14 @@ test('gestão móvel: todas as telas pela barra inferior, cartões e formulário
   await expect(page.locator('.sidebar')).toBeHidden();
   for (const width of [320, 390, 768, 1024]) {
     await page.setViewportSize({ width, height: 844 });
+    const logo = page.locator('.mobile-header-logo');
+    await expect(logo).toBeVisible();
+    expect(
+      await logo.evaluate((element: HTMLImageElement) => element.naturalWidth),
+    ).toBeGreaterThan(0);
+    expect((await logo.boundingBox())!.x + (await logo.boundingBox())!.width).toBeLessThanOrEqual(
+      (await page.locator('.breadcrumbs').boundingBox())!.x,
+    );
     for (const name of [
       'Visão geral',
       'Distribuição',
@@ -465,6 +473,15 @@ test('atendimento móvel acessa bolsão e confirma aceite sem abrir contato fict
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page, 'vanessa');
   await expect(page.getByRole('heading', { name: 'Meus atendimentos' })).toBeVisible();
+  await expect(page.locator('.mobile-header-logo')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Lista', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(page.locator('.attendant-summary')).toHaveText(/\d+ novo[s]? lead[s]?/);
+  await expect(
+    page.getByText('Assuma dentro do prazo para manter a oportunidade com você.'),
+  ).toHaveCount(0);
   await page
     .getByRole('navigation', { name: 'Atalhos de atendimento' })
     .getByRole('button', { name: 'Bolsão' })
@@ -486,6 +503,27 @@ test('atendimento móvel acessa bolsão e confirma aceite sem abrir contato fict
     .getByRole('button', { name: 'Meus leads' })
     .click();
   await expect(page.getByText('WhatsApp', { exact: true }).first()).toBeVisible();
+  const firstLead = page.locator('.attendant-lead').first();
+  const name = await firstLead.locator('.attendant-lead-details strong').innerText();
+  expect((await firstLead.boundingBox())!.height).toBeLessThanOrEqual(100);
+  await expect(firstLead.getByRole('button', { name: 'Ver ficha', exact: true })).toHaveCount(0);
+  await expect(firstLead.locator('.source, .lead-card-info, .next-action, time')).toHaveCount(0);
+  await firstLead.getByRole('button', { name: `Abrir ficha de ${name}`, exact: true }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Fechar janela' }).click();
+  const count = await page.locator('.attendant-lead').count();
+  await page.getByRole('button', { name: 'Cartões', exact: true }).click();
+  await expect(page.locator('.attendant-lead')).toHaveCount(count);
+  await expect(firstLead.locator('.attendant-lead-details strong')).toHaveText(name);
+  expect((await firstLead.boundingBox())!.height).toBeLessThanOrEqual(180);
+  await page.screenshot({ path: 'test-results/atendente-cartoes-compactos.png', fullPage: true });
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Cartões', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await page.getByRole('button', { name: 'Lista', exact: true }).click();
+  await page.screenshot({ path: 'test-results/atendente-lista-compacta.png', fullPage: true });
 });
 test('ficha edita cadastro, agenda avaliação e preserva histórico', async ({ page }) => {
   await login(page);

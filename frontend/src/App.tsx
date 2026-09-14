@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useCallback, useRef, type FormEvent } from 'react';
+import { useState, useEffect, useCallback, useRef, type FormEvent } from 'react';
 import {
   LayoutDashboard,
   Users,
@@ -40,6 +40,7 @@ import {
 } from './components';
 import { LeadForm, LeadDetail } from './forms';
 import { Distribution } from './distribution';
+import { AttendantLeads } from './attendant-leads';
 import { Team, PasswordChange } from './operations';
 import { MobileNavigation } from './mobile-navigation';
 import { DevicePanel, disconnectPush, PushBinding } from './pwa';
@@ -494,6 +495,13 @@ export function App() {
       </aside>
       <div className="main-shell">
         <header className="topbar">
+          <img
+            className="mobile-header-logo"
+            src="/artisti-logo.webp"
+            alt="Artisti Transplante Capilar"
+            width="104"
+            height="34"
+          />
           <div className="breadcrumbs">
             <h1>{activePage === 'mine' ? 'Meus atendimentos' : title}</h1>
           </div>
@@ -849,102 +857,12 @@ export function App() {
           )}
 
           {(activePage === 'mine' || activePage === 'pool') && (
-            <>
-              <div className="attendant-summary">
-                <div>
-                  <span className="status-dot" />
-                  <strong>
-                    {activePage === 'pool'
-                      ? `${pool.length} oportunidades disponíveis`
-                      : `${owned.filter((l) => l.state === 'RESERVED').length} novas reservas para você`}
-                  </strong>
-                </div>
-                <p>
-                  {activePage === 'pool'
-                    ? 'O telefone é liberado somente após o aceite.'
-                    : 'Assuma dentro do prazo para manter a oportunidade com você.'}
-                </p>
-              </div>
-              <div className="lead-cards">
-                {(activePage === 'pool'
-                  ? pool
-                  : [...owned].sort(
-                      (a, b) =>
-                        Number(b.state === 'RESERVED') - Number(a.state === 'RESERVED') ||
-                        (a.state === 'RESERVED' && b.state === 'RESERVED'
-                          ? Date.parse(a.expires_at!) - Date.parse(b.expires_at!)
-                          : 0),
-                    )
-                ).map((lead, index, items) => (
-                  <Fragment key={lead.id}>
-                    {(index === 0 ||
-                      (items[index - 1].state === 'RESERVED') !== (lead.state === 'RESERVED')) && (
-                      <div className="lead-section-heading">
-                        <h2>
-                          {activePage === 'pool'
-                            ? 'Oportunidades disponíveis'
-                            : lead.state === 'RESERVED'
-                              ? 'Prioridade para você'
-                              : 'Seus atendimentos'}
-                        </h2>
-                      </div>
-                    )}
-                    <article
-                      className={`lead-card ${lead.state === 'RESERVED' ? 'reserved-card' : ''}`}
-                      key={lead.id}
-                    >
-                      <div className="lead-card-top">
-                        <Badge state={lead.state} />
-                        {lead.state === 'RESERVED' ? (
-                          <Countdown lead={lead} now={now} />
-                        ) : (
-                          <span className="muted">{dateLabel(lead.created_at)}</span>
-                        )}
-                      </div>
-                      <button
-                        className="lead-card-identity"
-                        onClick={() => void openDetail(lead.id)}
-                      >
-                        <Avatar name={lead.name} />
-                        <span>
-                          <h2>{lead.name}</h2>
-                          <p>{lead.interest || 'Interesse a identificar'}</p>
-                        </span>
-                        <ArrowUpRight size={17} />
-                      </button>
-                      <div className="lead-card-info">
-                        <Source value={lead.source} />
-                        <span>{lead.unit}</span>
-                      </div>
-                      {lead.next_action && (
-                        <p className="next-action">
-                          <Clock3 size={14} />
-                          {lead.next_action}
-                        </p>
-                      )}
-                      <footer>
-                        <button className="text-link" onClick={() => void openDetail(lead.id)}>
-                          Ver ficha
-                        </button>
-                        {actionButton(lead)}
-                      </footer>
-                    </article>
-                  </Fragment>
-                ))}
-              </div>
-              {!(activePage === 'pool' ? pool : owned).length && (
-                <section className="panel">
-                  <Empty
-                    title={
-                      activePage === 'pool'
-                        ? 'Tudo encaminhado por aqui'
-                        : 'Nenhum atendimento pendente'
-                    }
-                    description="A tela consulta o servidor a cada 5 segundos enquanto estiver aberta. Notificações push ainda não estão conectadas."
-                  />
-                </section>
-              )}
-            </>
+            <AttendantLeads
+              leads={activePage === 'pool' ? pool : owned}
+              pool={activePage === 'pool'}
+              onOpen={(id) => void openDetail(id)}
+              action={actionButton}
+            />
           )}
 
           {(activePage === 'meta' || activePage === 'google') && (
