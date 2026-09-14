@@ -8,6 +8,7 @@ import {
   Shuffle,
   Columns3,
   List,
+  History,
 } from 'lucide-react';
 import { api, type Lead, type Snapshot } from './api';
 import { Avatar, Badge, Countdown, Empty, Modal } from './components';
@@ -100,6 +101,8 @@ export function Distribution({
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [settings, setSettings] = useState<Snapshot | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const historyTrigger = useRef<HTMLButtonElement>(null);
   const [now, setNow] = useState(0);
   const clock = useRef({ server: 0, monotonic: 0 });
   const query = new URLSearchParams({
@@ -210,8 +213,6 @@ export function Distribution({
       <div className="workspace-intro">
         <div>
           <span className="eyebrow">CENTRAL DE ATENDIMENTOS</span>
-          <h2>Leads, equipe e próximos passos.</h2>
-          <p>Acompanhe as reservas e veja quem está cuidando de cada oportunidade.</p>
         </div>
         <div className="view-switch" role="group" aria-label="Visualização da distribuição">
           <button aria-pressed={view === 'board'} onClick={() => setView('board')}>
@@ -241,6 +242,16 @@ export function Distribution({
         >
           <RefreshCw size={16} />
           <span>Atualizar</span>
+        </button>
+        <button
+          className="button outline compact history-toggle"
+          ref={historyTrigger}
+          disabled={!board}
+          onClick={() => setHistoryOpen(true)}
+          aria-haspopup="dialog"
+          aria-expanded={historyOpen}
+        >
+          <History size={16} /> Últimas movimentações
         </button>
         <button
           className="button outline compact"
@@ -512,35 +523,46 @@ export function Distribution({
             </>
           )}
         </section>
-        <details className="panel distribution-history" open>
-          <summary>
-            Últimas movimentações <span>20 mais recentes · toda a central</span>
-          </summary>
-          <ol>
-            {board?.events.map((event) => (
-              <li key={event.id}>
-                <time dateTime={event.created_at}>{dateTime(event.created_at)}</time>
-                <div>
-                  {event.opportunity_id ? (
-                    <button
-                      className="text-link"
-                      onClick={() => onOpen(event.opportunity_id!, true)}
-                    >
-                      {event.name ?? 'Lead'} <ArrowUpRight size={14} />
-                    </button>
-                  ) : (
-                    <strong>Configuração da equipe</strong>
-                  )}
-                  <p>{event.description}</p>
-                </div>
-              </li>
-            ))}
-          </ol>
-          {board && !board.events.length && (
-            <p className="distribution-loading">Nenhuma movimentação registrada.</p>
-          )}
-        </details>
       </div>
+      {historyOpen && (
+        <Modal
+          title="Últimas movimentações"
+          description="20 mais recentes · toda a central"
+          onClose={() => {
+            setHistoryOpen(false);
+            requestAnimationFrame(() => historyTrigger.current?.focus({ preventScroll: true }));
+          }}
+        >
+          <div className="distribution-history">
+            <ol>
+              {board?.events.map((event) => (
+                <li key={event.id}>
+                  <time dateTime={event.created_at}>{dateTime(event.created_at)}</time>
+                  <div>
+                    {event.opportunity_id ? (
+                      <button
+                        className="text-link"
+                        onClick={() => {
+                          setHistoryOpen(false);
+                          onOpen(event.opportunity_id!, true);
+                        }}
+                      >
+                        {event.name ?? 'Lead'} <ArrowUpRight size={14} />
+                      </button>
+                    ) : (
+                      <strong>Configuração da equipe</strong>
+                    )}
+                    <p>{event.description}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+            {board && !board.events.length && (
+              <p className="distribution-loading">Nenhuma movimentação registrada.</p>
+            )}
+          </div>
+        </Modal>
+      )}
       <p className="distribution-caption">
         Atualização a cada 5 segundos. Aceite no CRM não confirma envio de mensagem no WhatsApp.
       </p>
@@ -580,9 +602,7 @@ function OperationalColumns({
     ['CLAIMED', 'Em atendimento', 'Oportunidades com responsável'],
     ['POOL', 'Bolsão', 'Disponíveis para a equipe'],
     ['PENDING', 'Sem destino', 'Precisam de atenção da gestão'],
-  ].filter(([key]) =>
-    state === 'ALL' ? key !== 'PENDING' || board.counts.PENDING > 0 : key === state,
-  );
+  ].filter(([key]) => state === 'ALL' || key === state);
   return (
     <div className={`operational-columns ${state !== 'ALL' ? 'single-column' : ''}`}>
       {columns.map(([key, title, subtitle]) => {
@@ -690,9 +710,6 @@ function OperationalColumns({
           </section>
         );
       })}
-      <p className="board-page-note">
-        Cartões desta página · use os filtros ou a paginação para consultar os demais leads.
-      </p>
     </div>
   );
 }

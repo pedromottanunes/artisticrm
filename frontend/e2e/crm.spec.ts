@@ -318,10 +318,12 @@ test('design operacional: quadro, lista e cartões responsivos preservam os mesm
   await expect(page.locator('.distribution-table')).toContainText(firstName);
   await page.getByRole('button', { name: 'Quadro', exact: true }).click();
   await expect(page.locator('.operational-card')).toHaveCount(cardCount);
-  for (const width of [320, 390, 768, 1024, 1440, 1920]) {
+  await expect(page.locator('.operational-lane')).toHaveCount(4);
+  await expect(page.getByText('Leads, equipe e próximos passos.', { exact: true })).toHaveCount(0);
+  for (const width of [320, 390, 768, 1024, 1280, 1440, 1920]) {
     await page.setViewportSize({ width, height: 1000 });
     const overflow = await page
-      .locator('.operational-card, .operational-lane, .distribution-results, .distribution-history')
+      .locator('.operational-columns, .distribution-results')
       .evaluateAll((elements) =>
         elements
           .filter((element) => {
@@ -331,6 +333,25 @@ test('design operacional: quadro, lista e cartões responsivos preservam os mesm
           .map((element) => element.className),
       );
     expect(overflow, `overflow at ${width}px`).toEqual([]);
+    const lanes = await page.locator('.operational-lane').evaluateAll((elements) =>
+      elements.map((element) => {
+        const rect = element.getBoundingClientRect();
+        return { top: rect.top, left: rect.left, right: rect.right };
+      }),
+    );
+    expect(
+      Math.max(...lanes.map((lane) => lane.top)) - Math.min(...lanes.map((lane) => lane.top)),
+    ).toBeLessThan(2);
+    if (width > 1100)
+      expect(lanes.every((lane) => lane.left >= 0 && lane.right <= width)).toBe(true);
+    const historyButton = page.getByRole('button', { name: 'Últimas movimentações', exact: true });
+    await historyButton.click();
+    const history = page.getByRole('dialog', { name: 'Últimas movimentações', exact: true });
+    await expect(history).toBeVisible();
+    await expect(historyButton).toHaveAttribute('aria-expanded', 'true');
+    await history.getByRole('button', { name: 'Fechar janela' }).click();
+    await expect(history).toHaveCount(0);
+    await expect(historyButton).toBeFocused();
     if (width === 390) {
       const summary = page.locator('.distribution-overview > summary');
       await expect(page.getByLabel('Resumo da distribuição')).not.toBeVisible();
@@ -349,6 +370,24 @@ test('design operacional: quadro, lista e cartões responsivos preservam os mesm
     if (width <= 1024)
       await expect(page.getByRole('navigation', { name: 'Atalhos de gestão' })).toBeVisible();
   }
+  const historyButton = page.getByRole('button', { name: 'Últimas movimentações', exact: true });
+  await historyButton.click();
+  await page.keyboard.press('Escape');
+  await expect(
+    page.getByRole('dialog', { name: 'Últimas movimentações', exact: true }),
+  ).toHaveCount(0);
+  await expect(historyButton).toBeFocused();
+  await historyButton.click();
+  await page
+    .getByRole('dialog', { name: 'Últimas movimentações', exact: true })
+    .locator('.text-link')
+    .first()
+    .click();
+  await expect(
+    page.getByRole('dialog', { name: 'Últimas movimentações', exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Fechar janela' }).click();
   await page.getByRole('button', { name: `Gerenciar ${firstName}`, exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
 });
