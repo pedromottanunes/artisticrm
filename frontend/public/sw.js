@@ -45,8 +45,9 @@ self.addEventListener('push', (event) => {
       } catch {
         /* A malformed push still shows a generic notice. */
       }
-      const page = ['mine', 'pool', 'distribution', 'settings'].includes(data.page)
-        ? data.page
+      const requestedPage = data.page === 'distribution' ? 'central' : data.page;
+      const page = ['mine', 'pool', 'central', 'settings'].includes(requestedPage)
+        ? requestedPage
         : 'mine';
       await self.registration.showNotification(data.title || 'Artisti CRM', {
         body: data.body || 'Há uma atualização no CRM. Abra para consultar.',
@@ -61,10 +62,12 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   event.waitUntil(
     (async () => {
-      const page = ['mine', 'pool', 'distribution', 'settings'].includes(
-        event.notification.data?.page,
-      )
-        ? event.notification.data.page
+      const requestedPage =
+        event.notification.data?.page === 'distribution'
+          ? 'central'
+          : event.notification.data?.page;
+      const page = ['mine', 'pool', 'central', 'settings'].includes(requestedPage)
+        ? requestedPage
         : 'mine';
       const url = `${self.location.origin}/#${page}`;
       const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });

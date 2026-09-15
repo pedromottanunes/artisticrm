@@ -44,7 +44,7 @@ export function MobileNavigation<T extends string>({
               <b aria-label={`${poolCount} no bolsão`}>{poolCount > 99 ? '99+' : poolCount}</b>
             )}
           </span>
-          <span>{id === 'pipeline' ? 'Funil' : label}</span>
+          <span>{id === 'pipeline' ? 'Funil' : id === 'central' ? 'Central' : label}</span>
         </button>
       ))}
     </nav>

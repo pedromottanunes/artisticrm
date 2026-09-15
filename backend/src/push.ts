@@ -219,7 +219,7 @@ export class PushService {
             : lead.state === 'CLAIMED'
               ? 'Uma oportunidade foi atribuída a você. Abra o CRM para conferir.'
               : 'Você recebeu uma oportunidade. Abra o CRM para conferir o prazo e assumir.',
-      page: manager ? 'distribution' : lead.state === 'POOL' ? 'pool' : 'mine',
+      page: manager ? 'central' : lead.state === 'POOL' ? 'pool' : 'mine',
       tag: `artisti-${lead.id}`,
     };
   }

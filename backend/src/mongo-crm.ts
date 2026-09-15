@@ -279,7 +279,7 @@ export class MongoOperations {
             actor_id: null,
             kind: 'reservation.expired',
             description: 'Reserva vencida. Lead disponível no bolsão.',
-            details: {},
+            details: { reserved_to: row.reserved_to },
             created_at: recordedAt,
           })),
           { session: tx.session },
@@ -326,6 +326,7 @@ export class MongoOperations {
           null,
           'reservation.expired',
           'Reserva vencida. Lead disponível no bolsão.',
+          { reserved_to: row.reserved_to },
         );
       await tx.update(
         'opportunities',

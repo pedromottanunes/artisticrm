@@ -77,6 +77,10 @@ export async function checkDistribution(
   assert.equal(all.users.find((u) => u.id === users[0].id)?.name, users[0].name);
   assert.ok(all.users.every((u) => !('password_hash' in u) && !('auth_version' in u)));
   assert.equal(all.team.find((t) => t.user_id === users[0].id)?.count, 506);
+  assert.equal(all.attendants.length, users.length);
+  assert.equal(all.attendants.find((u) => u.id === users[0].id)?.reserved_count, 506);
+  assert.equal(all.attendants.find((u) => u.id === users[0].id)?.claimed_count, 0);
+  assert.equal(all.attendants.find((u) => u.id === users[1].id)?.is_next, true);
   const next = await board({ page: 2 });
   assert.ok(next.rows.every((r) => !all.rows.some((a) => a.id === r.id)));
   const last = await board({ page: 999 });
@@ -86,6 +90,7 @@ export async function checkDistribution(
   assert.equal((await board({ search: '[literal]' })).rows[0].id, first.id);
   assert.equal((await board({ search: '[literal]' })).counts.RESERVED, 506);
   assert.equal((await board({ search: '.*' })).total, 0);
+  assert.equal((await board({ source: 'Meta Ads' })).total, 0);
   await assert.rejects(
     () => distributionBoard(db, users[0], distributionQuery.parse({}), async () => getNow()),
     { code: 'FORBIDDEN' },
@@ -134,6 +139,10 @@ export async function checkDistribution(
     assert.equal(expired.statusCode, 200, expired.body);
     assert.equal(expired.json().counts.POOL, 506);
     assert.equal(expired.json().counts.RESERVED, 0);
+    assert.equal(
+      expired.json().attendants.find((u: { id: string }) => u.id === users[0].id).expired_today,
+      506,
+    );
     assert.equal(await crm.expire(), 0);
     const expiredEvents =
       db.kind === 'mongo'
@@ -159,6 +168,26 @@ export async function checkDistribution(
     assert.equal(claimed.counts.POOL, 505);
     assert.equal(claimed.counts.CLAIMED, 1);
     assert.ok(!JSON.stringify(claimed).includes('password_hash'));
+
+    const detail = await crm.detail(manager, first.id);
+    await crm.update(manager, first.id, {
+      version: detail.version,
+      name: detail.name,
+      email: detail.email ?? '',
+      instagram: detail.instagram ?? '',
+      interest: detail.interest,
+      unit: detail.unit,
+      stage: 'LOST',
+      next_action: detail.next_action,
+    });
+    const openAfterClose = await board({ scope: 'OPEN' });
+    assert.equal(openAfterClose.total, 505);
+    const closed = await board({ scope: 'CLOSED' });
+    assert.equal(closed.total, 1);
+    assert.equal(closed.rows[0].id, first.id);
+    assert.equal(closed.rows[0].stage, 'LOST');
+    assert.equal((await board({ scope: 'ALL' })).total, 506);
+    assert.equal((await board({ scope: 'CLOSED', attendant: users[2].id })).total, 1);
   } finally {
     await app.close();
   }

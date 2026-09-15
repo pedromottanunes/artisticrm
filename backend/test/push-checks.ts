@@ -149,10 +149,7 @@ export async function checkPush(
       2,
       'only the manager and reserved attendant receive this event, even with two workers',
     );
-    assert.deepEqual(
-      new Set(delivered.map((d) => d.message.page)),
-      new Set(['distribution', 'mine']),
-    );
+    assert.deepEqual(new Set(delivered.map((d) => d.message.page)), new Set(['central', 'mine']));
     assert.equal(
       delivered.some((d) => /Privado|554899987/.test(JSON.stringify(d.message))),
       false,

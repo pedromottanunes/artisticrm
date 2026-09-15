@@ -7,8 +7,10 @@ import { requireManager, type User } from './types.js';
 export const distributionQuery = z
   .object({
     state: z.enum(['ALL', 'RESERVED', 'POOL', 'CLAIMED', 'PENDING']).default('ALL'),
+    scope: z.enum(['OPEN', 'CLOSED', 'ALL']).default('OPEN'),
     attendant: z.union([z.string().uuid(), z.literal('')]).default(''),
     search: z.string().trim().max(100).default(''),
+    source: z.string().trim().max(160).default(''),
     page: z.coerce.number().int().min(1).max(100000).default(1),
   })
   .strict();
@@ -22,6 +24,93 @@ const kinds = [
   'queue.updated',
 ];
 const pageSize = 25;
+const businessTimeZone = 'America/Sao_Paulo';
+
+function startOfDayInTimeZone(value: Date, timeZone: string) {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  });
+  const parts = Object.fromEntries(
+    formatter
+      .formatToParts(value)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, Number(part.value)]),
+  );
+  const localMidnight = Date.UTC(parts.year, parts.month - 1, parts.day);
+  const probe = new Date(localMidnight);
+  const probeParts = Object.fromEntries(
+    formatter
+      .formatToParts(probe)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, Number(part.value)]),
+  );
+  const offset =
+    Date.UTC(
+      probeParts.year,
+      probeParts.month - 1,
+      probeParts.day,
+      probeParts.hour,
+      probeParts.minute,
+      probeParts.second,
+    ) - probe.getTime();
+  return new Date(localMidnight - offset);
+}
+
+type BoardUser = Pick<
+  User,
+  | 'id'
+  | 'name'
+  | 'email'
+  | 'role'
+  | 'active'
+  | 'queue_enabled'
+  | 'queue_position'
+  | 'color'
+  | 'version'
+  | 'must_change_password'
+>;
+
+function attendantSummaries(
+  users: BoardUser[],
+  settings: { last_position: number },
+  team: { user_id: string; state: string; count: number }[],
+  expired: { user_id: string; count: number }[],
+) {
+  const eligible = users
+    .filter(
+      (user) =>
+        user.role === 'attendant' &&
+        user.active &&
+        user.queue_enabled &&
+        user.queue_position !== null,
+    )
+    .sort(
+      (a, b) =>
+        (a.queue_position! > settings.last_position ? 0 : 1) -
+          (b.queue_position! > settings.last_position ? 0 : 1) ||
+        a.queue_position! - b.queue_position!,
+    );
+  const ranks = new Map(eligible.map((user, index) => [user.id, index + 1]));
+  const metric = (userId: string, state: string) =>
+    team.find((item) => item.user_id === userId && item.state === state)?.count ?? 0;
+  return users
+    .filter((user) => user.role === 'attendant')
+    .map((user) => ({
+      ...user,
+      queue_rank: ranks.get(user.id) ?? null,
+      is_next: ranks.get(user.id) === 1,
+      claimed_count: metric(user.id, 'CLAIMED'),
+      reserved_count: metric(user.id, 'RESERVED'),
+      expired_today: expired.find((item) => item.user_id === user.id)?.count ?? 0,
+    }));
+}
 
 // Counts cover every open opportunity, independently of the workspace's 500-row limit.
 export async function distributionBoard(
@@ -31,7 +120,8 @@ export async function distributionBoard(
   now: () => Promise<Date>,
 ) {
   requireManager(user);
-  const result = await readDistributionBoard(db, query);
+  const metricsSince = startOfDayInTimeZone(await now(), businessTimeZone);
+  const result = await readDistributionBoard(db, query, metricsSince);
   // Read the clock after the query, without opening another connection inside its
   // transaction. Long queries must not restart the displayed countdown in the past.
   return { ...result, server_time: (await now()).toISOString() };
@@ -53,6 +143,7 @@ const userFields = [
 async function readDistributionBoard(
   db: Database | MongoStore,
   query: z.infer<typeof distributionQuery>,
+  metricsSince: Date,
 ) {
   if (db.kind === 'mongo')
     return db.atomic(async (tx) => {
@@ -74,13 +165,20 @@ async function readDistributionBoard(
         last_position: configuration.last_position,
       };
       const open = { state: { $in: states }, stage: { $nin: ['LOST', 'WON'] } };
-      const filter: Document = { ...open };
+      const filter: Document =
+        query.scope === 'OPEN'
+          ? { ...open }
+          : query.scope === 'CLOSED'
+            ? { stage: { $in: ['LOST', 'WON'] } }
+            : {};
       if (query.state !== 'ALL') filter.state = query.state;
       if (query.attendant)
         filter.$or = [
           { state: 'RESERVED', reserved_to: query.attendant },
           { state: 'CLAIMED', owner_id: query.attendant },
+          ...(query.scope === 'OPEN' ? [] : [{ owner_id: query.attendant }]),
         ];
+      if (query.source) filter.source = query.source;
       const join: Document[] = [
         { $match: filter },
         {
@@ -122,6 +220,16 @@ async function readDistributionBoard(
           },
         },
       ]);
+      const expired = await aggregate('audit_events', [
+        {
+          $match: {
+            kind: 'reservation.expired',
+            created_at: { $gte: metricsSince },
+            'details.reserved_to': { $type: 'string' },
+          },
+        },
+        { $group: { _id: '$details.reserved_to', count: { $sum: 1 } } },
+      ]);
       const matched = await aggregate('opportunities', [...join, { $count: 'count' }]);
       const total = Number(matched[0]?.count ?? 0);
       const page = Math.min(query.page, Math.max(1, Math.ceil(total / pageSize)));
@@ -151,7 +259,9 @@ async function readDistributionBoard(
             id: 1,
             name: '$contact.name',
             phone: '$contact.phone',
+            interest: 1,
             source: 1,
+            stage: 1,
             state: 1,
             reserved_to: 1,
             owner_id: 1,
@@ -195,8 +305,24 @@ async function readDistributionBoard(
           },
         },
       ]);
+      const normalizedTeam = team
+        .filter((item) => item._id.user)
+        .map((item) => ({
+          user_id: item._id.user as string,
+          state: item._id.state as string,
+          count: Number(item.count),
+        }));
+      const normalizedExpired = expired
+        .filter((item) => item._id)
+        .map((item) => ({ user_id: item._id as string, count: Number(item.count) }));
       return {
         users,
+        attendants: attendantSummaries(
+          users as unknown as BoardUser[],
+          settings,
+          normalizedTeam,
+          normalizedExpired,
+        ),
         settings,
         rows,
         total,
@@ -205,9 +331,7 @@ async function readDistributionBoard(
         counts: Object.fromEntries(
           states.map((s) => [s, Number(counts.find((c) => c._id === s)?.count ?? 0)]),
         ),
-        team: team
-          .filter((t) => t._id.user)
-          .map((t) => ({ user_id: t._id.user, state: t._id.state, count: Number(t.count) })),
+        team: normalizedTeam,
         events,
       };
     }, true);
@@ -216,21 +340,23 @@ async function readDistributionBoard(
     // A coherent read for rows, totals and movement history in PostgreSQL as well.
     await tx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
     const users = (
-      await tx.query(
+      await tx.query<BoardUser>(
         `SELECT ${userFields.join(',')} FROM users ORDER BY queue_position NULLS FIRST,id`,
       )
     ).rows;
     const settings = (
-      await tx.query(
+      await tx.query<{ version: number; timeout_minutes: number; last_position: number }>(
         'SELECT version,timeout_minutes,last_position FROM distribution_settings WHERE id=1',
       )
     ).rows[0];
     const open =
       "o.state IN ('RESERVED','POOL','CLAIMED','PENDING') AND o.stage NOT IN ('WON','LOST')";
-    const where = `${open} AND ($1='ALL' OR o.state=$1)
-      AND ($2='' OR (o.state='RESERVED' AND o.reserved_to::text=$2) OR (o.state='CLAIMED' AND o.owner_id::text=$2))
-      AND ($3='' OR strpos(lower(c.name),lower($3))>0 OR strpos(c.phone,$3)>0)`;
-    const args = [query.state, query.attendant, query.search];
+    const selectedScope = `($4='ALL' OR ($4='OPEN' AND ${open}) OR ($4='CLOSED' AND o.stage IN ('WON','LOST')))`;
+    const where = `${selectedScope} AND ($1='ALL' OR o.state=$1)
+      AND ($2='' OR (o.state='RESERVED' AND o.reserved_to::text=$2) OR (o.state='CLAIMED' AND o.owner_id::text=$2) OR ($4<>'OPEN' AND o.owner_id::text=$2))
+      AND ($3='' OR strpos(lower(c.name),lower($3))>0 OR strpos(c.phone,$3)>0)
+      AND ($5='' OR o.source=$5)`;
+    const args = [query.state, query.attendant, query.search, query.scope, query.source];
     const counts = (
       await tx.query<{ state: string; count: string }>(
         `SELECT o.state,count(*) FROM opportunities o WHERE ${open} GROUP BY o.state`,
@@ -239,6 +365,16 @@ async function readDistributionBoard(
     const team = (
       await tx.query<{ user_id: string; state: string; count: string }>(
         `SELECT CASE WHEN o.state='RESERVED' THEN o.reserved_to ELSE o.owner_id END AS user_id,o.state,count(*) FROM opportunities o WHERE ${open} GROUP BY 1,2`,
+      )
+    ).rows;
+    const expired = (
+      await tx.query<{ user_id: string; count: string }>(
+        `SELECT details->>'reserved_to' AS user_id,count(*)
+        FROM audit_events
+        WHERE kind='reservation.expired' AND created_at >= $1
+          AND details->>'reserved_to' IS NOT NULL
+        GROUP BY 1`,
+        [metricsSince],
       )
     ).rows;
     const total = Number(
@@ -252,10 +388,10 @@ async function readDistributionBoard(
     const page = Math.min(query.page, Math.max(1, Math.ceil(total / pageSize)));
     const rows = (
       await tx.query(
-        `SELECT o.id,c.name,c.phone,o.source,o.state,o.reserved_to,o.owner_id,o.created_at,o.expires_at,o.claimed_at,o.needs_review,o.version
+        `SELECT o.id,c.name,c.phone,o.interest,o.source,o.stage,o.state,o.reserved_to,o.owner_id,o.created_at,o.expires_at,o.claimed_at,o.needs_review,o.version
       FROM opportunities o JOIN contacts c ON c.id=o.contact_id WHERE ${where}
       ORDER BY CASE o.state WHEN 'RESERVED' THEN 0 WHEN 'POOL' THEN 1 WHEN 'PENDING' THEN 2 ELSE 3 END,
-      COALESCE(o.expires_at,o.created_at),o.id LIMIT $4 OFFSET $5`,
+      COALESCE(o.expires_at,o.created_at),o.id LIMIT $6 OFFSET $7`,
         [...args, pageSize, (page - 1) * pageSize],
       )
     ).rows;
@@ -267,8 +403,15 @@ async function readDistributionBoard(
         [kinds],
       )
     ).rows;
+    const normalizedTeam = team
+      .filter((item) => item.user_id)
+      .map((item) => ({ ...item, count: Number(item.count) }));
+    const normalizedExpired = expired
+      .filter((item) => item.user_id)
+      .map((item) => ({ ...item, count: Number(item.count) }));
     return {
       users,
+      attendants: attendantSummaries(users, settings, normalizedTeam, normalizedExpired),
       settings,
       rows,
       total,
@@ -277,7 +420,7 @@ async function readDistributionBoard(
       counts: Object.fromEntries(
         states.map((s) => [s, Number(counts.find((c) => c.state === s)?.count ?? 0)]),
       ),
-      team: team.filter((t) => t.user_id).map((t) => ({ ...t, count: Number(t.count) })),
+      team: normalizedTeam,
       events,
     };
   });

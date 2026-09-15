@@ -110,9 +110,7 @@ test('gestão móvel: todas as telas pela barra inferior, cartões e formulário
       (await page.locator('.breadcrumbs').boundingBox())!.x,
     );
     for (const name of [
-      'Visão geral',
-      'Distribuição',
-      'Leads',
+      'Central de atendimentos',
       'Funil',
       'Agenda',
       'Contratos',
@@ -138,7 +136,7 @@ test('gestão móvel: todas as telas pela barra inferior, cartões e formulário
   await expect(navigation.getByRole('button', { name: 'Google Ads' })).toHaveCount(0);
   await expect(page.locator('.sidebar .workspace-label')).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
-  await navigation.getByRole('button', { name: /^Leads/ }).click();
+  await navigation.getByRole('button', { name: 'Central de atendimentos' }).click();
   await expect(page.locator('.leads-table tbody tr').first()).toBeVisible();
   expect(
     (await page.getByLabel('Buscar nome ou telefone').boundingBox())!.height,
@@ -198,7 +196,7 @@ test('exclusão permanente: confirmação explícita e atualização imediata no
   await page.reload();
   await page
     .getByRole('navigation', { name: 'Atalhos de gestão' })
-    .getByRole('button', { name: /^Leads/ })
+    .getByRole('button', { name: 'Central de atendimentos' })
     .click();
   const row = page.locator('.leads-table tbody tr').filter({ hasText: name });
   await expect(row).toBeVisible();
@@ -301,29 +299,21 @@ async function login(page: Page, profile = 'cadu') {
   demoSessions.set(profile, await page.context().cookies());
 }
 
-test('design operacional: quadro, lista e cartões responsivos preservam os mesmos leads', async ({
-  page,
-}) => {
+test('central administrativa: resumo, equipe e lista permanecem responsivos', async ({ page }) => {
   await login(page);
+  // Endereços antigos continuam abrindo a Central durante a transição.
   await page.goto('/#distribution');
-  await expect(page.locator('.operational-card').first()).toBeVisible();
-  const firstName = await page.locator('.operational-contact strong').first().innerText();
-  const cardCount = await page.locator('.operational-card').count();
-  await expect(page.getByRole('button', { name: 'Quadro', exact: true })).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  );
-  await page.getByRole('button', { name: 'Lista', exact: true }).click();
-  await expect(page.locator('.distribution-table tbody tr')).toHaveCount(cardCount);
-  await expect(page.locator('.distribution-table')).toContainText(firstName);
-  await page.getByRole('button', { name: 'Quadro', exact: true }).click();
-  await expect(page.locator('.operational-card')).toHaveCount(cardCount);
-  await expect(page.locator('.operational-lane')).toHaveCount(4);
-  await expect(page.getByText('Leads, equipe e próximos passos.', { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Central de atendimentos' }),
+  ).toBeVisible();
+  await expect(page.locator('.attendant-card').first()).toBeVisible();
+  await expect(page.locator('.central-summary button')).toHaveCount(4);
+  await expect(page.locator('.central-table tbody tr').first()).toBeVisible();
+  const firstName = await page.locator('.central-contact strong').first().innerText();
   for (const width of [320, 390, 768, 1024, 1280, 1440, 1920]) {
     await page.setViewportSize({ width, height: 1000 });
     const overflow = await page
-      .locator('.operational-columns, .distribution-results')
+      .locator('.manager-central, .central-summary, .central-leads')
       .evaluateAll((elements) =>
         elements
           .filter((element) => {
@@ -333,18 +323,7 @@ test('design operacional: quadro, lista e cartões responsivos preservam os mesm
           .map((element) => element.className),
       );
     expect(overflow, `overflow at ${width}px`).toEqual([]);
-    const lanes = await page.locator('.operational-lane').evaluateAll((elements) =>
-      elements.map((element) => {
-        const rect = element.getBoundingClientRect();
-        return { top: rect.top, left: rect.left, right: rect.right };
-      }),
-    );
-    expect(
-      Math.max(...lanes.map((lane) => lane.top)) - Math.min(...lanes.map((lane) => lane.top)),
-    ).toBeLessThan(2);
-    if (width > 1100)
-      expect(lanes.every((lane) => lane.left >= 0 && lane.right <= width)).toBe(true);
-    const historyButton = page.getByRole('button', { name: 'Últimas movimentações', exact: true });
+    const historyButton = page.getByRole('button', { name: 'Movimentações', exact: true });
     await historyButton.click();
     const history = page.getByRole('dialog', { name: 'Últimas movimentações', exact: true });
     await expect(history).toBeVisible();
@@ -352,15 +331,6 @@ test('design operacional: quadro, lista e cartões responsivos preservam os mesm
     await history.getByRole('button', { name: 'Fechar janela' }).click();
     await expect(history).toHaveCount(0);
     await expect(historyButton).toBeFocused();
-    if (width === 390) {
-      const summary = page.locator('.distribution-overview > summary');
-      await expect(page.getByLabel('Resumo da distribuição')).not.toBeVisible();
-      await summary.click();
-      await expect(page.getByLabel('Resumo da distribuição')).toBeVisible();
-      await summary.click();
-      await expect(page.getByLabel('Resumo da distribuição')).not.toBeVisible();
-      await page.evaluate(() => window.scrollTo(0, 0));
-    }
     if (width === 390 || width === 1920) {
       await page.screenshot({
         path: `test-results/artisti-operacional-${width}.png`,
@@ -370,7 +340,7 @@ test('design operacional: quadro, lista e cartões responsivos preservam os mesm
     if (width <= 1024)
       await expect(page.getByRole('navigation', { name: 'Atalhos de gestão' })).toBeVisible();
   }
-  const historyButton = page.getByRole('button', { name: 'Últimas movimentações', exact: true });
+  const historyButton = page.getByRole('button', { name: 'Movimentações', exact: true });
   await historyButton.click();
   await page.keyboard.press('Escape');
   await expect(
@@ -388,18 +358,21 @@ test('design operacional: quadro, lista e cartões responsivos preservam os mesm
   ).toHaveCount(0);
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.getByRole('dialog').getByRole('button', { name: 'Fechar janela' }).click();
-  await page.getByRole('button', { name: `Gerenciar ${firstName}`, exact: true }).click();
+  await page.getByRole('button', { name: `Abrir ficha de ${firstName}`, exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
 });
 
-test('distribuição mantém a estrutura visível enquanto troca os resultados', async ({ page }) => {
+test('central mantém a estrutura visível enquanto troca somente os resultados', async ({
+  page,
+}) => {
   await login(page);
-  await page.goto('/#distribution');
-  await expect(page.locator('.operational-card').first()).toBeVisible();
+  await page.goto('/#central');
+  await expect(page.locator('.central-table tbody tr').first()).toBeVisible();
 
-  const previousName = await page.locator('.operational-contact strong').first().innerText();
-  const previousCardCount = await page.locator('.operational-card').count();
-  await page.locator('.workspace-intro').evaluate((element) => {
+  const previousName = await page.locator('.central-contact strong').first().innerText();
+  const previousRowCount = await page.locator('.central-table tbody tr').count();
+  const attendantCount = await page.locator('.attendant-card').count();
+  await page.locator('.central-commandbar').evaluate((element) => {
     element.setAttribute('data-stability-check', 'preserved');
   });
 
@@ -428,17 +401,19 @@ test('distribuição mantém a estrutura visível enquanto troca os resultados',
   await requested;
 
   await expect(page.getByText('Atualizando resultados…', { exact: true })).toBeVisible();
-  await expect(page.locator('.workspace-intro')).toHaveAttribute(
+  await expect(page.locator('.central-commandbar')).toHaveAttribute(
     'data-stability-check',
     'preserved',
   );
-  await expect(page.locator('.operational-card')).toHaveCount(previousCardCount);
-  await expect(page.locator('.operational-contact strong').first()).toHaveText(previousName);
+  await expect(page.locator('.attendant-card')).toHaveCount(attendantCount);
+  await expect(page.locator('.central-table tbody tr')).toHaveCount(previousRowCount);
+  await expect(page.locator('.central-contact strong').first()).toHaveText(previousName);
 
   releaseResults();
   await expect(page.getByText('Atualizando resultados…', { exact: true })).toHaveCount(0);
-  await expect(page.locator('.operational-lane')).toHaveAttribute('aria-label', 'Bolsão');
-  await expect(page.locator('.operational-card').first()).toBeVisible();
+  await expect(
+    page.getByLabel('Situação dos leads').getByRole('button', { name: /^Bolsão/ }),
+  ).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('tipografia permanece legível em desktop amplo e celular', async ({ page }) => {
@@ -488,7 +463,7 @@ test('gestão navega, filtra e cadastra lead persistente', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await login(page);
-  await expect(page.getByRole('heading', { name: 'Visão geral' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Central de atendimentos' })).toBeVisible();
   await page.screenshot({ path: 'test-results/gestao-desktop.png', fullPage: true });
   await page.getByRole('button', { name: 'Novo lead', exact: true }).click();
   const dialog = page.getByRole('dialog');
@@ -496,10 +471,6 @@ test('gestão navega, filtra e cadastra lead persistente', async ({ page }) => {
   await dialog.getByLabel('WhatsApp com país e DDD').fill(`5548${String(Date.now()).slice(-9)}`);
   await dialog.getByRole('button', { name: 'Cadastrar e distribuir' }).click();
   await expect(dialog).not.toBeVisible();
-  await page
-    .getByRole('navigation', { name: 'Menu principal' })
-    .getByRole('button', { name: /^Leads/ })
-    .click();
   await page.getByLabel('Buscar nome ou telefone').fill('Teste Navegador');
   await expect(page.getByRole('table').getByText('Teste Navegador').first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Meta Ads', exact: true })).toHaveCount(0);
@@ -568,7 +539,7 @@ test('ficha edita cadastro, agenda avaliação e preserva histórico', async ({ 
   await login(page);
   await page
     .getByRole('navigation', { name: 'Menu principal' })
-    .getByRole('button', { name: /^Leads/ })
+    .getByRole('button', { name: 'Central de atendimentos', exact: true })
     .click();
   await page.getByLabel('Buscar nome ou telefone').fill('Gustavo Pereira');
   await page.getByRole('button', { name: 'Abrir ficha de Gustavo Pereira' }).click();
@@ -661,30 +632,36 @@ test('gestão cria atendente e primeiro acesso obriga troca de senha', async ({ 
   }
 });
 
-test('central de distribuição acompanha reservas, histórico e aceite por outra atendente', async ({
+test('central acompanha reservas, histórico e aceite por outra atendente', async ({
   page,
   browser,
 }) => {
   await login(page);
   await page
     .getByRole('navigation', { name: 'Menu principal' })
-    .getByRole('button', { name: 'Distribuição', exact: true })
+    .getByRole('button', { name: 'Central de atendimentos', exact: true })
     .click();
-  await expect(page.getByRole('heading', { level: 1, name: 'Distribuição' })).toBeVisible();
-  await expect(page.locator('.operational-card').first()).toBeVisible();
-  await page.getByLabel('Buscar na distribuição').fill('Eduardo Ribeiro');
-  const reservation = page.locator('.operational-card').filter({ hasText: 'Eduardo Ribeiro' });
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Central de atendimentos' }),
+  ).toBeVisible();
+  await expect(page.locator('.central-table tbody tr').first()).toBeVisible();
+  await page.getByLabel('Buscar nome ou telefone').fill('Eduardo Ribeiro');
+  const reservation = page
+    .locator('.central-table tbody tr')
+    .filter({ hasText: 'Eduardo Ribeiro' });
   await expect(reservation.locator('.countdown')).toHaveText(/\d{2}:\d{2}/);
-  await page.getByRole('button', { name: 'Histórico de Eduardo Ribeiro' }).click();
+  await reservation.getByRole('button', { name: 'Abrir ficha de Eduardo Ribeiro' }).click();
   const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Histórico', exact: true }).click();
   await expect(dialog.getByText(/Distribuído para/)).toBeVisible();
   await dialog.getByRole('button', { name: 'Fechar janela' }).click();
-  await page.getByLabel('Buscar na distribuição').clear();
+  await page.getByLabel('Buscar nome ou telefone').clear();
   await page
     .getByLabel('Situação dos leads')
     .getByRole('button', { name: /^Bolsão/ })
     .click();
-  await expect(page.locator('.operational-columns').getByText('Daniel Rocha')).toBeVisible();
+  const poolRow = page.locator('.central-table tbody tr').filter({ hasText: 'Daniel Rocha' });
+  await expect(poolRow).toBeVisible();
   const response = await page.request.get('/api/v1/distribution/board?state=POOL');
   const lead = (await response.json()).rows.find(
     (r: { name: string }) => r.name === 'Daniel Rocha',
@@ -698,29 +675,32 @@ test('central de distribuição acompanha reservas, histórico e aceite por outr
       data: { mode: 'pool', expected_version: lead.version },
     });
     expect(claim.status()).toBe(200);
-    await expect(page.locator('.operational-columns').getByText('Daniel Rocha')).toHaveCount(0, {
+    await expect(poolRow).toHaveCount(0, {
       timeout: 12000,
     });
     await page
       .getByLabel('Situação dos leads')
       .getByRole('button', { name: /^Em atendimento/ })
       .click();
-    const assigned = page.locator('.operational-card').filter({ hasText: 'Daniel Rocha' });
-    await expect(assigned.locator('.distribution-owner')).toContainText('Vanessa');
-    await page.getByRole('button', { name: 'Histórico de Daniel Rocha' }).click();
+    const assigned = page.locator('.central-table tbody tr').filter({ hasText: 'Daniel Rocha' });
+    await expect(assigned.locator('.central-owner')).toContainText('Vanessa');
+    await assigned.getByRole('button', { name: 'Abrir ficha de Daniel Rocha' }).click();
+    await dialog.getByRole('button', { name: 'Histórico', exact: true }).click();
     await expect(dialog.getByText(/Lead assumido por Vanessa/)).toBeVisible();
     await dialog.getByRole('button', { name: 'Fechar janela' }).click();
-    await page.screenshot({ path: 'test-results/distribuicao-desktop.png', fullPage: true });
+    await page.screenshot({ path: 'test-results/central-desktop.png', fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
-    await expect(page.getByRole('button', { name: 'Configurar rodízio' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Rodízio', exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.body.scrollWidth <= innerWidth)).toBe(true);
-    await expect(page.getByRole('button', { name: 'Gerenciar Daniel Rocha' })).toBeVisible();
+    await expect(
+      assigned.getByRole('button', { name: 'Abrir ficha de Daniel Rocha' }),
+    ).toBeVisible();
     await page.screenshot({
-      path: 'test-results/distribuicao-mobile.png',
+      path: 'test-results/central-mobile.png',
       fullPage: true,
       animations: 'disabled',
     });
-    await page.getByRole('button', { name: 'Configurar rodízio' }).click();
+    await page.getByRole('button', { name: 'Rodízio', exact: true }).click();
     await expect(dialog.getByLabel('Prazo para aceite')).toHaveValue('10');
     await dialog.getByRole('button', { name: 'Fechar janela' }).click();
   } finally {
@@ -728,7 +708,7 @@ test('central de distribuição acompanha reservas, histórico e aceite por outr
   }
 });
 
-test('distribuição aceita consulta lenta e usa a mesma fotografia para equipe e leads', async ({
+test('central aceita consulta lenta e usa a mesma fotografia para equipe e leads', async ({
   page,
 }) => {
   await login(page);
@@ -736,6 +716,7 @@ test('distribuição aceita consulta lenta e usa a mesma fotografia para equipe 
   const firstUser = expected.users.find(
     (u: { id: string }) => u.id === expected.rows[0].reserved_to,
   );
+  await page.getByRole('button', { name: 'Configurações', exact: true }).click();
   // Simulate the workspace's independent snapshot lagging behind the board.
   await page.route('**/api/v1/workspace', async (route) => {
     const response = await route.fetch();
@@ -753,24 +734,23 @@ test('distribuição aceita consulta lenta e usa a mesma fotografia para equipe 
   });
   await page
     .getByRole('navigation', { name: 'Menu principal' })
-    .getByRole('button', { name: 'Distribuição', exact: true })
+    .getByRole('button', { name: 'Central de atendimentos', exact: true })
     .click();
-  await expect(page.locator('.operational-card').first()).toBeVisible({
+  await expect(page.locator('.central-table tbody tr').first()).toBeVisible({
     timeout: 12000,
   });
   // React StrictMode can mount twice, but a slow request must finish rather than
   // being restarted by each five-second workspace poll.
   expect(calls).toBeLessThanOrEqual(2);
-  await expect(page.locator('.distribution-rule')).toContainText('10 min');
+  await expect(page.locator('.central-rule')).toContainText('10 min');
   await expect(
-    page.locator('.operational-card').first().locator('.distribution-owner'),
+    page.locator('.central-table tbody tr').first().locator('.central-owner'),
   ).toContainText(firstUser.name);
 });
 
-test('distribuição recupera falhas e descarta respostas de filtros anteriores', async ({
-  page,
-}) => {
+test('central recupera falhas e descarta respostas de filtros anteriores', async ({ page }) => {
   await login(page);
+  await page.getByRole('button', { name: 'Configurações', exact: true }).click();
   let unavailable = true;
   let releaseOld!: () => void;
   let completeOld!: () => void;
@@ -797,33 +777,33 @@ test('distribuição recupera falhas e descarta respostas de filtros anteriores'
   });
   await page
     .getByRole('navigation', { name: 'Menu principal' })
-    .getByRole('button', { name: 'Distribuição', exact: true })
+    .getByRole('button', { name: 'Central de atendimentos', exact: true })
     .click();
   await expect(page.getByRole('alert')).toContainText('Falha temporária');
   unavailable = false;
-  await expect(page.locator('.operational-card').first()).toBeVisible({
+  await expect(page.locator('.central-table tbody tr').first()).toBeVisible({
     timeout: 12000,
   });
   await expect(page.getByRole('alert')).toHaveCount(0);
   const requested = page.waitForRequest(
     (request) => new URL(request.url()).searchParams.get('search') === 'Eduardo',
   );
-  await page.getByLabel('Buscar na distribuição').fill('Eduardo');
+  await page.getByLabel('Buscar nome ou telefone').fill('Eduardo');
   await requested;
-  await page.getByLabel('Buscar na distribuição').fill('Henrique');
-  await expect(page.locator('.distribution-contact')).toContainText(['Henrique Alves']);
+  await page.getByLabel('Buscar nome ou telefone').fill('Henrique');
+  await expect(page.locator('.central-contact')).toContainText(['Henrique Alves']);
   releaseOld();
   await oldComplete;
-  await expect(page.locator('.distribution-contact')).toContainText(['Henrique Alves']);
+  await expect(page.locator('.central-contact')).toContainText(['Henrique Alves']);
 });
 
 test('configuração preserva rascunho e mostra conflito dentro da janela', async ({ page }) => {
   await login(page);
   await page
     .getByRole('navigation', { name: 'Menu principal' })
-    .getByRole('button', { name: 'Distribuição', exact: true })
+    .getByRole('button', { name: 'Central de atendimentos', exact: true })
     .click();
-  await page.getByRole('button', { name: 'Configurar rodízio' }).click();
+  await page.getByRole('button', { name: 'Rodízio', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Prazo para aceite').fill('15');
   const original = await (await page.request.get('/api/v1/distribution/board')).json();
@@ -839,7 +819,7 @@ test('configuração preserva rascunho e mostra conflito dentro da janela', asyn
     data: payload,
   });
   expect(result.status()).toBe(200);
-  await expect(page.locator('.distribution-rule')).toContainText('11 min', { timeout: 12000 });
+  await expect(page.locator('.central-rule')).toContainText('11 min', { timeout: 12000 });
   await expect(dialog.getByLabel('Prazo para aceite')).toHaveValue('15');
   await dialog.getByRole('button', { name: 'Salvar configuração' }).click();
   await expect(dialog.getByRole('alert')).toContainText('configuração mudou');
@@ -847,19 +827,19 @@ test('configuração preserva rascunho e mostra conflito dentro da janela', asyn
     (await (await page.request.get('/api/v1/distribution/board')).json()).settings.timeout_minutes,
   ).toBe(11);
   await dialog.getByRole('button', { name: 'Fechar janela' }).click();
-  await page.getByRole('button', { name: 'Configurar rodízio' }).click();
+  await page.getByRole('button', { name: 'Rodízio', exact: true }).click();
   await expect(dialog.getByLabel('Prazo para aceite')).toHaveValue('11');
   await dialog.getByLabel('Prazo para aceite').fill('10');
   await dialog.getByRole('button', { name: 'Salvar configuração' }).click();
   await expect(dialog).not.toBeVisible();
-  await expect(page.locator('.distribution-rule')).toContainText('10 min');
+  await expect(page.locator('.central-rule')).toContainText('10 min');
 });
 
 test('gestão transfere lead e desativação redistribui os atendimentos', async ({ page }) => {
   await login(page);
   await page
     .getByRole('navigation', { name: 'Menu principal' })
-    .getByRole('button', { name: /^Leads/ })
+    .getByRole('button', { name: 'Central de atendimentos', exact: true })
     .click();
   await page.getByLabel('Buscar nome ou telefone').fill('Rafael Almeida');
   await page.getByRole('button', { name: 'Abrir ficha de Rafael Almeida' }).click();

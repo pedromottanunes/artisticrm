@@ -198,9 +198,9 @@ export class CRM {
   async expire() {
     return this.db.transaction(async (tx) => {
       const rows = (
-        await tx.query<{ id: string }>(
+        await tx.query<{ id: string; reserved_to: string | null }>(
           `UPDATE opportunities SET state='POOL', version=version+1
-        WHERE state='RESERVED' AND expires_at <= $1 RETURNING id`,
+        WHERE state='RESERVED' AND expires_at <= $1 RETURNING id,reserved_to`,
           [await this.now(tx)],
         )
       ).rows;
@@ -211,6 +211,7 @@ export class CRM {
           null,
           'reservation.expired',
           'Reserva vencida. Lead disponível no bolsão.',
+          { reserved_to: row.reserved_to },
         );
       return rows.length;
     });
@@ -282,6 +283,7 @@ export class CRM {
           null,
           'reservation.expired',
           'Reserva vencida. Lead disponível no bolsão.',
+          { reserved_to: row.reserved_to },
         );
       await tx.query(
         `UPDATE opportunities SET state='CLAIMED',owner_id=$2,claimed_at=$3,version=version+1 WHERE id=$1`,

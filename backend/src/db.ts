@@ -60,6 +60,7 @@ export async function migrate(db: Database) {
       '004_whatsapp.sql',
       '005_push.sql',
       '006_lead_deletion.sql',
+      '007_central_metrics.sql',
     ]) {
       const version = file.split('_')[0];
       const done = await tx.query('SELECT version FROM schema_migrations WHERE version=$1', [

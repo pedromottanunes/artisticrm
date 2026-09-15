@@ -4,9 +4,7 @@ import {
   Users,
   GitBranch,
   CalendarDays,
-  Shuffle,
   Settings,
-  Search,
   Plus,
   ArrowRight,
   ArrowUpRight,
@@ -19,7 +17,6 @@ import {
   ShieldCheck,
   Link2,
   WifiOff,
-  SlidersHorizontal,
   FileCheck2,
   Info,
   X,
@@ -34,18 +31,18 @@ import {
   Empty,
   Modal,
   Countdown,
-  TextLink,
   IconButton,
   dateLabel,
 } from './components';
 import { LeadForm, LeadDetail } from './forms';
-import { Distribution } from './distribution';
+import { ManagerCentral } from './manager-central';
 import { AttendantLeads } from './attendant-leads';
 import { Team, PasswordChange } from './operations';
 import { MobileNavigation } from './mobile-navigation';
 import { DevicePanel, disconnectPush, PushBinding } from './pwa';
 
 type Page =
+  | 'central'
   | 'overview'
   | 'leads'
   | 'pipeline'
@@ -58,9 +55,7 @@ type Page =
   | 'mine'
   | 'pool';
 const navItems: { id: Page; label: string; icon: typeof Users; group: string }[] = [
-  { id: 'overview', label: 'Visão geral', icon: LayoutDashboard, group: 'workspace' },
-  { id: 'distribution', label: 'Distribuição', icon: Shuffle, group: 'workspace' },
-  { id: 'leads', label: 'Leads', icon: Users, group: 'workspace' },
+  { id: 'central', label: 'Central de atendimentos', icon: LayoutDashboard, group: 'workspace' },
   { id: 'pipeline', label: 'Funil de vendas', icon: GitBranch, group: 'workspace' },
   { id: 'agenda', label: 'Agenda', icon: CalendarDays, group: 'workspace' },
   { id: 'contracts', label: 'Contratos', icon: FileCheck2, group: 'growth' },
@@ -75,7 +70,8 @@ const salesNav = [
 
 const readPage = (): Page => {
   const hash = window.location.hash.slice(1);
-  return [...navItems, ...salesNav].some((item) => item.id === hash) ? (hash as Page) : 'overview';
+  if (['overview', 'distribution', 'leads'].includes(hash)) return 'central';
+  return [...navItems, ...salesNav].some((item) => item.id === hash) ? (hash as Page) : 'central';
 };
 
 export function App() {
@@ -83,8 +79,6 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(true);
   const [page, setPage] = useState<Page>(readPage);
-  const [search, setSearch] = useState('');
-  const [source, setSource] = useState('Todas as origens');
   const [notice, setNotice] = useState('');
   const [newLead, setNewLead] = useState(false);
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -150,7 +144,6 @@ export function App() {
   useEffect(() => {
     const changed = () => {
       setPage(readPage());
-      setSearch('');
       window.scrollTo(0, 0);
     };
     window.addEventListener('hashchange', changed);
@@ -158,6 +151,7 @@ export function App() {
   }, []);
   useEffect(() => {
     if (!data) return;
+    if (data.user.role === 'manager' && page === 'central') return;
     const interval = setInterval(() => {
       if (!document.hidden) void refresh();
     }, 5000);
@@ -174,7 +168,7 @@ export function App() {
       window.removeEventListener('online', focus);
       document.removeEventListener('visibilitychange', visible);
     };
-  }, [data?.user.id, refresh]);
+  }, [data?.user.id, page, refresh]);
   useEffect(() => {
     const id = setInterval(() => {
       if (!document.hidden)
@@ -191,7 +185,6 @@ export function App() {
     setPage(next);
     window.location.hash = next;
     window.scrollTo(0, 0);
-    setSearch('');
   };
   const openDetail = async (id: string, history = false) => {
     const sequence = ++detailSeq.current;
@@ -261,13 +254,12 @@ export function App() {
       detailSeq.current++;
       setData(null);
       setDetail(null);
-      setSearch('');
       setWhatsappUrl('');
       claims.current.clear();
       setNotifications(false);
       setNewLead(false);
       setNotice('');
-      setPage('overview');
+      setPage('central');
     } catch (error) {
       setNotice((error as Error).message);
     }
@@ -281,7 +273,7 @@ export function App() {
     setNewLead(false);
     setNotifications(false);
     setNotice('');
-    setPage('overview');
+    setPage('central');
   };
   if (loading)
     return (
@@ -316,7 +308,7 @@ export function App() {
     !isManager && !['mine', 'pool', 'agenda', 'settings'].includes(page)
       ? 'mine'
       : isManager && ['mine', 'pool'].includes(page)
-        ? 'distribution'
+        ? 'central'
         : page;
   const leads = data.opportunities;
   const pool = leads.filter((l) => l.state === 'POOL');
@@ -325,23 +317,9 @@ export function App() {
     (l) =>
       l.owner_id === data.user.id || (l.state === 'RESERVED' && l.reserved_to === data.user.id),
   );
-  const attendants = data.users.filter((u) => u.role === 'attendant');
-  const filtered = leads.filter(
-    (l) =>
-      `${l.name} ${l.phone ?? ''}`.toLowerCase().includes(search.toLowerCase()) &&
-      (source === 'Todas as origens' || source === l.source),
-  );
   const title = isManager
     ? navItems.find((n) => n.id === activePage)?.label
     : salesNav.find((n) => n.id === activePage)?.label;
-  const nextAttendant = attendants
-    .filter((u) => u.active && u.queue_enabled)
-    .sort(
-      (a, b) =>
-        (a.queue_position! > data.settings.last_position ? 0 : 1) -
-          (b.queue_position! > data.settings.last_position ? 0 : 1) ||
-        a.queue_position! - b.queue_position!,
-    )[0];
   const actionButton = (lead: Lead) => {
     if (!isManager && ['RESERVED', 'POOL'].includes(lead.state))
       return (
@@ -534,212 +512,25 @@ export function App() {
           </div>
         </header>
         <main>
-          {!connected && (
+          {!connected && activePage !== 'central' && (
             <div className="connection-banner" role="alert">
               <WifiOff size={17} />
               Conexão interrompida. Os dados podem estar desatualizados; ações críticas estão
               suspensas.<button onClick={() => void refresh()}>Tentar novamente</button>
             </div>
           )}
-          {activePage === 'overview' && (
-            <>
-              <div className="workspace-intro">
-                <div>
-                  <span className="eyebrow">GESTÃO COMERCIAL</span>
-                  <h2>Sua operação em um olhar.</h2>
-                  <p>Oportunidades, atendimentos e distribuição da equipe.</p>
-                </div>
-                <button className="button outline" onClick={() => navigate('distribution')}>
-                  <Shuffle size={17} /> Abrir central de atendimentos <ArrowUpRight size={16} />
-                </button>
-              </div>
-              <div className="stats-grid">
-                {[
-                  {
-                    label: 'Oportunidades na base',
-                    value: leads.length,
-                    icon: Users,
-                    note: 'Registros nesta visualização',
-                    accent: 'gold',
-                  },
-                  {
-                    label: 'Em atendimento',
-                    value: leads.filter((l) => l.state === 'CLAIMED').length,
-                    icon: MessageCircle,
-                    note: 'Aceite confirmado no CRM',
-                    accent: 'mint',
-                  },
-                  {
-                    label: 'Avaliações agendadas',
-                    value: data.appointments.filter((a) => a.status === 'scheduled').length,
-                    icon: CalendarDays,
-                    note: 'Compromissos registrados',
-                    accent: 'blue',
-                  },
-                  {
-                    label: 'Disponíveis no bolsão',
-                    value: pool.length,
-                    icon: Inbox,
-                    note: pool.length ? 'Aguardando aceite' : 'Todos os contatos encaminhados',
-                    accent: 'amber',
-                  },
-                ].map(({ label, value, icon: Icon, note, accent }) => (
-                  <article className={`stat-card ${accent}`} key={label}>
-                    <div>
-                      <span>{label}</span>
-                      <Icon size={18} />
-                    </div>
-                    <strong>{String(value).padStart(2, '0')}</strong>
-                    <small>
-                      {accent === 'amber' ? <Clock3 size={13} /> : <span className="mini-line" />}
-                      {note}
-                    </small>
-                  </article>
-                ))}
-              </div>
-              <div className="overview-grid">
-                <section className="panel funnel-panel">
-                  <div className="panel-heading">
-                    <div>
-                      <h2>Funil de vendas</h2>
-                    </div>
-                    <TextLink onClick={() => navigate('pipeline')}>Ver funil</TextLink>
-                  </div>
-                  <div className="funnel-chart">
-                    {Object.entries(stages)
-                      .filter(([key]) => key !== 'LOST')
-                      .map(([key, label], index) => {
-                        const count = leads.filter((l) => l.stage === key).length;
-                        return (
-                          <button
-                            key={key}
-                            className="funnel-step"
-                            onClick={() => navigate('pipeline')}
-                          >
-                            <div className="funnel-value">
-                              <strong>{String(count).padStart(2, '0')}</strong>
-                              <span>
-                                {leads.length ? Math.round((count / leads.length) * 100) : 0}% da
-                                base
-                              </span>
-                            </div>
-                            <div
-                              className={`funnel-bar step-${index}`}
-                              style={{
-                                height: `${Math.max(16, (count / Math.max(1, leads.length)) * 200)}px`,
-                              }}
-                            />
-                            <div className="funnel-label">
-                              <i />
-                              {label}
-                            </div>
-                            <small>0{index + 1}</small>
-                          </button>
-                        );
-                      })}
-                  </div>
-                  <div className="panel-footnote">
-                    <Info size={12} />
-                    Distribuição atual por etapa, não taxa de conversão entre etapas.
-                  </div>
-                </section>
-                <section className="panel queue-preview">
-                  <div className="panel-heading">
-                    <div>
-                      <h2>Rodízio da equipe</h2>
-                    </div>
-                    <Shuffle size={19} />
-                  </div>
-                  <div className="queue-users">
-                    {attendants.map((user) => (
-                      <div
-                        className={`queue-person ${nextAttendant?.id === user.id ? 'next' : ''}`}
-                        key={user.id}
-                      >
-                        <span className="queue-number">0{user.queue_position}</span>
-                        <Avatar user={user} />
-                        <div>
-                          <strong>{user.name}</strong>
-                          <small>
-                            {user.queue_enabled
-                              ? `${leads.filter((l) => l.owner_id === user.id).length} em atendimento`
-                              : 'Fora do rodízio'}
-                          </small>
-                        </div>
-                        {nextAttendant?.id === user.id ? (
-                          <span className="next-tag">PRÓXIMA</span>
-                        ) : (
-                          <span className={`status-dot ${user.queue_enabled ? '' : 'paused'}`} />
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                  <div className="queue-bottom">
-                    <Clock3 size={15} />
-                    <span>
-                      Reserva de <strong>{data.settings.timeout_minutes} minutos</strong>
-                    </span>
-                    <TextLink onClick={() => navigate('distribution')}>Gerenciar</TextLink>
-                  </div>
-                </section>
-              </div>
-              <section className="panel">
-                <div className="panel-heading">
-                  <div>
-                    <h2>Leads mais recentes</h2>
-                  </div>
-                  <TextLink onClick={() => navigate('leads')}>Todos os leads</TextLink>
-                </div>
-                {leadTable(leads.slice(0, 5), true)}
-              </section>
-            </>
+          {activePage === 'central' && (
+            <ManagerCentral
+              leadRevision={leadRevision}
+              data={data}
+              connected={connected}
+              onSaved={refresh}
+              onNotice={setNotice}
+              onOpen={(id, history) => void openDetail(id, history)}
+              onConnectionChange={setConnected}
+              onSessionExpired={refresh}
+            />
           )}
-
-          {activePage === 'leads' && (
-            <section className="panel">
-              <div className="list-toolbar">
-                <div className="tab-label">
-                  Todos os leads <span>{leads.length}</span>
-                </div>
-                <div className="table-filters">
-                  <label className="search-field">
-                    <Search size={17} />
-                    <input
-                      placeholder="Buscar nome ou telefone"
-                      aria-label="Buscar nome ou telefone"
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                    />
-                  </label>
-                  <label className="select-filter">
-                    <SlidersHorizontal size={15} />
-                    <select
-                      aria-label="Filtrar origem"
-                      value={source}
-                      onChange={(e) => setSource(e.target.value)}
-                    >
-                      {[
-                        'Todas as origens',
-                        'Google Ads',
-                        'Meta Ads',
-                        'Não identificada',
-                        'Cadastro manual',
-                        'Indicação',
-                      ].map((s) => (
-                        <option key={s}>{s}</option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-              </div>
-              {leadTable(filtered)}
-              <div className="panel-footnote">
-                {filtered.length} de {leads.length} oportunidades • Origem manual não equivale a
-                atribuição de anúncio verificada.
-              </div>
-            </section>
-          )}
-
           {activePage === 'pipeline' && (
             <div className="kanban">
               {Object.entries(stages).map(([key, label]) => (
@@ -843,17 +634,6 @@ export function App() {
                 </div>
               )}
             </section>
-          )}
-
-          {activePage === 'distribution' && (
-            <Distribution
-              leadRevision={leadRevision}
-              data={data}
-              connected={connected}
-              onSaved={refresh}
-              onNotice={setNotice}
-              onOpen={(id, history) => void openDetail(id, history)}
-            />
           )}
 
           {(activePage === 'mine' || activePage === 'pool') && (
@@ -981,6 +761,7 @@ export function App() {
           onCreated={async () => {
             setNewLead(false);
             setNotice('Cadastro recebido. O servidor aplicou a regra de distribuição.');
+            setLeadRevision((value) => value + 1);
             await refresh();
           }}
         />
@@ -999,6 +780,7 @@ export function App() {
           }}
           onSaved={async () => {
             await refresh();
+            setLeadRevision((value) => value + 1);
             await openDetail(detail.id);
           }}
           onDeleted={async () => {
