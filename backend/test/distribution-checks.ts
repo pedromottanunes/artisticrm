@@ -130,6 +130,15 @@ export async function checkDistribution(
       ).statusCode,
       400,
     );
+    assert.equal(
+      (
+        await app.inject({
+          url: '/api/v1/distribution/board?stage=INVALID',
+          headers: managerHeaders,
+        })
+      ).statusCode,
+      400,
+    );
     advance();
     // GET reconciles persistent deadlines, including after the server was asleep.
     const expired = await app.inject({
@@ -187,6 +196,10 @@ export async function checkDistribution(
     assert.equal(closed.rows[0].id, first.id);
     assert.equal(closed.rows[0].stage, 'LOST');
     assert.equal((await board({ scope: 'ALL' })).total, 506);
+    assert.equal((await board({ scope: 'ALL', stage: 'LOST' })).total, 1);
+    assert.equal((await board({ scope: 'ALL', stage: 'TO_QUALIFY' })).total, 505);
+    const recent = await board({ scope: 'ALL', order: 'RECENT' });
+    assert.notEqual(recent.rows[0].id, first.id);
     assert.equal((await board({ scope: 'CLOSED', attendant: users[2].id })).total, 1);
   } finally {
     await app.close();

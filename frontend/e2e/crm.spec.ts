@@ -289,9 +289,24 @@ async function login(page: Page, profile = 'cadu') {
   const cookies = demoSessions.get(profile);
   if (cookies) await page.context().addCookies(cookies);
   await page.goto('/');
-  if (cookies && (await page.request.get('/api/v1/me')).ok()) {
-    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
-    return;
+  if (cookies) {
+    let session = await page.request.get('/api/v1/me');
+    if (session.status() === 429) {
+      await expect
+        .poll(
+          async () => {
+            session = await page.request.get('/api/v1/me');
+            return session.status();
+          },
+          { timeout: 20_000, intervals: [1_000] },
+        )
+        .toBe(200);
+      await page.reload();
+    }
+    if (session.ok()) {
+      await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+      return;
+    }
   }
   await page.getByLabel('Escolha um perfil de demonstração').selectOption(profile);
   await page.getByRole('button', { name: 'Entrar no espaço de trabalho' }).click();
@@ -421,6 +436,50 @@ test('central mantém a estrutura visível enquanto troca somente os resultados'
   await expect(
     page.getByLabel('Situação dos leads').getByRole('button', { name: /^Bolsão/ }),
   ).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('funil alterna entre quadro e lista completa com filtros', async ({ page }) => {
+  await login(page);
+  await page.goto('/#pipeline');
+
+  const view = page.getByRole('group', { name: 'Visualização do funil' });
+  await expect(view.getByRole('button', { name: 'Quadro' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(page.locator('.kanban-column')).toHaveCount(6);
+
+  await view.getByRole('button', { name: 'Lista' }).click();
+  await expect(view.getByRole('button', { name: 'Lista' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.pipeline-table tbody tr').first()).toBeVisible();
+  await expect(page.locator('.pipeline-list-summary strong')).toHaveText('12');
+
+  await page.getByLabel('Filtrar por etapa').selectOption('EVALUATION_SCHEDULED');
+  await expect(page.locator('.pipeline-table tbody tr')).toHaveCount(2);
+  await expect(page.locator('.pipeline-table .stage-pill')).toHaveText([
+    'Avaliação agendada',
+    'Avaliação agendada',
+  ]);
+
+  await page.getByLabel('Filtrar por etapa').selectOption('ALL');
+  await page.getByLabel('Buscar lead no funil').fill('Gustavo Pereira');
+  await expect(page.locator('.pipeline-table tbody tr')).toHaveCount(1);
+  await expect(page.locator('.pipeline-contact strong')).toHaveText('Gustavo Pereira');
+
+  for (const width of [390, 1920]) {
+    await page.setViewportSize({ width, height: 1000 });
+    expect(
+      await page.evaluate(() => document.body.scrollWidth <= innerWidth),
+      `pipeline list overflow at ${width}px`,
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/artisti-pipeline-list-${width}.png`,
+      fullPage: true,
+    });
+  }
+
+  await page.getByRole('button', { name: 'Abrir ficha de Gustavo Pereira' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
 });
 
 test('tipografia permanece legível em desktop amplo e celular', async ({ page }) => {

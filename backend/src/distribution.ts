@@ -8,6 +8,18 @@ export const distributionQuery = z
   .object({
     state: z.enum(['ALL', 'RESERVED', 'POOL', 'CLAIMED', 'PENDING']).default('ALL'),
     scope: z.enum(['OPEN', 'CLOSED', 'ALL']).default('OPEN'),
+    stage: z
+      .enum([
+        'ALL',
+        'TO_QUALIFY',
+        'EVALUATION_SCHEDULED',
+        'NEGOTIATION',
+        'CONTRACT_PENDING',
+        'WON',
+        'LOST',
+      ])
+      .default('ALL'),
+    order: z.enum(['PRIORITY', 'RECENT']).default('PRIORITY'),
     attendant: z.union([z.string().uuid(), z.literal('')]).default(''),
     search: z.string().trim().max(100).default(''),
     source: z.string().trim().max(160).default(''),
@@ -171,6 +183,13 @@ async function readDistributionBoard(
           : query.scope === 'CLOSED'
             ? { stage: { $in: ['LOST', 'WON'] } }
             : {};
+      if (query.stage !== 'ALL') {
+        if (filter.stage !== undefined) {
+          const scopeStage = filter.stage;
+          delete filter.stage;
+          filter.$and = [{ stage: scopeStage }, { stage: query.stage }];
+        } else filter.stage = query.stage;
+      }
       if (query.state !== 'ALL') filter.state = query.state;
       if (query.attendant)
         filter.$or = [
@@ -233,24 +252,32 @@ async function readDistributionBoard(
       const matched = await aggregate('opportunities', [...join, { $count: 'count' }]);
       const total = Number(matched[0]?.count ?? 0);
       const page = Math.min(query.page, Math.max(1, Math.ceil(total / pageSize)));
+      const priority = {
+        $switch: {
+          branches: [
+            { case: { $eq: ['$state', 'RESERVED'] }, then: 0 },
+            { case: { $eq: ['$state', 'POOL'] }, then: 1 },
+            { case: { $eq: ['$state', 'PENDING'] }, then: 2 },
+          ],
+          default: 3,
+        },
+      };
       const rows = await aggregate('opportunities', [
         ...join,
-        {
-          $set: {
-            priority: {
-              $switch: {
-                branches: [
-                  { case: { $eq: ['$state', 'RESERVED'] }, then: 0 },
-                  { case: { $eq: ['$state', 'POOL'] }, then: 1 },
-                  { case: { $eq: ['$state', 'PENDING'] }, then: 2 },
-                ],
-                default: 3,
+        ...(query.order === 'PRIORITY'
+          ? [
+              {
+                $set: {
+                  priority,
+                  due: { $ifNull: ['$expires_at', '$created_at'] },
+                },
               },
-            },
-            due: { $ifNull: ['$expires_at', '$created_at'] },
-          },
+            ]
+          : []),
+        {
+          $sort:
+            query.order === 'RECENT' ? { created_at: -1, id: -1 } : { priority: 1, due: 1, id: 1 },
         },
-        { $sort: { priority: 1, due: 1, id: 1 } },
         { $skip: (page - 1) * pageSize },
         { $limit: pageSize },
         {
@@ -355,8 +382,16 @@ async function readDistributionBoard(
     const where = `${selectedScope} AND ($1='ALL' OR o.state=$1)
       AND ($2='' OR (o.state='RESERVED' AND o.reserved_to::text=$2) OR (o.state='CLAIMED' AND o.owner_id::text=$2) OR ($4<>'OPEN' AND o.owner_id::text=$2))
       AND ($3='' OR strpos(lower(c.name),lower($3))>0 OR strpos(c.phone,$3)>0)
-      AND ($5='' OR o.source=$5)`;
-    const args = [query.state, query.attendant, query.search, query.scope, query.source];
+      AND ($5='' OR o.source=$5)
+      AND ($6='ALL' OR o.stage=$6)`;
+    const args = [
+      query.state,
+      query.attendant,
+      query.search,
+      query.scope,
+      query.source,
+      query.stage,
+    ];
     const counts = (
       await tx.query<{ state: string; count: string }>(
         `SELECT o.state,count(*) FROM opportunities o WHERE ${open} GROUP BY o.state`,
@@ -390,8 +425,11 @@ async function readDistributionBoard(
       await tx.query(
         `SELECT o.id,c.name,c.phone,o.interest,o.source,o.stage,o.state,o.reserved_to,o.owner_id,o.created_at,o.expires_at,o.claimed_at,o.needs_review,o.version
       FROM opportunities o JOIN contacts c ON c.id=o.contact_id WHERE ${where}
-      ORDER BY CASE o.state WHEN 'RESERVED' THEN 0 WHEN 'POOL' THEN 1 WHEN 'PENDING' THEN 2 ELSE 3 END,
-      COALESCE(o.expires_at,o.created_at),o.id LIMIT $6 OFFSET $7`,
+      ORDER BY ${
+        query.order === 'RECENT'
+          ? 'o.created_at DESC,o.id DESC'
+          : "CASE o.state WHEN 'RESERVED' THEN 0 WHEN 'POOL' THEN 1 WHEN 'PENDING' THEN 2 ELSE 3 END,COALESCE(o.expires_at,o.created_at),o.id"
+      } LIMIT $7 OFFSET $8`,
         [...args, pageSize, (page - 1) * pageSize],
       )
     ).rows;

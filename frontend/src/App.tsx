@@ -24,18 +24,10 @@ import {
 } from 'lucide-react';
 import { api, ApiError, stages, type Snapshot, type Lead, type Detail } from './api';
 import { CentralStatusPanel } from './central';
-import {
-  Avatar,
-  Badge,
-  Source,
-  Empty,
-  Modal,
-  Countdown,
-  IconButton,
-  dateLabel,
-} from './components';
+import { Avatar, Badge, Source, Empty, Modal, Countdown, IconButton } from './components';
 import { LeadForm, LeadDetail } from './forms';
 import { ManagerCentral } from './manager-central';
+import { ManagerPipeline } from './manager-pipeline';
 import { AttendantLeads } from './attendant-leads';
 import { Team, PasswordChange } from './operations';
 import { MobileNavigation } from './mobile-navigation';
@@ -532,53 +524,13 @@ export function App() {
             />
           )}
           {activePage === 'pipeline' && (
-            <div className="kanban">
-              {Object.entries(stages).map(([key, label]) => (
-                <section className="kanban-column" key={key}>
-                  <header>
-                    <i className={`stage-dot ${key}`} />
-                    <h2>{label}</h2>
-                    <span>{leads.filter((l) => l.stage === key).length}</span>
-                  </header>
-                  <div className="kanban-cards">
-                    {leads
-                      .filter((l) => l.stage === key)
-                      .map((lead) => (
-                        <button
-                          className="kanban-card"
-                          onClick={() => void openDetail(lead.id)}
-                          key={lead.id}
-                        >
-                          <Source value={lead.source} />
-                          <h3>{lead.name}</h3>
-                          <p>{lead.interest || 'Interesse a definir'}</p>
-                          <span className="kanban-action">
-                            <Clock3 size={13} />
-                            {lead.next_action || 'Definir próximo passo'}
-                          </span>
-                          <footer>
-                            <Avatar
-                              user={data.users.find(
-                                (u) => u.id === (lead.owner_id ?? lead.reserved_to),
-                              )}
-                              small
-                            />
-                            <span>{dateLabel(lead.created_at)}</span>
-                            <ArrowUpRight size={14} />
-                          </footer>
-                        </button>
-                      ))}
-                    {!leads.some((l) => l.stage === key) && (
-                      <p className="column-empty">
-                        {key === 'WON'
-                          ? 'A validação de contratos estará disponível na próxima etapa.'
-                          : 'Nenhuma oportunidade nesta etapa.'}
-                      </p>
-                    )}
-                  </div>
-                </section>
-              ))}
-            </div>
+            <ManagerPipeline
+              data={data}
+              leadRevision={leadRevision}
+              onOpen={(id) => void openDetail(id)}
+              onConnectionChange={setConnected}
+              onSessionExpired={refresh}
+            />
           )}
 
           {activePage === 'agenda' && (

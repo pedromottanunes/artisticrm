@@ -11,6 +11,7 @@ import './mobile-app.css';
 import './premium-workspace.css';
 import './attendant-leads.css';
 import './manager-central.css';
+import './manager-pipeline.css';
 import { registerDeviceWorker } from './pwa';
 void registerDeviceWorker();
 ReactDOM.createRoot(document.getElementById('root')!).render(
