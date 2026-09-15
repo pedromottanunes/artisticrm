@@ -309,6 +309,13 @@ test('central administrativa: resumo, equipe e lista permanecem responsivos', as
   await expect(page.locator('.attendant-card').first()).toBeVisible();
   await expect(page.locator('.central-summary button')).toHaveCount(4);
   await expect(page.locator('.central-table tbody tr').first()).toBeVisible();
+  await expect(page.getByText('Atendentes', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Todos os leads', { exact: true })).toHaveCount(0);
+  const firstAttendantName = await page.locator('.attendant-card strong').first().innerText();
+  await page.locator('.attendant-card').first().click();
+  await expect(page.locator('.central-selected-attendant')).toHaveText(firstAttendantName);
+  await page.getByRole('button', { name: 'Todos os atendentes' }).click();
+  await expect(page.locator('.central-selected-attendant')).toHaveCount(0);
   const firstName = await page.locator('.central-contact strong').first().innerText();
   for (const width of [320, 390, 768, 1024, 1280, 1440, 1920]) {
     await page.setViewportSize({ width, height: 1000 });

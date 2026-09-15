@@ -225,6 +225,9 @@ export function ManagerCentral({
         : (board.counts[key] ?? 0)
       : '—';
   const resultsUpdating = !!board && loadedQuery !== query;
+  const selectedAttendant = attendant
+    ? board?.attendants.find((user) => user.id === attendant)
+    : undefined;
 
   const selectStatus = (value: string) => {
     setScope('OPEN');
@@ -304,10 +307,9 @@ export function ManagerCentral({
 
       <section className="central-team" aria-labelledby="central-team-title">
         <div className="central-section-heading">
-          <div>
-            <span className="eyebrow">EQUIPE</span>
-            <h2 id="central-team-title">Atendentes</h2>
-          </div>
+          <h2 className="eyebrow" id="central-team-title">
+            EQUIPE
+          </h2>
           <button
             className="text-link"
             disabled={!attendant}
@@ -384,9 +386,13 @@ export function ManagerCentral({
           </span>
         )}
         <div className="central-list-head">
-          <div>
-            <span className="eyebrow">LEADS</span>
-            <h2>Todos os leads</h2>
+          <div className="central-list-title">
+            <h2 className="eyebrow">LEADS</h2>
+            {selectedAttendant && (
+              <p className="central-selected-attendant" aria-live="polite">
+                {selectedAttendant.name}
+              </p>
+            )}
           </div>
           <div className="central-scopes" role="group" aria-label="Escopo dos leads">
             {(

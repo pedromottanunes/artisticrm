@@ -88,14 +88,17 @@
 .central-section-heading .eyebrow,
 .central-list-head .eyebrow {
   display: block;
-  margin-bottom: 4px;
+  margin: 0;
   color: var(--gold);
+  font-family: inherit;
   font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
   letter-spacing: 1.5px;
 }
 
-.central-section-heading h2,
-.central-list-head h2 {
+.central-selected-attendant {
+  margin-top: 5px;
   color: #f4f6fa;
   font: 400 24px/1.25 var(--display-font);
 }
@@ -502,8 +505,7 @@
     font-size: 31px;
   }
 
-  .central-section-heading h2,
-  .central-list-head h2 {
+  .central-selected-attendant {
     font-size: 21px;
   }
 
