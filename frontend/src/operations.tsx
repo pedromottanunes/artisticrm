@@ -90,13 +90,11 @@ export function PasswordChange({
               aria-label="Nova senha"
               type="password"
               autoComplete="new-password"
-              minLength={6}
+              minLength={1}
               maxLength={128}
               required
             />
-            <small>
-              Mínimo de 6 caracteres. Para maior proteção, prefira uma frase longa e exclusiva.
-            </small>
+            <small>A senha precisa apenas estar preenchida.</small>
           </label>
           <label className="full">
             Confirmar nova senha
@@ -105,7 +103,7 @@ export function PasswordChange({
               type="password"
               autoComplete="new-password"
               required
-              minLength={6}
+              minLength={1}
               maxLength={128}
             />
           </label>
@@ -155,7 +153,7 @@ export function Team({
       if (creating)
         await command('/users', 'POST', {
           name: f.get('name'),
-          email: f.get('email'),
+          login: f.get('login'),
           password: f.get('password'),
           queue_position: Number(f.get('position')),
         });
@@ -216,7 +214,7 @@ export function Team({
               <Avatar user={user} />
               <div>
                 <strong>{user.name}</strong>
-                <small>{user.email}</small>
+                <small>Login: {user.email}</small>
                 <small>
                   {user.active ? 'Acesso ativo' : 'Acesso desativado'} · posição{' '}
                   {user.queue_position}
@@ -276,8 +274,14 @@ export function Team({
               {creating && (
                 <>
                   <label className="full">
-                    E-mail de acesso
-                    <input name="email" type="email" required maxLength={200} />
+                    Login de acesso
+                    <input
+                      name="login"
+                      type="text"
+                      autoComplete="username"
+                      required
+                      maxLength={200}
+                    />
                   </label>
                   <label className="full">
                     Posição no rodízio
@@ -297,21 +301,21 @@ export function Team({
               {creating || reset ? (
                 <>
                   <label className="full">
-                    Senha temporária
+                    Senha de acesso
                     <input
                       name="password"
                       type="password"
                       autoComplete="new-password"
                       required
-                      minLength={6}
+                      minLength={1}
                       maxLength={128}
                     />
                   </label>
                   <div className="inline-info full">
                     <ShieldCheck size={20} />
                     <span>
-                      Entregue por canal seguro. A atendente precisará escolher outra senha antes de
-                      acessar leads. Redefinir encerra todas as sessões atuais.
+                      Esta senha já valerá no próximo acesso. Redefinir encerra todas as sessões
+                      atuais dessa atendente.
                     </span>
                   </div>
                 </>

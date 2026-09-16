@@ -12,6 +12,7 @@ import type { MongoStore } from './mongo-store.js';
 import { distributionBoard, distributionQuery } from './distribution.js';
 import { reportsOverview, reportsQuery } from './reports.js';
 import { tokenHash, verifyPassword } from './auth.js';
+import { loginSchema, passwordSchema } from './credentials.js';
 import { registerPush, type PushConfig, type PushSender } from './push.js';
 import { DomainError, requireManager, stages, type User } from './types.js';
 
@@ -182,22 +183,33 @@ export async function buildApp(
     { config: { rateLimit: { max: 12, timeWindow: '1 minute' } } },
     async (request, reply) => {
       const input = z
-        .object({ email: z.string().email().max(200), password: z.string().min(1).max(128) })
+        .object({
+          login: loginSchema.optional(),
+          // Compatibilidade durante a atualização de clientes que ainda enviam "email".
+          email: loginSchema.optional(),
+          password: passwordSchema,
+        })
+        .strict()
+        .refine((value) => Boolean(value.login || value.email), {
+          message: 'Informe o login.',
+          path: ['login'],
+        })
         .parse(request.body);
+      const login = input.login ?? input.email!;
       const user =
         db.kind === 'mongo'
           ? await db.one<User & { password_hash: string }>('users', {
-              email: input.email.toLowerCase(),
+              email: login,
               active: true,
             })
           : (
               await db.query<User & { password_hash: string }>(
                 'SELECT * FROM users WHERE lower(email)=$1 AND active',
-                [input.email.toLowerCase()],
+                [login],
               )
             ).rows[0];
       if (!user || !(await verifyPassword(input.password, user.password_hash)))
-        throw new DomainError('INVALID_CREDENTIALS', 'E-mail ou senha incorretos.', 401);
+        throw new DomainError('INVALID_CREDENTIALS', 'Login ou senha incorretos.', 401);
       const token = randomBytes(32).toString('base64url');
       if (db.kind === 'mongo')
         await db.atomic(async (tx) => {
@@ -379,28 +391,40 @@ export async function buildApp(
   });
   const commandKey = (headers: Record<string, unknown>) =>
     z.string().min(8).max(100).parse(headers['idempotency-key']);
-  const password = z.string().min(6, 'Use pelo menos 6 caracteres.').max(128);
+  const password = passwordSchema;
   const reason = z.string().trim().min(5, 'Explique o motivo em pelo menos 5 caracteres.').max(500);
   app.post('/api/v1/users', async (request, reply) => {
     requireManager(request.user);
     const input = z
       .object({
         name: shortText.min(2),
-        email: z
-          .string()
-          .email()
-          .max(200)
-          .transform((v) => v.toLowerCase()),
+        login: loginSchema.optional(),
+        // Compatibilidade com o formulário anterior durante o deploy.
+        email: loginSchema.optional(),
         password,
         queue_position: z.number().int().min(1).max(99),
       })
       .strict()
+      .refine((value) => Boolean(value.login || value.email), {
+        message: 'Informe o login.',
+        path: ['login'],
+      })
       .parse(request.body);
-    if (options.production && input.email.endsWith('@demo.artisti.local'))
-      throw new DomainError('INVALID_INPUT', 'Use um e-mail de acesso próprio.', 400);
-    return reply
-      .code(201)
-      .send(await crm.createAttendant(request.user, input, commandKey(request.headers)));
+    const login = input.login ?? input.email!;
+    if (options.production && login.endsWith('@demo.artisti.local'))
+      throw new DomainError('INVALID_INPUT', 'Use um login de acesso próprio.', 400);
+    return reply.code(201).send(
+      await crm.createAttendant(
+        request.user,
+        {
+          name: input.name,
+          email: login,
+          password: input.password,
+          queue_position: input.queue_position,
+        },
+        commandKey(request.headers),
+      ),
+    );
   });
   app.patch('/api/v1/users/:id', async (request) => {
     const input = z

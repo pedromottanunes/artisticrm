@@ -369,13 +369,13 @@ test('atendente alheia não altera avaliação de outra responsável', async () 
     { code: 'NOT_FOUND' },
   );
 });
-test('novo acesso exige troca de senha, não expõe dados e invalida sessão após troca', async () => {
+test('novo acesso aceita login simples e senha curta sem exigir troca', async () => {
   const created = await ops.createAttendant(
     manager,
     {
       name: 'Nova Atendente',
-      email: 'nova@example.test',
-      password: 'Temporary-secure-password-2026',
+      email: 'atendente5',
+      password: '1',
       queue_position: 5,
     },
     randomUUID(),
@@ -386,35 +386,19 @@ test('novo acesso exige troca de senha, não expõe dados e invalida sessão ap�
       method: 'POST',
       url: '/api/v1/auth/login',
       headers: { 'x-artisti-client': 'web' },
-      payload: { email: 'nova@example.test', password },
+      payload: { login: 'ATENDENTE5', password },
     });
   try {
-    const first = await login('Temporary-secure-password-2026');
+    const first = await login('1');
     assert.equal(first.statusCode, 200);
     const headers = {
       'x-artisti-client': 'web',
       cookie: `artisti_session=${first.cookies[0].value}`,
     };
     const snapshot = await app.inject({ url: '/api/v1/workspace', headers });
-    assert.equal(snapshot.json().user.must_change_password, true);
-    assert.deepEqual(snapshot.json().users, []);
-    assert.equal(
-      (await app.inject({ url: '/api/v1/opportunities/' + randomUUID(), headers })).statusCode,
-      403,
-    );
-    const changed = await app.inject({
-      method: 'POST',
-      url: '/api/v1/auth/password',
-      headers,
-      payload: {
-        current_password: 'Temporary-secure-password-2026',
-        new_password: 'Personal-secure-password-2026',
-      },
-    });
-    assert.equal(changed.statusCode, 200);
-    assert.equal((await app.inject({ url: '/api/v1/workspace', headers })).statusCode, 401);
-    assert.equal((await login('Temporary-secure-password-2026')).statusCode, 401);
-    assert.equal((await login('Personal-secure-password-2026')).statusCode, 200);
+    assert.equal(snapshot.statusCode, 200);
+    assert.equal(snapshot.json().user.must_change_password, false);
+    assert.equal((await login('senha-errada')).statusCode, 401);
     assert.equal(
       (await db.query<User>('SELECT * FROM users WHERE id=$1', [created.id])).rows[0]
         .must_change_password,
@@ -424,7 +408,7 @@ test('novo acesso exige troca de senha, não expõe dados e invalida sessão ap�
     await app.close();
   }
 });
-test('reset de senha revoga sessão, protege segredo no histórico e exige nova troca', async () => {
+test('reset de senha revoga sessão, protege segredo e libera o próximo acesso', async () => {
   await db.query('INSERT INTO sessions VALUES($1,$2,$3,1)', [
     'reset-token',
     users[0].id,
@@ -432,7 +416,7 @@ test('reset de senha revoga sessão, protege segredo no histórico e exige nova 
   ]);
   await ops.resetPassword(manager, users[0].id, 'Secret-temporary-password-2026', 1, randomUUID());
   const target = (await db.query<User>('SELECT * FROM users WHERE id=$1', [users[0].id])).rows[0];
-  assert.equal(target.must_change_password, true);
+  assert.equal(target.must_change_password, false);
   assert.equal(target.auth_version, 2);
   assert.equal((await db.query('SELECT * FROM sessions')).rows.length, 0);
   assert.doesNotMatch(
@@ -444,7 +428,7 @@ test('reset de senha revoga sessão, protege segredo no histórico e exige nova 
     /Secret-temporary-password/,
   );
 });
-test('criação repetida é idempotente e conflito de e-mail ignora caixa', async () => {
+test('criação repetida é idempotente e conflito de login ignora caixa', async () => {
   const input = {
       name: 'Nova Pessoa',
       email: 'person@example.test',

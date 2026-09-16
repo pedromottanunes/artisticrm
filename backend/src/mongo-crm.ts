@@ -682,14 +682,14 @@ export class MongoOperations {
             $or: [{ email: input.email.toLowerCase() }, { queue_position: input.queue_position }],
           })
         )
-          throw new DomainError('USER_CONFLICT', 'E-mail ou posição já utilizados.');
+          throw new DomainError('USER_CONFLICT', 'Login ou posição já utilizados.');
         const user = mongoUser({
           name: input.name,
           email: input.email,
           password_hash: hash,
           role: 'attendant',
           queue_position: input.queue_position,
-          must_change_password: true,
+          must_change_password: false,
         });
         await tx.insert('users', user);
         await tx.update('distribution_settings', { id: 1 }, { $inc: { version: 1 } });
@@ -698,7 +698,7 @@ export class MongoOperations {
           null,
           actor.id,
           'user.created',
-          'Atendente criada. Troca de senha exigida no primeiro acesso.',
+          'Atendente criada com login e senha definidos pela gestão.',
           { user_id: user.id },
         );
         return { id: user.id };
@@ -920,7 +920,7 @@ export class MongoOperations {
             'users',
             { id },
             {
-              $set: { password_hash: hash, must_change_password: true },
+              $set: { password_hash: hash, must_change_password: false },
               $inc: { auth_version: 1, version: 1 },
             },
           );
@@ -930,7 +930,7 @@ export class MongoOperations {
             null,
             actor.id,
             'password.reset',
-            'Senha temporária redefinida e sessões revogadas.',
+            'Senha redefinida e sessões revogadas.',
             { user_id: id },
           );
           return { ok: true };

@@ -22,6 +22,7 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const base = `http://127.0.0.1:${port}`;
 let server: ChildProcess | undefined;
 let output = '';
+let access = { login: 'master-release', password: '1' };
 const start = (bootstrap = true, overrides: NodeJS.ProcessEnv = {}) => {
   output = '';
   server = spawn(process.execPath, ['backend/dist/server.js'], {
@@ -37,8 +38,9 @@ const start = (bootstrap = true, overrides: NodeJS.ProcessEnv = {}) => {
       DATABASE_URL: '',
       APP_ORIGIN: 'https://staging.example.test',
       WHATSAPP_ENABLED: 'false',
-      BOOTSTRAP_ADMIN_EMAIL: bootstrap ? 'release@example.test' : '',
-      BOOTSTRAP_ADMIN_PASSWORD: bootstrap ? '123abc' : '',
+      BOOTSTRAP_ADMIN_LOGIN: bootstrap ? 'master-release' : '',
+      BOOTSTRAP_ADMIN_EMAIL: '',
+      BOOTSTRAP_ADMIN_PASSWORD: bootstrap ? '1' : '',
       ...overrides,
     },
   });
@@ -76,7 +78,7 @@ const login = async () => {
       'X-Artisti-Client': 'web',
       Origin: 'https://staging.example.test',
     },
-    body: JSON.stringify({ email: 'release@example.test', password: '123abc' }),
+    body: JSON.stringify(access),
   });
   assert.equal(response.status, 200);
   assert.match(response.headers.get('set-cookie')!, /Secure/);
@@ -100,6 +102,28 @@ try {
   assert.equal(first.opportunities.length, 0);
   assert.equal(first.demo, false);
   await stop();
+
+  let resetOutput = '';
+  const reset = spawn(process.execPath, ['backend/dist/reset-master.js'], {
+    cwd: root,
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      MONGODB_URI: replica.getUri(),
+      MONGODB_DB: 'artisti_release_test',
+      DATABASE_URL: '',
+      MASTER_LOGIN: 'master-reset',
+      MASTER_PASSWORD: 'masterartisti',
+    },
+  });
+  reset.stdout.on('data', (chunk) => (resetOutput += chunk));
+  reset.stderr.on('data', (chunk) => (resetOutput += chunk));
+  const [resetCode] = await once(reset, 'exit');
+  assert.equal(resetCode, 0, resetOutput);
+  assert.match(resetOutput, /master-reset/);
+  access = { login: 'master-reset', password: 'masterartisti' };
+
   start(false);
   await ready();
   cookie = await login();
@@ -111,7 +135,7 @@ try {
   assert.notEqual(code, 0);
   assert.match(output, /nunca ambos/);
   console.info(
-    'MongoDB release: servidor compilado, inicialização automática, frontend, login 6 caracteres, reinício sem bootstrap e configuração ambígua rejeitada — OK.',
+    'MongoDB release: servidor compilado, login simples, senha curta, reinício sem bootstrap e configuração ambígua rejeitada — OK.',
   );
 } finally {
   await stop();

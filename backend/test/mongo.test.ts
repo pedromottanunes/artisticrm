@@ -394,27 +394,24 @@ test('Mongo: retorno após perdido preserva histórico e exige revisão', async 
     code: 'CONTRACT_REQUIRED',
   });
 });
-test('Mongo: criação de conta, senha de seis caracteres, reset e revogação', async () => {
+test('Mongo: criação com login simples, senha curta, reset e revogação', async () => {
   const createKey = key(),
     input = {
       name: 'Nova Teste',
-      email: 'new@example.test',
-      password: '123abc',
+      email: 'atendente5',
+      password: '1',
       queue_position: 5,
     };
   const created = await ops.createAttendant(manager, input, createKey);
   assert.deepEqual(await ops.createAttendant(manager, input, createKey), created);
   let user = publicUser((await db.one('users', { id: created.id }))!);
-  assert.equal(user.must_change_password, true);
-  await assert.rejects(ops.snapshot(user), { code: 'PASSWORD_CHANGE_REQUIRED' });
-  await ops.changePassword(user, '123abc', 'abc123');
-  await assert.rejects(ops.snapshot(user), { code: 'UNAUTHENTICATED' });
-  user = publicUser((await db.one('users', { id: user.id }))!);
   assert.equal(user.must_change_password, false);
-  await ops.resetPassword(manager, user.id, '456abc', user.version, key());
+  assert.equal((await ops.snapshot(user)).user.id, user.id);
+  assert.equal(user.must_change_password, false);
+  await ops.resetPassword(manager, user.id, '2', user.version, key());
   await assert.rejects(ops.snapshot(user), { code: 'UNAUTHENTICATED' });
-  assert.ok(!JSON.stringify(await db.many('operation_receipts')).includes('123abc'));
-  assert.ok(!JSON.stringify(await db.many('audit_events')).includes('456abc'));
+  assert.ok(!JSON.stringify(await db.many('operation_receipts')).includes('"password":"1"'));
+  assert.ok(!JSON.stringify(await db.many('audit_events')).includes('"password":"2"'));
 });
 test('Mongo: transação abortada não deixa escrita parcial e índices impedem duplicatas', async () => {
   await assert.rejects(

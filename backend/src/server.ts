@@ -18,6 +18,7 @@ if (production && !process.env.DATABASE_URL && !process.env.MONGODB_URI)
     'Configure MONGODB_URI no ambiente publicado. Banco embarcado não é permitido no Render.',
   );
 const appOrigin = process.env.APP_ORIGIN ?? process.env.RENDER_EXTERNAL_URL;
+const bootstrapLogin = process.env.BOOTSTRAP_ADMIN_LOGIN ?? process.env.BOOTSTRAP_ADMIN_EMAIL;
 if (production && (!appOrigin || new URL(appOrigin).protocol !== 'https:'))
   throw new Error('APP_ORIGIN ou RENDER_EXTERNAL_URL deve conter a origem HTTPS pública.');
 const dataPath = fileURLToPath(new URL('../.data/postgres', import.meta.url));
@@ -31,7 +32,7 @@ const db = process.env.MONGODB_URI
     );
 if (db.kind === 'mongo') {
   await initializeMongo(db);
-  await bootstrapMongo(db, process.env.BOOTSTRAP_ADMIN_EMAIL, process.env.BOOTSTRAP_ADMIN_PASSWORD);
+  await bootstrapMongo(db, bootstrapLogin, process.env.BOOTSTRAP_ADMIN_PASSWORD);
 } else {
   await migrate(db);
   if (production) {
@@ -42,11 +43,7 @@ if (db.kind === 'mongo') {
       throw new Error(
         'O banco contém contas de demonstração. Use um banco vazio e exclusivo para homologação.',
       );
-    await bootstrapManager(
-      db,
-      process.env.BOOTSTRAP_ADMIN_EMAIL,
-      process.env.BOOTSTRAP_ADMIN_PASSWORD,
-    );
+    await bootstrapManager(db, bootstrapLogin, process.env.BOOTSTRAP_ADMIN_PASSWORD);
   } else await seedDemo(new CRM(db));
 }
 const { app } = await buildApp(db, {

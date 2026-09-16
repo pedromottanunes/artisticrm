@@ -10,6 +10,7 @@
     "start": "node dist/server.js",
     "migrate": "node dist/migrate.js",
     "user:create": "node dist/create-user.js",
+    "master:reset": "node dist/reset-master.js",
     "push:keys": "tsx src/push-keys.ts",
     "test": "tsx --test --test-concurrency=1 test/*.test.ts"
   },

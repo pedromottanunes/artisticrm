@@ -70,11 +70,11 @@ export class Operations extends CRM {
           [input.email.toLowerCase(), input.queue_position],
         );
         if (occupied.rows.length)
-          throw new DomainError('USER_CONFLICT', 'E-mail ou posição de rodízio já utilizados.');
+          throw new DomainError('USER_CONFLICT', 'Login ou posição de rodízio já utilizados.');
         const id = randomUUID();
         await tx.query(
           `INSERT INTO users(id,name,email,password_hash,role,queue_position,queue_enabled,must_change_password)
-          VALUES($1,$2,$3,$4,'attendant',$5,true,true)`,
+          VALUES($1,$2,$3,$4,'attendant',$5,true,false)`,
           [id, input.name, input.email.toLowerCase(), hash, input.queue_position],
         );
         await tx.query('UPDATE distribution_settings SET version=version+1 WHERE id=1');
@@ -83,7 +83,7 @@ export class Operations extends CRM {
           null,
           actor.id,
           'user.created',
-          'Atendente criada. Troca de senha exigida no primeiro acesso.',
+          'Atendente criada com login e senha definidos pela gestão.',
           { user_id: id },
         );
         return { id };
@@ -348,7 +348,7 @@ export class Operations extends CRM {
               'A conta mudou. Atualize antes de redefinir.',
             );
           await tx.query(
-            'UPDATE users SET password_hash=$2,must_change_password=true,auth_version=auth_version+1,version=version+1 WHERE id=$1',
+            'UPDATE users SET password_hash=$2,must_change_password=false,auth_version=auth_version+1,version=version+1 WHERE id=$1',
             [id, hash],
           );
           await tx.query('DELETE FROM sessions WHERE user_id=$1', [id]);
@@ -357,7 +357,7 @@ export class Operations extends CRM {
             null,
             actor.id,
             'password.reset',
-            'Senha temporária redefinida pela gestão e sessões revogadas.',
+            'Senha redefinida pela gestão e sessões revogadas.',
             { user_id: id },
           );
           return { ok: true };

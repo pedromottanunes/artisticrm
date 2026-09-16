@@ -9,6 +9,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { hashPassword } from './auth.js';
+import { loginSchema, passwordSchema } from './credentials.js';
 
 // Native document operations. No SQL emulation and no in-memory source of truth.
 export class MongoTx {
@@ -202,17 +203,15 @@ export function mongoUser(input: {
   };
 }
 
-export async function bootstrapMongo(db: MongoStore, email?: string, password?: string) {
+export async function bootstrapMongo(db: MongoStore, login?: string, password?: string) {
   if (await db.count('users', { email: /@demo\.artisti\.local$/ }))
     throw new Error('Banco contém usuários demo. Use outro banco para homologação.');
   if (await db.count('users')) return;
   const credentials = z
-    .object({ email: z.string().email().max(200), password: z.string().min(6).max(128) })
-    .safeParse({ email, password });
-  if (!credentials.success || credentials.data.email.endsWith('@demo.artisti.local'))
-    throw new Error(
-      'Banco vazio: configure BOOTSTRAP_ADMIN_EMAIL e BOOTSTRAP_ADMIN_PASSWORD (6 a 128 caracteres).',
-    );
+    .object({ login: loginSchema, password: passwordSchema })
+    .safeParse({ login, password });
+  if (!credentials.success || credentials.data.login.endsWith('@demo.artisti.local'))
+    throw new Error('Banco vazio: configure BOOTSTRAP_ADMIN_LOGIN e BOOTSTRAP_ADMIN_PASSWORD.');
   const password_hash = await hashPassword(credentials.data.password);
   await db.atomic(async (tx) => {
     if (await tx.count('users')) return;
@@ -220,7 +219,7 @@ export async function bootstrapMongo(db: MongoStore, email?: string, password?: 
       'users',
       mongoUser({
         name: 'Gestão Artisti',
-        email: credentials.data.email,
+        email: credentials.data.login,
         password_hash,
         role: 'manager',
       }),

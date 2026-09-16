@@ -646,7 +646,7 @@ export function App() {
                 <div className="profile-card">
                   <Avatar user={data.user} />
                   <h2>{data.user.name}</h2>
-                  <p>{data.user.email}</p>
+                  <p>Login: {data.user.email}</p>
                   <span className="stage-pill">{isManager ? 'Gestão' : 'Atendimento'}</span>
                   <button className="button outline" onClick={() => void logout()}>
                     <LogOut size={16} />
@@ -827,7 +827,7 @@ function Login({ onLogin, connected }: { onLogin: () => Promise<void>; connected
   const [profile, setProfile] = useState('cadu');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [email, setEmail] = useState('');
+  const [accessLogin, setAccessLogin] = useState('');
   const [password, setPassword] = useState('');
   const [demoSelected, setDemoSelected] = useState(true);
   const localDemo = import.meta.env.DEV && demoSelected;
@@ -840,8 +840,8 @@ function Login({ onLogin, connected }: { onLogin: () => Promise<void>; connected
         method: 'POST',
         body: JSON.stringify(
           localDemo
-            ? { email: `${profile}@demo.artisti.local`, password: 'Artisti.demo2026!' }
-            : { email, password },
+            ? { login: `${profile}@demo.artisti.local`, password: 'Artisti.demo2026!' }
+            : { login: accessLogin, password },
         ),
       });
       await onLogin();
@@ -878,7 +878,7 @@ function Login({ onLogin, connected }: { onLogin: () => Promise<void>; connected
                   setError('');
                 }}
               >
-                {localDemo ? 'Usar e-mail e senha' : 'Usar perfil de demonstração'}
+                {localDemo ? 'Usar login e senha' : 'Usar perfil de demonstração'}
               </button>
             )}
             {localDemo ? (
@@ -901,13 +901,14 @@ function Login({ onLogin, connected }: { onLogin: () => Promise<void>; connected
             ) : (
               <>
                 <label>
-                  E-mail
+                  Login
                   <input
-                    type="email"
+                    type="text"
                     autoComplete="username"
                     required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    maxLength={200}
+                    value={accessLogin}
+                    onChange={(e) => setAccessLogin(e.target.value)}
                   />
                 </label>
                 <label>
