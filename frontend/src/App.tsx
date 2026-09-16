@@ -21,6 +21,7 @@ import {
   Info,
   X,
   Smartphone,
+  BarChart3,
 } from 'lucide-react';
 import { api, ApiError, stages, type Snapshot, type Lead, type Detail } from './api';
 import { CentralStatusPanel } from './central';
@@ -28,6 +29,7 @@ import { Avatar, Badge, Source, Empty, Modal, Countdown, IconButton } from './co
 import { LeadForm, LeadDetail } from './forms';
 import { ManagerCentral } from './manager-central';
 import { ManagerPipeline } from './manager-pipeline';
+import { ManagerReports } from './manager-reports';
 import { AttendantLeads } from './attendant-leads';
 import { Team, PasswordChange } from './operations';
 import { MobileNavigation } from './mobile-navigation';
@@ -38,6 +40,7 @@ type Page =
   | 'overview'
   | 'leads'
   | 'pipeline'
+  | 'reports'
   | 'agenda'
   | 'distribution'
   | 'meta'
@@ -50,6 +53,7 @@ const navItems: { id: Page; label: string; icon: typeof Users; group: string }[]
   { id: 'central', label: 'Central de atendimentos', icon: LayoutDashboard, group: 'workspace' },
   { id: 'pipeline', label: 'Funil de vendas', icon: GitBranch, group: 'workspace' },
   { id: 'agenda', label: 'Agenda', icon: CalendarDays, group: 'workspace' },
+  { id: 'reports', label: 'Relatórios', icon: BarChart3, group: 'workspace' },
   { id: 'contracts', label: 'Contratos', icon: FileCheck2, group: 'growth' },
   { id: 'settings', label: 'Configurações', icon: Settings, group: 'system' },
 ];
@@ -527,6 +531,13 @@ export function App() {
             <ManagerPipeline
               data={data}
               leadRevision={leadRevision}
+              onOpen={(id) => void openDetail(id)}
+              onConnectionChange={setConnected}
+              onSessionExpired={refresh}
+            />
+          )}
+          {activePage === 'reports' && (
+            <ManagerReports
               onOpen={(id) => void openDetail(id)}
               onConnectionChange={setConnected}
               onSessionExpired={refresh}

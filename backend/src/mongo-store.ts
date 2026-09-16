@@ -142,6 +142,7 @@ export async function initializeMongo(db: MongoStore) {
   await db.collection('opportunities').createIndex({ owner_id: 1, created_at: -1 });
   await db.collection('opportunities').createIndex({ state: 1, reserved_to: 1 });
   await db.collection('opportunities').createIndex({ created_at: -1 });
+  await db.collection('opportunities').createIndex({ stage: 1, created_at: -1 });
   await db.collection('appointments').createIndex({ opportunity_id: 1, status: 1 });
   await db
     .collection('appointments')

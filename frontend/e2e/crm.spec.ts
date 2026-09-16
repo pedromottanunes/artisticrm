@@ -384,6 +384,75 @@ test('central administrativa: resumo, equipe e lista permanecem responsivos', as
   await expect(page.getByRole('dialog')).toBeVisible();
 });
 
+test('relatórios administrativos mostram período, equipe, bolsão e resultados sem poluir a central', async ({
+  page,
+}) => {
+  await login(page);
+  const loaded = page.waitForResponse(
+    (response) => response.url().includes('/api/v1/reports/overview?') && response.status() === 200,
+  );
+  await page.goto('/#reports');
+  await loaded;
+  await expect(page.getByRole('heading', { level: 1, name: 'Relatórios' })).toBeVisible();
+  await expect(
+    page.getByText('Usuários com mais leads sem resposta', { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText('Usuários com resposta mais rápida', { exact: true })).toBeVisible();
+  await expect(page.getByText('Origens com mais leads', { exact: true })).toBeVisible();
+  await expect(page.getByText('Leads assumidos através do bolsão', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('Leads perdidos para o bolsão por usuário', { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText('Leads interagidos no mesmo dia', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('Tempo de primeira interação por usuário (minutos)', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText('Leads com negócio fechado por usuário', { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText('Atividades em aberto por usuário', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('Tempo médio até o primeiro aceite no CRM', { exact: true }),
+  ).toBeVisible();
+
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 950 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+  }
+
+  await page.setViewportSize({ width: 1440, height: 950 });
+  const sources = page.locator('.report-card').filter({
+    has: page.getByRole('heading', { name: 'Origens com mais leads', exact: true }),
+  });
+  await sources.locator('.report-compact-list button').first().click();
+  const list = page.getByRole('dialog');
+  await expect(list).toBeVisible();
+  await expect(list.locator('.report-lead-list button').first()).toBeVisible();
+  await list.getByRole('button', { name: 'Fechar janela' }).click();
+
+  const emptyLoaded = page.waitForResponse(
+    (response) =>
+      response.url().includes('from=2020-01-01') &&
+      response.url().includes('to=2020-01-02') &&
+      response.status() === 200,
+  );
+  await page.getByLabel('De', { exact: true }).fill('2020-01-01');
+  await page.getByLabel('Até', { exact: true }).fill('2020-01-02');
+  await page.getByRole('button', { name: 'Filtrar', exact: true }).click();
+  await emptyLoaded;
+  await expect(page.getByText('Nenhuma origem no período.', { exact: true })).toBeVisible();
+  await expect(page.locator('.report-funnel b').first()).toHaveAttribute('style', 'width: 0%;');
+
+  await page
+    .getByRole('navigation', { name: 'Menu principal' })
+    .getByRole('button', { name: 'Central de atendimentos', exact: true })
+    .click();
+  await expect(page.locator('.manager-central')).toBeVisible();
+  await expect(page.locator('.manager-reports')).toHaveCount(0);
+});
+
 test('central mantém a estrutura visível enquanto troca somente os resultados', async ({
   page,
 }) => {

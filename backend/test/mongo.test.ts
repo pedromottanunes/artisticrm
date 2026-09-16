@@ -17,6 +17,7 @@ import { hashPassword } from '../src/auth.js';
 import type { User } from '../src/types.js';
 import { checkDistribution } from './distribution-checks.js';
 import { checkPush } from './push-checks.js';
+import { checkReports } from './report-checks.js';
 import {
   checkDeletePermissions,
   checkDeleteCleanup,
@@ -111,6 +112,19 @@ test('push: entrega privada, fila durável, concorrência, expiração e revoga�
     () => now,
     (ms) => {
       now = new Date(now.getTime() + ms);
+    },
+  );
+});
+
+test('relatórios Mongo: período, equipe, bolsão, funil e acesso administrativo', async () => {
+  await checkReports(
+    db,
+    ops,
+    manager,
+    users,
+    () => now,
+    (milliseconds) => {
+      now = new Date(now.getTime() + milliseconds);
     },
   );
 });

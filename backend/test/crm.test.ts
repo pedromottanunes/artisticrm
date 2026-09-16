@@ -12,6 +12,7 @@ import { bootstrapManager } from '../src/bootstrap.js';
 import type { User, Opportunity } from '../src/types.js';
 import { checkDistribution } from './distribution-checks.js';
 import { checkPush } from './push-checks.js';
+import { checkReports } from './report-checks.js';
 
 let db: Database;
 let crm: CRM;
@@ -94,6 +95,19 @@ test('push: entrega privada, fila durável, concorrência, expiração e revoga�
     },
   );
   await db.query('UPDATE users SET auth_version=1');
+});
+
+test('relatórios SQL: período, equipe, bolsão, funil e acesso administrativo', async () => {
+  await checkReports(
+    db,
+    crm,
+    manager,
+    users,
+    () => now,
+    (milliseconds) => {
+      now = new Date(now.getTime() + milliseconds);
+    },
+  );
 });
 
 test('oito novos contatos percorrem duas voltas exatas do rodízio', async () => {

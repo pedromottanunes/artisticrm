@@ -1,0 +1,325 @@
+.manager-reports {
+  display: grid;
+  gap: 16px;
+}
+.reports-filter {
+  min-height: 66px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #0c1d2c;
+}
+.reports-filter > div,
+.reports-filter label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.reports-filter > div:last-child {
+  justify-content: flex-end;
+}
+.reports-filter label {
+  flex-direction: row;
+  font-size: 13px;
+  color: #91a2b4;
+}
+.reports-filter input {
+  width: 152px;
+  min-height: 38px;
+  padding: 7px 10px;
+  font-size: 14px;
+}
+.reports-filter > div > span {
+  color: #8193a6;
+  font-size: 13px;
+}
+.reports-error {
+  padding: 12px 15px;
+  border: 1px solid #b15e4a55;
+  border-radius: 8px;
+  color: #e1a18f;
+  background: #a0442e10;
+  font-size: 14px;
+}
+.reports-loading {
+  color: #92a4b6;
+  text-align: center;
+  padding: 60px 20px;
+}
+.reports-overview {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  transition: opacity 0.15s;
+}
+.reports-overview.is-updating {
+  opacity: 0.58;
+}
+.report-card {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #0e2031;
+  overflow: hidden;
+}
+.report-card > header {
+  min-height: 58px;
+  padding: 15px 16px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border-bottom: 1px solid var(--line);
+}
+.report-card > header svg {
+  color: var(--gold);
+}
+.report-card > header h2 {
+  font-size: 14px;
+  line-height: 1.45;
+}
+.report-compact-list {
+  padding: 5px 15px 11px;
+}
+.report-compact-list > div {
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: 25px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.report-compact-list > div:last-child {
+  border-bottom: 0;
+}
+.report-rank {
+  color: #667e94;
+  font-size: 11px;
+}
+.report-compact-list strong {
+  overflow: hidden;
+  color: #c9d3dd;
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.report-compact-list button {
+  color: var(--gold);
+  font-size: 12px;
+}
+.report-empty-line {
+  min-height: 98px;
+  padding: 26px 16px;
+  color: #7f91a3;
+  font-size: 13px;
+}
+.report-funnel {
+  padding: 9px 15px 13px;
+  display: grid;
+  gap: 7px;
+}
+.report-funnel button {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) minmax(50px, 0.8fr) 27px;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  font-size: 11px;
+  color: #aebdcb;
+}
+.report-funnel i,
+.report-bars i {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 5px;
+  background: #ffffff0b;
+}
+.report-funnel b,
+.report-bars b {
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  background: #d6a456;
+}
+.report-funnel strong {
+  text-align: right;
+  color: #dbe3ea;
+}
+.report-average {
+  min-height: 74px;
+  padding: 12px 17px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #0c1d2c;
+}
+.report-average > svg {
+  color: var(--gold);
+}
+.report-average div {
+  display: flex;
+  align-items: baseline;
+  gap: 13px;
+}
+.report-average strong {
+  color: #e9b562;
+  font-size: 25px;
+}
+.report-average span {
+  color: #92a4b5;
+  font-size: 13px;
+}
+.reports-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 6px 1px -4px;
+  color: #aebdcb;
+}
+.reports-section-heading svg {
+  color: var(--gold);
+}
+.reports-section-heading h2 {
+  font-size: 15px;
+}
+.reports-pair,
+.reports-charts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.report-bars {
+  min-height: 180px;
+  padding: 16px;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+.report-bars button {
+  display: grid;
+  grid-template-columns: minmax(105px, 0.75fr) minmax(80px, 1.8fr) 35px;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  color: #aebdcb;
+  font-size: 12px;
+}
+.report-bars button > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.report-bars strong {
+  text-align: right;
+  color: #dbe3ea;
+}
+.report-card.danger .report-bars b {
+  background: #b36b50;
+}
+.report-card .empty {
+  min-height: 180px;
+  border: 0;
+  padding: 28px 18px;
+}
+.report-columns {
+  min-height: 210px;
+  padding: 18px 15px 12px;
+  display: flex;
+  align-items: end;
+  gap: 7px;
+  overflow-x: auto;
+}
+.report-columns button {
+  width: 34px;
+  min-width: 34px;
+  height: 172px;
+  display: grid;
+  grid-template-rows: 20px 1fr 22px;
+  align-items: end;
+  color: #899caf;
+  font-size: 10px;
+}
+.report-columns button strong {
+  color: #bac7d3;
+  text-align: center;
+}
+.report-columns button i {
+  width: 20px;
+  min-height: 3px;
+  justify-self: center;
+  border-radius: 3px 3px 0 0;
+  background: #4396d0;
+}
+.report-lead-list {
+  max-height: 58vh;
+  padding: 4px 20px 20px;
+  overflow-y: auto;
+}
+.report-lead-list button {
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  color: #d3dce5;
+}
+.report-lead-list button > span:last-child {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--gold);
+  font-size: 12px;
+}
+
+@media (max-width: 1350px) {
+  .reports-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 700px) {
+  .reports-filter,
+  .reports-filter > div {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+  .reports-filter {
+    flex-direction: column;
+  }
+  .reports-filter > div:first-child > svg {
+    display: none;
+  }
+  .reports-filter label {
+    flex: 1 1 125px;
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .reports-filter input {
+    width: 100%;
+  }
+  .reports-filter > div:last-child .button {
+    flex: 1;
+  }
+  .reports-overview,
+  .reports-pair,
+  .reports-charts {
+    grid-template-columns: 1fr;
+  }
+  .report-average div {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .report-bars button {
+    grid-template-columns: minmax(90px, 0.9fr) minmax(70px, 1.4fr) 30px;
+    gap: 8px;
+  }
+}
