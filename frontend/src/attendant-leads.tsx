@@ -97,6 +97,9 @@ export function AttendantLeads({
               >
                 <Badge state={lead.state} />
                 <strong>{lead.name}</strong>
+                {pool && lead.phone && (
+                  <span className="attendant-lead-phone">{phoneLabel(lead.phone)}</span>
+                )}
               </button>
               <div className="attendant-lead-actions">{action(lead)}</div>
             </article>
@@ -117,4 +120,13 @@ export function AttendantLeads({
       )}
     </section>
   );
+}
+
+function phoneLabel(value: string) {
+  const digits = value.replace(/\D/g, '');
+  if (digits.startsWith('55') && digits.length === 13)
+    return `+55 (${digits.slice(2, 4)}) ${digits.slice(4, 9)}-${digits.slice(9)}`;
+  if (digits.startsWith('55') && digits.length === 12)
+    return `+55 (${digits.slice(2, 4)}) ${digits.slice(4, 8)}-${digits.slice(8)}`;
+  return digits ? `+${digits}` : value;
 }

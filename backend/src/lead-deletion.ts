@@ -80,7 +80,12 @@ export async function deleteLeadData(
       'response.id': { $in: [id, ...appointments.map((a) => a.id)] },
     });
     await tx.remove('whatsapp_inbox', inboxFilter);
-    for (const collection of ['appointments', 'audit_events', 'inbound_events'])
+    for (const collection of [
+      'appointments',
+      'audit_events',
+      'lead_attributions',
+      'inbound_events',
+    ])
       await tx.remove(collection, { opportunity_id: id });
     await tx.remove('opportunities', { id });
     if (!shared) await tx.remove('contacts', { id: row.contact_id });
@@ -130,6 +135,7 @@ export async function deleteLeadData(
     ]);
     await tx.query('DELETE FROM appointments WHERE opportunity_id=$1', [id]);
     await tx.query('DELETE FROM audit_events WHERE opportunity_id=$1', [id]);
+    await tx.query('DELETE FROM lead_attributions WHERE opportunity_id=$1', [id]);
     await tx.query('DELETE FROM inbound_events WHERE opportunity_id=$1', [id]);
     await tx.query('DELETE FROM opportunities WHERE id=$1', [id]);
     if (!shared) await tx.query('DELETE FROM contacts WHERE id=$1', [row.contact_id]);

@@ -34,7 +34,9 @@ Sem ativação, GET/POST do webhook retornam 503. Ativar com configuração inco
 - Deduplicação permanente pelo ID da mensagem. Repetição após crash não recria o lead nem avança novamente o rodízio. Novas mensagens do mesmo contato preservam a oportunidade aberta.
 - O prazo da reserva começa quando o backend efetivamente distribui o lead, não no clique do site. Sem destinatária habilitada, fica pendente até habilitar o rodízio.
 - Nome e telefone vêm do webhook. Texto, mídia e histórico de chat não são armazenados; não há downloads de anexos ou respostas automáticas. Mensagens sem telefone válido são rejeitadas para diagnóstico, não convertidas em contatos fictícios.
-- Origem padrão: “Não identificada”. Referência de anúncio Meta no webhook identifica Meta Ads. Texto pré-preenchido do site não prova Google Ads; GTM/atribuição do site continuam sendo uma integração separada.
+- Origem padrão: “Não identificada”. Quando a primeira mensagem traz uma referência de anúncio, são preservados o ID e a URL da origem, `ctwa_clid`, título, texto, formato e URLs da mídia publicitária fornecidos no próprio webhook. Cada nova referência fica no histórico da oportunidade e não apaga as anteriores.
+- Esta etapa não consulta a Marketing API nem qualquer outro endpoint da Meta. Nomes de campanha, conjunto e anúncio só poderão ser enriquecidos posteriormente; até lá, o CRM exibe exclusivamente os dados comprovadamente recebidos no webhook assinado.
+- Texto pré-preenchido do site não prova Google Ads; GTM/atribuição do site continuam sendo uma integração separada.
 - `GET /api/v1/whatsapp/status`, exclusivo da gestão, exibe configuração, pendências, tentativas e últimas datas sem revelar credenciais. “Configurado” não significa verificação de conectividade externa.
 - As linhas normalizadas da fila e IDs de deduplicação são mantidos. Planejar retenção/eliminação de dados e backups antes da operação com pacientes; não remover IDs de eventos indiscriminadamente, pois reenvios poderiam criar novas oportunidades.
 

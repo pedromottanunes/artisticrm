@@ -56,6 +56,22 @@ export interface Detail extends Lead {
   appointments: Appointment[];
   can_edit: boolean;
   history: { id: string; kind: string; description: string; created_at: string }[];
+  attributions: MetaAttribution[];
+}
+export interface MetaAttribution {
+  id: string;
+  provider: 'meta';
+  channel: 'whatsapp';
+  source_type: 'ad';
+  source_id?: string | null;
+  source_url?: string | null;
+  headline?: string | null;
+  body?: string | null;
+  media_type?: string | null;
+  image_url?: string | null;
+  video_url?: string | null;
+  thumbnail_url?: string | null;
+  received_at: string;
 }
 export interface Appointment {
   version: number;

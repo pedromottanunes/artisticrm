@@ -563,6 +563,11 @@ test('atendimento móvel acessa bolsão e confirma aceite sem abrir contato fict
     .getByRole('button', { name: 'Bolsão' })
     .click();
   await expect(page.getByRole('heading', { name: 'Bolsão', exact: true })).toBeVisible();
+  const available = page.locator('.attendant-lead').first();
+  await expect(available.locator('.attendant-lead-details strong')).not.toHaveText(
+    'Contato disponível',
+  );
+  await expect(available.locator('.attendant-lead-phone')).toHaveText(/^\+55/);
   await page.screenshot({ path: 'test-results/atendimento-mobile.png', fullPage: true });
   const claim = page.getByRole('button', { name: 'Assumir lead' }).first();
   await expect(claim).toBeVisible();

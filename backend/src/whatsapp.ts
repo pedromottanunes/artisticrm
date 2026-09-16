@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { CRM, LeadInput } from './crm.js';
+import type { CRM, LeadInput, MetaAttributionInput } from './crm.js';
 import type { MongoOperations } from './mongo-crm.js';
 import { DomainError } from './types.js';
 import { wasDeleted } from './lead-deletion.js';
@@ -46,7 +46,18 @@ const message = z.object({
   from: z.string().regex(/^[1-9]\d{9,14}$/),
   type: z.string(),
   referral: z
-    .object({ source_type: z.string().optional(), source_id: z.string().optional() })
+    .object({
+      source_type: z.string().trim().max(50).nullish(),
+      source_id: z.string().trim().max(512).nullish(),
+      source_url: z.string().trim().max(4096).nullish(),
+      ctwa_clid: z.string().trim().max(2048).nullish(),
+      headline: z.string().trim().max(1000).nullish(),
+      body: z.string().trim().max(4000).nullish(),
+      media_type: z.string().trim().max(50).nullish(),
+      image_url: z.string().trim().max(4096).nullish(),
+      video_url: z.string().trim().max(4096).nullish(),
+      thumbnail_url: z.string().trim().max(4096).nullish(),
+    })
     .optional(),
 });
 const envelope = z.object({
@@ -68,6 +79,31 @@ const valueSchema = z.object({
     .optional(),
   messages: z.array(message).max(1000).optional(),
 });
+
+type Referral = NonNullable<z.infer<typeof message>['referral']>;
+const present = (value: string | null | undefined) => value || undefined;
+function metaAttribution(referral: Referral | undefined): MetaAttributionInput | undefined {
+  if (referral?.source_type !== 'ad') return;
+  const source_id = present(referral.source_id);
+  const source_url = present(referral.source_url);
+  const ctwa_clid = present(referral.ctwa_clid);
+  // A signed payload still needs an ad/click identifier before it is treated as attribution.
+  if (!source_id && !source_url && !ctwa_clid) return;
+  return {
+    provider: 'meta',
+    channel: 'whatsapp',
+    source_type: 'ad',
+    source_id,
+    source_url,
+    ctwa_clid,
+    headline: present(referral.headline),
+    body: present(referral.body),
+    media_type: present(referral.media_type),
+    image_url: present(referral.image_url),
+    video_url: present(referral.video_url),
+    thumbnail_url: present(referral.thumbnail_url),
+  };
+}
 
 export class WhatsAppCentral {
   constructor(
@@ -112,7 +148,7 @@ export class WhatsAppCentral {
             ?.find((c) => c.wa_id === msg.from)
             ?.profile?.name?.trim()
             .slice(0, 160);
-          const metaAd = msg.referral?.source_type === 'ad' && !!msg.referral.source_id;
+          const attribution = metaAttribution(msg.referral);
           events.push({
             id: `whatsapp:${config.phoneNumberId}:${msg.id}`,
             lead: {
@@ -120,16 +156,18 @@ export class WhatsAppCentral {
               phone: msg.from,
               interest: '',
               unit: 'A definir',
-              source: metaAd ? 'Meta Ads' : 'Não identificada',
-              source_evidence: metaAd
-                ? 'Webhook WhatsApp assinado com referência de anúncio Meta.'
+              source: attribution ? 'Meta Ads' : 'Não identificada',
+              source_evidence: attribution
+                ? 'Webhook WhatsApp assinado com referência de anúncio enviada pela Meta.'
                 : 'Entrada confirmada pelo WhatsApp central. Origem de marketing não atribuída.',
+              meta_attribution: attribution,
             },
           });
         }
       }
     }
-    // Persist the entire batch before acknowledging. No chat bodies/media are stored.
+    // Persist the entire batch before acknowledging. Chat bodies/media are not stored;
+    // only the normalized ad referral supplied by Meta is retained.
     const db = this.crm.db;
     if (db.kind === 'mongo')
       await db.atomic(async (tx) => {

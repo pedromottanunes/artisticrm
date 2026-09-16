@@ -151,6 +151,9 @@ export async function initializeMongo(db: MongoStore) {
     );
   await db.collection('audit_events').createIndex({ opportunity_id: 1, created_at: -1 });
   await db.collection('audit_events').createIndex({ kind: 1, created_at: -1, id: -1 });
+  await db.collection('lead_attributions').createIndex({ id: 1 }, { unique: true });
+  await db.collection('lead_attributions').createIndex({ external_id: 1 }, { unique: true });
+  await db.collection('lead_attributions').createIndex({ opportunity_id: 1, received_at: -1 });
   await db.collection('inbound_events').createIndex({ external_id: 1 }, { unique: true });
   await db.collection('deleted_inbound_events').createIndex({ hash: 1 }, { unique: true });
   await db.collection('claims').createIndex({ user_id: 1, key: 1 }, { unique: true });

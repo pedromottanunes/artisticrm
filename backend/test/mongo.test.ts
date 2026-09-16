@@ -228,7 +228,7 @@ test('Mongo: aceite antes do sweep registra vencimento apenas uma vez', async ()
     1,
   );
 });
-test('Mongo: contatos e histórico ficam ocultos até o aceite e sem hashes no snapshot', async () => {
+test('Mongo: reserva protege contato e bolsão libera dados para a equipe ativa', async () => {
   const { id } = await lead();
   const reserved = await ops.detail(users[0], id);
   assert.equal(reserved.phone, undefined);
@@ -236,9 +236,10 @@ test('Mongo: contatos e histórico ficam ocultos até o aceite e sem hashes no s
   await assert.rejects(ops.detail(users[1], id), { code: 'NOT_FOUND' });
   now = new Date(now.getTime() + 600_000);
   const pool = await ops.snapshot(users[1]);
-  assert.equal(pool.opportunities[0].name, 'Contato disponível');
+  assert.equal(pool.opportunities[0].name, input().name);
+  assert.equal(pool.opportunities[0].phone, input().phone);
   assert.ok(!JSON.stringify(pool).includes('password_hash'));
-  assert.ok(!JSON.stringify(pool).includes(input().phone));
+  assert.equal((await ops.detail(users[1], id)).phone, input().phone);
   await ops.claim(users[1], id, 'pool', 2, key());
   assert.equal((await ops.detail(users[1], id)).phone, input().phone);
   assert.equal((await ops.snapshot(users[0])).opportunities.length, 0);
@@ -489,6 +490,51 @@ test('Mongo: webhook assinado persiste lote, deduplica e retoma após nova conex
   const unknown = Buffer.from(raw.toString().replace('"id":"111"', '"id":"999"'));
   await central.receive(unknown, sign(unknown));
   assert.equal(await db.count('whatsapp_inbox'), 1);
+});
+test('Mongo: mantém o histórico de referências Meta sem consultar serviços externos', async () => {
+  const first = await ops.ingest(
+    {
+      ...input(20),
+      source: 'Meta Ads',
+      source_evidence: 'Referência sintética recebida no webhook.',
+      meta_attribution: {
+        provider: 'meta',
+        channel: 'whatsapp',
+        source_type: 'ad',
+        source_id: 'mongo-ad-1',
+        ctwa_clid: 'mongo-click-1',
+      },
+    },
+    'mongo-meta-event-1',
+    null,
+  );
+  await ops.ingest(
+    {
+      ...input(20),
+      source: 'Meta Ads',
+      source_evidence: 'Referência sintética recebida no webhook.',
+      meta_attribution: {
+        provider: 'meta',
+        channel: 'whatsapp',
+        source_type: 'ad',
+        source_id: 'mongo-ad-2',
+        ctwa_clid: 'mongo-click-2',
+      },
+    },
+    'mongo-meta-event-2',
+    null,
+  );
+  const detail = await ops.detail(manager, first.id);
+  assert.deepEqual(detail.attributions.map((item) => item.source_id).sort(), [
+    'mongo-ad-1',
+    'mongo-ad-2',
+  ]);
+  const serialized = JSON.stringify(detail.attributions);
+  assert.ok(!serialized.includes('mongo-click'));
+  assert.ok(!serialized.includes('mongo-meta-event'));
+  assert.ok(!serialized.includes(first.id));
+  const reserved = users.find((user) => user.id === detail.reserved_to)!;
+  assert.deepEqual((await ops.detail(reserved, first.id)).attributions, []);
 });
 test('Mongo: falha de processamento mantém inbox para retry e lease vencida é recuperada', async () => {
   const central = new WhatsAppCentral(ops, config);

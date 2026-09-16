@@ -32,7 +32,7 @@ before(async () => {
 });
 beforeEach(async () => {
   await db.query(
-    'TRUNCATE deleted_inbound_events,push_records,whatsapp_inbox,operation_receipts,claims,appointments,inbound_events,audit_events,opportunities,contacts,sessions',
+    'TRUNCATE deleted_inbound_events,push_records,whatsapp_inbox,operation_receipts,claims,appointments,lead_attributions,inbound_events,audit_events,opportunities,contacts,sessions',
   );
   await db.query("DELETE FROM users WHERE email NOT LIKE '%@demo.artisti.local'");
   const { hashPassword } = await import('../src/auth.js');

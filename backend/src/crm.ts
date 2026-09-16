@@ -14,7 +14,58 @@ export interface LeadInput {
   unit: string;
   source: string;
   source_evidence?: string;
+  meta_attribution?: MetaAttributionInput;
   is_demo?: boolean;
+}
+
+export interface MetaAttributionInput {
+  provider: 'meta';
+  channel: 'whatsapp';
+  source_type: 'ad';
+  source_id?: string;
+  source_url?: string;
+  ctwa_clid?: string;
+  headline?: string;
+  body?: string;
+  media_type?: string;
+  image_url?: string;
+  video_url?: string;
+  thumbnail_url?: string;
+}
+
+async function recordMetaAttribution(
+  tx: Sql,
+  opportunityId: string,
+  externalId: string,
+  attribution: MetaAttributionInput | undefined,
+  receivedAt: Date,
+) {
+  if (!attribution) return;
+  await tx.query(
+    `INSERT INTO lead_attributions(
+      id,opportunity_id,external_id,provider,channel,source_type,source_id,source_url,
+      ctwa_clid,headline,body,media_type,image_url,video_url,thumbnail_url,received_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+    ON CONFLICT (external_id) DO NOTHING`,
+    [
+      randomUUID(),
+      opportunityId,
+      externalId,
+      attribution.provider,
+      attribution.channel,
+      attribution.source_type,
+      attribution.source_id ?? null,
+      attribution.source_url ?? null,
+      attribution.ctwa_clid ?? null,
+      attribution.headline ?? null,
+      attribution.body ?? null,
+      attribution.media_type ?? null,
+      attribution.image_url ?? null,
+      attribution.video_url ?? null,
+      attribution.thumbnail_url ?? null,
+      receivedAt,
+    ],
+  );
 }
 
 export class CRM {
@@ -63,6 +114,7 @@ export class CRM {
           unit: input.unit,
           source: input.source,
           source_evidence: input.source_evidence,
+          meta_attribution: input.meta_attribution,
           is_demo: input.is_demo ?? false,
         }),
       )
@@ -125,6 +177,7 @@ export class CRM {
           now,
           fingerprint,
         ]);
+        await recordMetaAttribution(tx, existing.id, externalId, input.meta_attribution, now);
         await this.audit(
           tx,
           existing.id,
@@ -181,6 +234,7 @@ export class CRM {
         now,
         fingerprint,
       ]);
+      await recordMetaAttribution(tx, id, externalId, input.meta_attribution, now);
       await this.audit(
         tx,
         id,
@@ -315,11 +369,15 @@ export class CRM {
     );
   }
   private sanitize(row: Opportunity, user: User): Opportunity {
-    if (user.role === 'manager' || row.owner_id === user.id) return row;
+    if (
+      user.role === 'manager' ||
+      row.owner_id === user.id ||
+      (row.state === 'POOL' && user.role === 'attendant' && user.active)
+    )
+      return row;
     const { phone: _phone, email: _email, instagram: _instagram, ...summary } = row;
     return {
       ...summary,
-      name: row.state === 'POOL' ? 'Contato disponível' : row.name,
       next_action: '',
     };
   }
@@ -384,7 +442,17 @@ export class CRM {
           )
         ).rows
       : [];
-    return { ...this.sanitize(row, user), history, appointments, can_edit: canEdit };
+    const attributions = canEdit
+      ? (
+          await this.db.query(
+            `SELECT id,provider,channel,source_type,source_id,source_url,headline,body,
+              media_type,image_url,video_url,thumbnail_url,received_at
+             FROM lead_attributions WHERE opportunity_id=$1 ORDER BY received_at DESC,id DESC`,
+            [id],
+          )
+        ).rows
+      : [];
+    return { ...this.sanitize(row, user), history, appointments, attributions, can_edit: canEdit };
   }
   async update(
     user: User,

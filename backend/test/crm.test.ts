@@ -48,7 +48,7 @@ after(async () => {
 });
 beforeEach(async () => {
   await db.query(
-    'TRUNCATE push_records,whatsapp_inbox,claims,appointments,inbound_events,audit_events,opportunities,contacts,sessions',
+    'TRUNCATE push_records,whatsapp_inbox,claims,appointments,lead_attributions,inbound_events,audit_events,opportunities,contacts,sessions',
   );
   await db.query('UPDATE distribution_settings SET last_position=0,timeout_minutes=10,version=1');
   await db.query("UPDATE users SET active=true,queue_enabled=(role='attendant')");
@@ -167,14 +167,15 @@ test('resposta perdida de aceite é recuperada usando a mesma chave', async () =
     code: 'IDEMPOTENCY_CONFLICT',
   });
 });
-test('telefone e nome do bolsão não vazam antes do aceite', async () => {
+test('reserva protege o telefone e bolsão libera os dados para a equipe ativa', async () => {
   const { id } = await create();
   let snapshot = await crm.snapshot(users[0]);
   assert.equal(snapshot.opportunities[0].phone, undefined);
   now = new Date(now.getTime() + 600_001);
   snapshot = await crm.snapshot(users[1]);
-  assert.equal(snapshot.opportunities[0].name, 'Contato disponível');
-  assert.equal(snapshot.opportunities[0].phone, undefined);
+  assert.equal(snapshot.opportunities[0].name, input().name);
+  assert.equal(snapshot.opportunities[0].phone, input().phone);
+  assert.equal((await crm.detail(users[1], id)).phone, input().phone);
   await crm.claim(users[1], id, 'pool', snapshot.opportunities[0].version, randomUUID());
   assert.equal((await crm.detail(users[1], id)).phone, input().phone);
   await assert.rejects(() => crm.detail(users[0], id), { code: 'NOT_FOUND' });
@@ -235,7 +236,8 @@ test('todas as atendentes ativas acessam o bolsão mesmo com rodízio pausado', 
     const snapshot = await crm.snapshot(user);
     assert.equal(snapshot.opportunities[0].id, id);
     assert.equal(snapshot.opportunities[0].state, 'POOL');
-    assert.equal((await crm.detail(user, id)).phone, undefined);
+    assert.equal(snapshot.opportunities[0].name, input().name);
+    assert.equal((await crm.detail(user, id)).phone, input().phone);
   }
   const row = await get(id);
   const attempts = await Promise.allSettled(
@@ -339,7 +341,8 @@ test('HTTP libera WhatsApp somente para vencedora, inclusive pausada no rodízio
     for (const h of headers) {
       const snapshot = await app.inject({ url: '/api/v1/workspace', headers: h });
       assert.equal(snapshot.json().opportunities[0].id, id);
-      assert.equal(snapshot.json().opportunities[0].phone, undefined);
+      assert.equal(snapshot.json().opportunities[0].name, input().name);
+      assert.equal(snapshot.json().opportunities[0].phone, input().phone);
       assert.equal(
         (
           await app.inject({

@@ -111,7 +111,22 @@ export async function checkDeletePermissions(
 
 export async function checkDeleteCleanup(ops: Ops, manager: User, users: User[], now: () => Date) {
   const event = randomUUID();
-  const { id } = await ops.ingest(input(), event, manager.id);
+  const { id } = await ops.ingest(
+    {
+      ...input(),
+      source: 'Meta Ads',
+      source_evidence: 'Referência sintética de teste.',
+      meta_attribution: {
+        provider: 'meta',
+        channel: 'whatsapp',
+        source_type: 'ad',
+        source_id: 'deletion-test-ad',
+        ctwa_clid: 'deletion-test-click',
+      },
+    },
+    event,
+    manager.id,
+  );
   const before = await ops.detail(manager, id);
   const owner = users.find((u) => u.id === before.reserved_to)!;
   await ops.claim(owner, id, 'reservation', before.version, randomUUID());
@@ -159,6 +174,7 @@ export async function checkDeleteCleanup(ops: Ops, manager: User, users: User[],
   for (const table of [
     'appointments',
     'audit_events',
+    'lead_attributions',
     'inbound_events',
     'opportunities',
     'contacts',

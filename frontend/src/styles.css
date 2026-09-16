@@ -1525,6 +1525,103 @@ fieldset.form-grid {
   font-weight: 500;
   color: #b3c0ce;
 }
+.meta-attributions {
+  margin: 0 28px 24px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0c2030;
+}
+.meta-attributions > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.meta-attributions > header span:first-child {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--gold);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.meta-attributions h3 {
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+}
+.verified-origin {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #69d4b5 !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+  white-space: nowrap;
+}
+.meta-attribution {
+  padding: 16px 18px;
+}
+.meta-attribution + .meta-attribution {
+  border-top: 1px solid var(--line);
+}
+.meta-attribution-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+.meta-attribution-title strong {
+  font-size: 15px;
+}
+.meta-attribution-title span {
+  color: #8196a9;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.meta-attribution > p {
+  margin-top: 8px;
+  color: #9fb1c1;
+  font-size: 13px;
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.meta-attribution dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  margin-top: 14px;
+}
+.meta-attribution dl div {
+  min-width: 120px;
+}
+.meta-attribution dt {
+  color: #70879a;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.meta-attribution dd {
+  margin: 4px 0 0;
+  color: #b9c7d3;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.meta-attribution a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  color: var(--gold);
+  font-size: 13px;
+}
 .timeline-event {
   display: flex;
   gap: 15px;

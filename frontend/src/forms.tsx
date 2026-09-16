@@ -391,6 +391,56 @@ export function LeadDetail({
               {detail.source_evidence}
             </p>
           </div>
+          {!!detail.attributions.length && (
+            <section className="meta-attributions" aria-label="Origens de anúncios da Meta">
+              <header>
+                <div>
+                  <span>ORIGEM DO ANÚNCIO</span>
+                  <h3>Referência recebida pela Meta</h3>
+                </div>
+                <span className="verified-origin">
+                  <ShieldCheck size={14} /> Verificada
+                </span>
+              </header>
+              {detail.attributions.map((attribution, index) => {
+                const sourceUrl = safeHttpUrl(attribution.source_url);
+                return (
+                  <article className="meta-attribution" key={attribution.id}>
+                    <div className="meta-attribution-title">
+                      <strong>{attribution.headline || 'Anúncio da Meta'}</strong>
+                      <span>
+                        {index === 0 ? 'Mais recente' : dateLabel(attribution.received_at, true)}
+                      </span>
+                    </div>
+                    {attribution.body && <p>{attribution.body}</p>}
+                    <dl>
+                      {attribution.source_id && (
+                        <div>
+                          <dt>ID do anúncio</dt>
+                          <dd>{attribution.source_id}</dd>
+                        </div>
+                      )}
+                      <div>
+                        <dt>Recebido em</dt>
+                        <dd>{dateLabel(attribution.received_at, true)}</dd>
+                      </div>
+                      {attribution.media_type && (
+                        <div>
+                          <dt>Formato</dt>
+                          <dd>{attribution.media_type}</dd>
+                        </div>
+                      )}
+                    </dl>
+                    {sourceUrl && (
+                      <a href={sourceUrl} target="_blank" rel="noreferrer">
+                        Abrir referência do anúncio <ArrowRight size={14} />
+                      </a>
+                    )}
+                  </article>
+                );
+              })}
+            </section>
+          )}
           {error && (
             <p className="form-error in-modal" role="alert">
               {error}
@@ -508,6 +558,16 @@ export function LeadDetail({
   );
 }
 const LinkEvidence = () => <ShieldCheck size={18} />;
+
+function safeHttpUrl(value?: string | null) {
+  if (!value) return;
+  try {
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol) ? url.toString() : undefined;
+  } catch {
+    return;
+  }
+}
 
 export function QueueSettings({
   data,

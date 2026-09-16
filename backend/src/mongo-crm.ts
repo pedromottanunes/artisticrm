@@ -140,6 +140,7 @@ export class MongoOperations {
       unit: input.unit,
       source: input.source,
       source_evidence: input.source_evidence,
+      meta_attribution: input.meta_attribution,
       is_demo: input.is_demo ?? false,
     });
     return this.db.atomic(async (tx) => {
@@ -181,6 +182,14 @@ export class MongoOperations {
           received_at: now,
           fingerprint,
         });
+        if (input.meta_attribution)
+          await tx.insert('lead_attributions', {
+            id: randomUUID(),
+            opportunity_id: existing.id,
+            external_id: externalId,
+            ...input.meta_attribution,
+            received_at: now,
+          });
         await this.audit(
           tx,
           existing.id,
@@ -228,6 +237,14 @@ export class MongoOperations {
         received_at: now,
         fingerprint,
       });
+      if (input.meta_attribution)
+        await tx.insert('lead_attributions', {
+          id: randomUUID(),
+          opportunity_id: id,
+          external_id: externalId,
+          ...input.meta_attribution,
+          received_at: now,
+        });
       await this.audit(
         tx,
         id,
@@ -366,11 +383,15 @@ export class MongoOperations {
     if (!contact) throw new Error('Missing contact');
     const { id: _id, ...fields } = contact;
     const full = { ...row, ...fields } as Opportunity;
-    if (user.role === 'manager' || row.owner_id === user.id) return full;
+    if (
+      user.role === 'manager' ||
+      row.owner_id === user.id ||
+      (row.state === 'POOL' && user.role === 'attendant' && user.active)
+    )
+      return full;
     const { phone: _phone, email: _email, instagram: _instagram, ...safe } = full;
     return {
       ...safe,
-      name: row.state === 'POOL' ? 'Contato disponível' : full.name,
       next_action: '',
     };
   }
@@ -457,7 +478,48 @@ export class MongoOperations {
       const appointments = canEdit
         ? await tx.many('appointments', { opportunity_id: id }, { starts_at: 1 })
         : [];
-      return { ...(await this.enrich(tx, row, user)), history, appointments, can_edit: canEdit };
+      const attributions = canEdit
+        ? (
+            await tx.many('lead_attributions', { opportunity_id: id }, { received_at: -1, id: -1 })
+          ).map(
+            ({
+              id,
+              provider,
+              channel,
+              source_type,
+              source_id,
+              source_url,
+              headline,
+              body,
+              media_type,
+              image_url,
+              video_url,
+              thumbnail_url,
+              received_at,
+            }) => ({
+              id,
+              provider,
+              channel,
+              source_type,
+              source_id,
+              source_url,
+              headline,
+              body,
+              media_type,
+              image_url,
+              video_url,
+              thumbnail_url,
+              received_at,
+            }),
+          )
+        : [];
+      return {
+        ...(await this.enrich(tx, row, user)),
+        history,
+        appointments,
+        attributions,
+        can_edit: canEdit,
+      };
     }, true);
   }
   async update(user: User, id: string, input: Parameters<CRM['update']>[2]) {
