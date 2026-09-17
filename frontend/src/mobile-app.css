@@ -599,3 +599,10 @@ a:focus-visible {
     justify-content: center;
   }
 }
+
+@media (max-width: 360px) {
+  .mobile-bottom-nav.management-nav > button {
+    flex-basis: 72px;
+    font-size: 11px;
+  }
+}

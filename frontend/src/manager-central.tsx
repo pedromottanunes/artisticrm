@@ -252,28 +252,40 @@ export function ManagerCentral({
           <Clock3 size={16} /> {board?.settings.timeout_minutes ?? '—'} min para aceite
         </span>
         <span className="central-sync" role="status">
-          {error || !connected
-            ? 'Atualização interrompida'
-            : board
-              ? `Atualizado às ${new Date(board.server_time).toLocaleTimeString('pt-BR')}`
-              : 'Carregando central…'}
+          <span className="central-sync-full">
+            {error || !connected
+              ? 'Atualização interrompida'
+              : board
+                ? `Atualizado às ${new Date(board.server_time).toLocaleTimeString('pt-BR')}`
+                : 'Carregando central…'}
+          </span>
+          <span className="central-sync-compact">
+            {error || !connected
+              ? 'Sem conexão'
+              : board
+                ? `Atualizado ${new Date(board.server_time).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+                : 'Carregando…'}
+          </span>
         </span>
         <button
           className="button outline compact"
+          aria-label="Atualizar"
           disabled={busy}
           onClick={() => setRevision((value) => value + 1)}
         >
-          <RefreshCw size={16} /> Atualizar
+          <RefreshCw size={16} /> <span className="central-refresh-label">Atualizar</span>
         </button>
         <button
           className="button outline compact"
           ref={historyTrigger}
+          aria-label="Movimentações"
           disabled={!board}
           onClick={() => setHistoryOpen(true)}
           aria-haspopup="dialog"
           aria-expanded={historyOpen}
         >
-          <History size={16} /> Movimentações
+          <History size={16} /> <span className="central-history-full">Movimentações</span>
+          <span className="central-history-compact">Histórico</span>
         </button>
         <button
           className="button outline compact"

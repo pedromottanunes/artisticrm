@@ -332,7 +332,7 @@ test('central administrativa: resumo, equipe e lista permanecem responsivos', as
   await page.getByRole('button', { name: 'Todos os atendentes' }).click();
   await expect(page.locator('.central-selected-attendant')).toHaveCount(0);
   const firstName = await page.locator('.central-contact strong').first().innerText();
-  for (const width of [320, 390, 768, 1024, 1280, 1440, 1920]) {
+  for (const width of [320, 360, 390, 768, 1024, 1280, 1440, 1920]) {
     await page.setViewportSize({ width, height: 1000 });
     const overflow = await page
       .locator('.manager-central, .central-summary, .central-leads')
@@ -345,6 +345,48 @@ test('central administrativa: resumo, equipe e lista permanecem responsivos', as
           .map((element) => element.className),
       );
     expect(overflow, `overflow at ${width}px`).toEqual([]);
+    if (width <= 760) {
+      const mobileLayout = await page.evaluate(() => {
+        const summary = document.querySelector<HTMLElement>('.central-summary')!;
+        const team = document.querySelector<HTMLElement>('.attendant-strip')!;
+        const cards = [...team.querySelectorAll<HTMLElement>('.attendant-card')];
+        const actions = [...document.querySelectorAll<HTMLElement>('.central-commandbar .button')];
+        const bounds = team.getBoundingClientRect();
+        return {
+          summaryHeight: summary.getBoundingClientRect().height,
+          teamOverflows: team.scrollWidth > team.clientWidth + 1,
+          cardOutside: cards.some((card) => {
+            const box = card.getBoundingClientRect();
+            return box.left < bounds.left - 1 || box.right > bounds.right + 1;
+          }),
+          actionOverflows: actions.some((button) => button.scrollWidth > button.clientWidth + 1),
+          headerHeight: document
+            .querySelector<HTMLElement>('.breadcrumbs h1')!
+            .getBoundingClientRect().height,
+        };
+      });
+      expect(mobileLayout.summaryHeight, `summary too tall at ${width}px`).toBeLessThan(130);
+      expect(mobileLayout.teamOverflows, `team overflow at ${width}px`).toBe(false);
+      expect(mobileLayout.cardOutside, `cut attendant card at ${width}px`).toBe(false);
+      expect(mobileLayout.actionOverflows, `action text clipped at ${width}px`).toBe(false);
+      expect(mobileLayout.headerHeight, `header wrapped at ${width}px`).toBeLessThan(32);
+      if (width <= 360) {
+        const narrowLayout = await page.evaluate(() => {
+          const row = document.querySelector<HTMLElement>('.central-table tbody tr')!;
+          const lead = row.querySelector<HTMLElement>('td:first-child')!.getBoundingClientRect();
+          const status = row.querySelector<HTMLElement>('td:nth-child(2)')!.getBoundingClientRect();
+          const scopes = document.querySelector<HTMLElement>('.central-scopes')!;
+          return {
+            leadOverlapsStatus: lead.bottom > status.top + 1,
+            scopesOverflow: scopes.scrollWidth > scopes.clientWidth + 1,
+          };
+        });
+        expect(narrowLayout.leadOverlapsStatus, `lead text overlaps status at ${width}px`).toBe(
+          false,
+        );
+        expect(narrowLayout.scopesOverflow, `scope buttons overflow at ${width}px`).toBe(false);
+      }
+    }
     const historyButton = page.getByRole('button', { name: 'Movimentações', exact: true });
     await historyButton.click();
     const history = page.getByRole('dialog', { name: 'Últimas movimentações', exact: true });
@@ -353,7 +395,7 @@ test('central administrativa: resumo, equipe e lista permanecem responsivos', as
     await history.getByRole('button', { name: 'Fechar janela' }).click();
     await expect(history).toHaveCount(0);
     await expect(historyButton).toBeFocused();
-    if (width === 390 || width === 1920) {
+    if (width === 320 || width === 390 || width === 1920) {
       await page.screenshot({
         path: `test-results/artisti-operacional-${width}.png`,
         fullPage: true,

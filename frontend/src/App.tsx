@@ -468,7 +468,9 @@ export function App() {
         </nav>
       </aside>
       <div className="main-shell">
-        <header className="topbar">
+        <header
+          className={`topbar ${isManager && activePage === 'central' ? 'topbar-central' : ''}`}
+        >
           <img
             className="mobile-header-logo"
             src="/artisti-logo.webp"
@@ -477,7 +479,16 @@ export function App() {
             height="34"
           />
           <div className="breadcrumbs">
-            <h1>{activePage === 'mine' ? 'Meus atendimentos' : title}</h1>
+            <h1 aria-label={isManager && activePage === 'central' ? title : undefined}>
+              <span className={isManager && activePage === 'central' ? 'central-full-title' : ''}>
+                {activePage === 'mine' ? 'Meus atendimentos' : title}
+              </span>
+              {isManager && activePage === 'central' && (
+                <span className="central-mobile-title" aria-hidden="true">
+                  Central
+                </span>
+              )}
+            </h1>
           </div>
           <div className="topbar-right">
             {isManager && (
