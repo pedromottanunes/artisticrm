@@ -426,6 +426,108 @@ test('central administrativa: resumo, equipe e lista permanecem responsivos', as
   await expect(page.getByRole('dialog')).toBeVisible();
 });
 
+test('tema clínico contemporâneo mantém as superfícies claras em toda a gestão', async ({
+  page,
+}) => {
+  const lightness = (color: string) => {
+    const channels =
+      color
+        .match(/[\d.]+/g)
+        ?.slice(0, 3)
+        .map(Number) ?? [];
+    return channels.length === 3
+      ? (channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722) / 255
+      : 0;
+  };
+  const darkSurfaces = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('.app-shell *')]
+        .filter((element) => {
+          const box = element.getBoundingClientRect();
+          if (box.width * box.height < 2_000 || box.bottom <= 0 || box.top >= innerHeight)
+            return false;
+          const color = getComputedStyle(element).backgroundColor;
+          const channels = color.match(/[\d.]+/g)?.map(Number) ?? [];
+          if (channels.length < 3 || (channels[3] ?? 1) < 0.8) return false;
+          const luminance =
+            (channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722) / 255;
+          return luminance < 0.35;
+        })
+        .map((element) => ({
+          className: element.className,
+          background: getComputedStyle(element).backgroundColor,
+        })),
+    );
+
+  await page.goto('/');
+  await expect(page.locator('.login-form-wrap')).toBeVisible();
+  const loginTheme = await page.evaluate(() => ({
+    scheme: getComputedStyle(document.documentElement).colorScheme,
+    background: getComputedStyle(document.querySelector<HTMLElement>('.login-form-wrap')!)
+      .backgroundColor,
+    accent: getComputedStyle(document.documentElement).getPropertyValue('--light-teal').trim(),
+  }));
+  expect(loginTheme.scheme).toBe('light');
+  expect(lightness(loginTheme.background)).toBeGreaterThan(0.85);
+  expect(loginTheme.accent).toBe('#14877c');
+  await page.screenshot({ path: 'test-results/artisti-login-light.png', fullPage: true });
+
+  await login(page);
+  const pages = [
+    ['central', '.central-summary'],
+    ['pipeline', '.kanban-column'],
+    ['agenda', '.panel'],
+    ['reports', '.report-card'],
+    ['contracts', '.panel'],
+    ['settings', '.panel'],
+  ] as const;
+
+  for (const [hash, surface] of pages) {
+    await page.goto(`/#${hash}`);
+    const element = page.locator(surface).first();
+    await expect(element, `surface missing on ${hash}`).toBeVisible();
+    const colors = await page.evaluate((selector) => {
+      const root = document.documentElement;
+      return {
+        page: getComputedStyle(document.body).backgroundColor,
+        header: getComputedStyle(document.querySelector<HTMLElement>('.topbar')!).backgroundColor,
+        surface: getComputedStyle(document.querySelector<HTMLElement>(selector)!).backgroundColor,
+        text: getComputedStyle(root).color,
+      };
+    }, surface);
+    expect(lightness(colors.page), `dark page on ${hash}`).toBeGreaterThan(0.85);
+    expect(lightness(colors.header), `dark header on ${hash}`).toBeGreaterThan(0.85);
+    expect(lightness(colors.surface), `dark surface on ${hash}`).toBeGreaterThan(0.85);
+    expect(lightness(colors.text), `light root text on ${hash}`).toBeLessThan(0.4);
+    expect(await darkSurfaces(), `legacy dark surface on ${hash}`).toEqual([]);
+    if (hash === 'reports')
+      await page.screenshot({ path: 'test-results/artisti-reports-light.png', fullPage: true });
+  }
+
+  await page.goto('/#central');
+  await page.locator('.central-contact').first().click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  expect(
+    lightness(await dialog.evaluate((element) => getComputedStyle(element).backgroundColor)),
+  ).toBeGreaterThan(0.85);
+  expect(await darkSurfaces(), 'legacy dark surface inside lead dialog').toEqual([]);
+
+  await page.context().clearCookies();
+  await login(page, 'vanessa');
+  for (const [hash, surface] of [
+    ['mine', '.attendant-summary'],
+    ['pool', '.attendant-summary'],
+    ['settings', '.panel'],
+  ] as const) {
+    await page.goto(`/#${hash}`);
+    await expect(page.locator(surface).first()).toBeVisible();
+    expect(await darkSurfaces(), `legacy dark surface on attendant ${hash}`).toEqual([]);
+    if (hash === 'settings')
+      await page.screenshot({ path: 'test-results/artisti-settings-light.png', fullPage: true });
+  }
+});
+
 test('relatórios administrativos mostram período, equipe, bolsão e resultados sem poluir a central', async ({
   page,
 }) => {

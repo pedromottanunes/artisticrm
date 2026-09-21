@@ -13,6 +13,7 @@ import './attendant-leads.css';
 import './manager-central.css';
 import './manager-pipeline.css';
 import './manager-reports.css';
+import './clinical-light.css';
 import { registerDeviceWorker } from './pwa';
 void registerDeviceWorker();
 ReactDOM.createRoot(document.getElementById('root')!).render(
