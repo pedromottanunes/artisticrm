@@ -3,7 +3,7 @@ import webpush from 'web-push';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { tokenHash } from './auth.js';
-import { DomainError, type User } from './types.js';
+import { DomainError, isClosedStage, type User } from './types.js';
 import {
   cleanPush,
   getPush,
@@ -198,8 +198,7 @@ export class PushService {
   }
   private async message(tx: PushTx, event: PushRecord, user: User, now: Date) {
     const lead = await pushOpportunity(tx, event.data.opportunityId);
-    if (!lead || ['WON', 'LOST'].includes(lead.stage) || lead.state !== event.data.state)
-      return null;
+    if (!lead || isClosedStage(lead.stage) || lead.state !== event.data.state) return null;
     const target = lead.state === 'RESERVED' ? lead.reserved_to : lead.owner_id;
     if (
       target !== event.data.target ||

@@ -50,6 +50,7 @@ export async function buildApp(
     whatsapp?: WhatsAppConfig;
     push?: PushConfig;
     pushSender?: PushSender;
+    rateLimitMax?: number;
   } = {},
 ) {
   const app = Fastify({
@@ -63,7 +64,7 @@ export async function buildApp(
       ? new MongoOperations(db, options.clock)
       : new Operations(db, options.clock);
   await app.register(cookie);
-  await app.register(rateLimit, { max: 240, timeWindow: '1 minute' });
+  await app.register(rateLimit, { max: options.rateLimitMax ?? 240, timeWindow: '1 minute' });
   app.decorateRequest('user');
   app.addHook('onRequest', async (request, reply) => {
     reply
@@ -350,6 +351,7 @@ export async function buildApp(
         interest: shortText,
         unit: shortText,
         stage: z.enum(stages),
+        procedure_date: z.union([z.string().regex(/^[1-9]\d{3}-\d{2}-\d{2}$/), z.null()]),
         next_action: z.string().trim().max(1000),
       })
       .strict()

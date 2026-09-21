@@ -4,7 +4,16 @@ import { deleteLeadData, type DeleteLeadInput } from './lead-deletion.js';
 import type { Sql } from './db.js';
 import { lockActor } from './access.js';
 import { hashPassword, verifyPassword } from './auth.js';
-import { DomainError, requireManager, type User, type Opportunity } from './types.js';
+import {
+  closedStages,
+  DomainError,
+  isClosedStage,
+  requireManager,
+  type User,
+  type Opportunity,
+} from './types.js';
+
+const closedStageSql = closedStages.map((stage) => `'${stage}'`).join(',');
 
 export interface AppointmentRow {
   id: string;
@@ -122,7 +131,7 @@ export class Operations extends CRM {
         if (!input.active) {
           const owned = (
             await tx.query<Opportunity>(
-              `SELECT * FROM opportunities WHERE stage NOT IN ('WON','LOST')
+              `SELECT * FROM opportunities WHERE stage NOT IN (${closedStageSql})
             AND (owner_id=$1 OR (state='RESERVED' AND reserved_to=$1)) ORDER BY id FOR UPDATE`,
               [id],
             )
@@ -203,7 +212,7 @@ export class Operations extends CRM {
         if (!row) throw new DomainError('NOT_FOUND', 'Lead não encontrado.', 404);
         if (row.version !== input.expected_version)
           throw new DomainError('VERSION_CONFLICT', 'O lead mudou. Reabra a ficha.');
-        if (['WON', 'LOST'].includes(row.stage))
+        if (isClosedStage(row.stage))
           throw new DomainError(
             'CLOSED',
             'Oportunidade encerrada: crie uma nova entrada para revisão.',
@@ -238,7 +247,7 @@ export class Operations extends CRM {
           const initial = (
             await tx.query<AppointmentRow>('SELECT * FROM appointments WHERE id=$1', [id])
           ).rows[0];
-          if (!initial) throw new DomainError('NOT_FOUND', 'Avaliação não encontrada.', 404);
+          if (!initial) throw new DomainError('NOT_FOUND', 'Consulta não encontrada.', 404);
           // Opportunity first, then appointment, matching schedule/close/transfer lock ordering.
           const row = (
             await tx.query<Opportunity>('SELECT * FROM opportunities WHERE id=$1 FOR UPDATE', [
@@ -246,18 +255,18 @@ export class Operations extends CRM {
             ])
           ).rows[0];
           if (actor.role !== 'manager' && row.owner_id !== actor.id)
-            throw new DomainError('NOT_FOUND', 'Avaliação não encontrada.', 404);
+            throw new DomainError('NOT_FOUND', 'Consulta não encontrada.', 404);
           const appointment = (
             await tx.query<AppointmentRow>('SELECT * FROM appointments WHERE id=$1 FOR UPDATE', [
               id,
             ])
           ).rows[0];
           if (appointment.version !== input.expected_version)
-            throw new DomainError('VERSION_CONFLICT', 'A avaliação mudou. Atualize a ficha.');
+            throw new DomainError('VERSION_CONFLICT', 'A consulta mudou. Atualize a ficha.');
           if (appointment.status !== 'scheduled')
             throw new DomainError(
               'APPOINTMENT_CLOSED',
-              'Avaliação concluída ou cancelada não pode ser reescrita. Crie outra avaliação.',
+              'Consulta concluída ou cancelada não pode ser reescrita. Crie outra consulta.',
             );
           const now = await this.now(tx);
           if (input.status === 'scheduled' && new Date(input.starts_at) <= now)
@@ -265,7 +274,7 @@ export class Operations extends CRM {
           if (input.status === 'completed' && new Date(appointment.starts_at) > now)
             throw new DomainError(
               'INVALID_DATE',
-              'Não é possível concluir uma avaliação futura.',
+              'Não é possível concluir uma consulta futura.',
               400,
             );
           const startsAt = input.status === 'scheduled' ? input.starts_at : appointment.starts_at;
@@ -280,7 +289,7 @@ export class Operations extends CRM {
             row.id,
             actor.id,
             'appointment.updated',
-            `Avaliação ${input.status === 'scheduled' ? 'remarcada' : input.status === 'completed' ? 'concluída' : 'cancelada'}. Motivo: ${input.reason}`,
+            `Consulta ${input.status === 'scheduled' ? 'remarcada' : input.status === 'completed' ? 'concluída' : 'cancelada'}. Motivo: ${input.reason}`,
             {
               appointment_id: id,
               before: {

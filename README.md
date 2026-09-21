@@ -49,11 +49,11 @@ Abra **http://127.0.0.1:5173**. Escolha Cadu para gestão ou uma atendente para 
 - Gestão: indicadores calculados da base, pesquisa e filtro de leads, ficha editável, funil, agenda e configuração do rodízio.
 - Atendimento: meus leads, bolsão, aceite no servidor e abertura externa do WhatsApp para contatos não fictícios.
 - Rodízio transacional, prazo configurável, vencimento persistente, disputa com um vencedor e repetição segura do aceite.
-- Deduplicação de cadastro/entrada, histórico de eventos e agendamento de avaliações.
+- Deduplicação de cadastro/entrada, histórico de eventos e agendamento de consultas.
 - Cadastro de atendentes pela gestão, desativação/reativação e redefinição de senha temporária. Primeiro acesso exige troca de senha; troca/redefinição revoga sessões anteriores.
 - Desativação com substituta obrigatória quando houver atendimentos ou reservas abertas, transferidos na mesma transação.
 - Transferência administrativa com motivo, versão e idempotência, sem alterar o rodízio nem contar como aceite da atendente.
-- Remarcação, cancelamento e conclusão de avaliações com histórico. Avaliação futura não pode ser concluída; avaliação já encerrada não pode ser reescrita.
+- Remarcação, cancelamento e conclusão de consultas com histórico. Consulta futura não pode ser concluída; consulta já encerrada não pode ser reescrita.
 - Retornos após oportunidade encerrada criam uma nova pendência de revisão. A gestão atribui essa oportunidade pela ficha; o histórico anterior permanece separado.
 - Reconciliação de reservas a cada 5 segundos e nas consultas; o aceite também valida o prazo, sem depender da rotina periódica.
 - Navegação inferior deslizável, cartões e formulários adaptados ao celular nos dois perfis; menu lateral no desktop, logo original e tema azul-marinho/dourado.
@@ -68,8 +68,8 @@ Não implementado: sincronização de anúncios, instrumentação do site/GTM, c
 - Reativar não devolve leads antigos nem habilita automaticamente o rodízio.
 - Atribuir pela gestão libera o contato para a nova responsável imediatamente. `claimed_at` fica vazio, distinguindo transferência administrativa de aceite.
 - Retorno de contato encerrado exige revisão manual; não se reabre nem se sobrescreve a oportunidade antiga.
-- Uma oportunidade só pode receber uma nova avaliação se não tiver outra agendada. Remarcação mantém o mesmo registro e guarda antes/depois na auditoria.
-- Cancelar/concluir avaliação não muda automaticamente o funil comercial. É preciso cancelar/concluir avaliações abertas antes de encerrar o lead como perdido.
+- Uma oportunidade só pode receber uma nova consulta se não tiver outra agendada. Ao agendar, a qualificação passa automaticamente para `FOLLOW_UP`; remarcação mantém o mesmo registro e guarda antes/depois na auditoria.
+- Cancelar ou concluir uma consulta não regride automaticamente a qualificação. É preciso cancelar ou concluir consultas abertas antes de marcar o lead como `DECLINED`.
 - Senhas temporárias são entregues fora do CRM por canal seguro; não há envio automático de credenciais. Para acessar contas criadas localmente, use **Usar e-mail e senha** na tela de login.
 
 Essas escolhas são conservadoras para teste técnico, não substituem a confirmação das regras operacionais com Cadu.

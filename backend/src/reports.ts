@@ -2,7 +2,14 @@ import { z } from 'zod';
 import type { Document } from 'mongodb';
 import type { Database } from './db.js';
 import type { MongoStore, MongoTx } from './mongo-store.js';
-import { DomainError, requireManager, type User } from './types.js';
+import {
+  DomainError,
+  isClosedStage,
+  isSaleStage,
+  normalizeStage,
+  requireManager,
+  type User,
+} from './types.js';
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 const reportKinds = ['reservation.expired', 'opportunity.claimed', 'opportunity.updated'];
@@ -387,7 +394,16 @@ function buildReport(data: ReportData, from: string, to: string) {
   }
   const won = new Map<string, Bucket>();
   for (const event of data.events.filter((item) => item.kind === 'opportunity.updated')) {
-    if (details(event.details).next_stage !== 'WON' || !event.opportunity_id) continue;
+    const transition = details(event.details);
+    const nextStage = normalizeStage(String(transition.next_stage ?? ''));
+    const previousStage = normalizeStage(String(transition.previous_stage ?? ''));
+    if (
+      !nextStage ||
+      !isSaleStage(nextStage) ||
+      (previousStage !== undefined && isSaleStage(previousStage)) ||
+      !event.opportunity_id
+    )
+      continue;
     const row = opportunities.get(event.opportunity_id);
     const userId = row?.owner_id ?? event.actor_id;
     if (!userId) continue;
@@ -397,7 +413,7 @@ function buildReport(data: ReportData, from: string, to: string) {
   }
   const activities = new Map<string, Bucket>();
   for (const row of data.periodOpportunities) {
-    if (!row.owner_id || ['WON', 'LOST'].includes(row.stage) || !row.next_action.trim()) continue;
+    if (!row.owner_id || isClosedStage(row.stage) || !row.next_action.trim()) continue;
     const value = bucket(activities, row.owner_id);
     value.count++;
     value.lead_ids.add(row.id);
@@ -405,22 +421,27 @@ function buildReport(data: ReportData, from: string, to: string) {
   const funnelDefinitions = [
     ['RECEIVED', 'Recebidos', () => true],
     [
-      'IN_SERVICE',
-      'Em atendimento',
-      (row: ReportOpportunity) => row.state === 'CLAIMED' && row.stage === 'TO_QUALIFY',
+      'CONSULTATION_NOT_SCHEDULED',
+      'Consulta não agendada',
+      (row: ReportOpportunity) => row.stage === 'CONSULTATION_NOT_SCHEDULED',
     ],
-    [
-      'EVALUATION_SCHEDULED',
-      'Avaliação agendada',
-      (row: ReportOpportunity) => row.stage === 'EVALUATION_SCHEDULED',
-    ],
-    ['NEGOTIATION', 'Em negociação', (row: ReportOpportunity) => row.stage === 'NEGOTIATION'],
+    ['FOLLOW_UP', 'Em follow-up', (row: ReportOpportunity) => row.stage === 'FOLLOW_UP'],
     [
       'CONTRACT_PENDING',
       'Contrato pendente',
       (row: ReportOpportunity) => row.stage === 'CONTRACT_PENDING',
     ],
-    ['WON', 'Conquistados', (row: ReportOpportunity) => row.stage === 'WON'],
+    [
+      'CLOSED_WITH_DATE',
+      'Fechado com data',
+      (row: ReportOpportunity) => row.stage === 'CLOSED_WITH_DATE',
+    ],
+    [
+      'CLOSED_WITHOUT_DATE',
+      'Fechado sem data',
+      (row: ReportOpportunity) => row.stage === 'CLOSED_WITHOUT_DATE',
+    ],
+    ['DECLINED', 'Declinado', (row: ReportOpportunity) => row.stage === 'DECLINED'],
   ] as const;
   return {
     period: { from, to, days: (dateNumber(to) - dateNumber(from)) / dayMs + 1 },

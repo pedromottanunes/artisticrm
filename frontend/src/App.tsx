@@ -559,7 +559,7 @@ export function App() {
             <section className="panel">
               <div className="panel-heading">
                 <div>
-                  <h2>Próximas avaliações</h2>
+                  <h2>Próximas consultas</h2>
                   <p>
                     Horários no fuso deste dispositivo:{' '}
                     {Intl.DateTimeFormat().resolvedOptions().timeZone}.
@@ -569,8 +569,8 @@ export function App() {
               </div>
               {!data.appointments.length ? (
                 <Empty
-                  title="Nenhuma avaliação agendada"
-                  description="Abra a ficha de um lead para agendar uma avaliação."
+                  title="Nenhuma consulta agendada"
+                  description="Abra a ficha de um lead para agendar uma consulta."
                 />
               ) : (
                 <div className="appointment-list">
@@ -626,14 +626,11 @@ export function App() {
             <section className="panel">
               <div className="feature-notice">
                 <FileCheck2 size={34} />
-                <h2>Funcionalidade ainda não disponível</h2>
-                <p>
-                  A validação de assinatura e as regras de comissão ainda serão implementadas. Mover
-                  um lead para contrato pendente não confirma venda nem libera pagamento.
-                </p>
+                <h2>Contratos pendentes</h2>
+                <p>Leads com sinal pago que ainda aguardam a assinatura do contrato.</p>
                 <span className="badge pending">
                   <i />
-                  Não disponível nesta versão
+                  Aguardando assinatura
                 </span>
               </div>
               {leads.some((l) => l.stage === 'CONTRACT_PENDING') && (

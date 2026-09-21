@@ -1,12 +1,23 @@
 import { randomUUID, createHash } from 'node:crypto';
 import type { Database, Sql } from './db.js';
-import { DomainError, requireManager, type Opportunity, type User } from './types.js';
+import {
+  closedStages,
+  DomainError,
+  isClosedStage,
+  isValidDateOnly,
+  requireManager,
+  stageLabels,
+  type Opportunity,
+  type Stage,
+  type User,
+} from './types.js';
 import { lockActor } from './access.js';
 import { enqueuePushEvent } from './push-store.js';
 import { wasDeleted } from './lead-deletion.js';
 
 const selectOpportunity = `SELECT o.*, c.name, c.phone, c.email, c.instagram, c.is_demo
   FROM opportunities o JOIN contacts c ON c.id = o.contact_id`;
+const closedStageSql = closedStages.map((stage) => `'${stage}'`).join(',');
 export interface LeadInput {
   name: string;
   phone: string;
@@ -162,7 +173,7 @@ export class CRM {
       }
       const existing = (
         await tx.query<{ id: string }>(
-          "SELECT id FROM opportunities WHERE contact_id=$1 AND stage NOT IN ('WON','LOST') FOR UPDATE",
+          `SELECT id FROM opportunities WHERE contact_id=$1 AND stage NOT IN (${closedStageSql}) FOR UPDATE`,
           [contact.id],
         )
       ).rows[0];
@@ -464,7 +475,8 @@ export class CRM {
       instagram: string;
       interest: string;
       unit: string;
-      stage: string;
+      stage: Stage;
+      procedure_date: string | null;
       next_action: string;
     },
   ) {
@@ -480,13 +492,14 @@ export class CRM {
           'VERSION_CONFLICT',
           'O cadastro foi alterado. Reabra a ficha antes de salvar.',
         );
-      if (input.stage === 'WON')
+      if (input.stage === 'CLOSED_WITH_DATE' && !isValidDateOnly(input.procedure_date))
         throw new DomainError(
-          'CONTRACT_REQUIRED',
-          'Validação de contrato será implementada na etapa comercial. Não é possível confirmar venda nesta versão.',
+          'PROCEDURE_DATE_REQUIRED',
+          'Informe a data do procedimento para concluir como fechado com data.',
+          400,
         );
       if (
-        input.stage === 'LOST' &&
+        input.stage === 'DECLINED' &&
         (
           await tx.query(
             "SELECT id FROM appointments WHERE opportunity_id=$1 AND status='scheduled' LIMIT 1",
@@ -496,12 +509,17 @@ export class CRM {
       )
         throw new DomainError(
           'OPEN_APPOINTMENTS',
-          'Conclua ou cancele as avaliações antes de encerrar o lead.',
+          'Conclua ou cancele as consultas antes de declinar o lead.',
         );
-      if (row.stage === 'LOST' && input.stage !== 'LOST')
+      if (row.stage === 'DECLINED' && input.stage !== 'DECLINED')
         throw new DomainError(
           'REENTRY_PENDING',
-          'Reabertura depende da política de reentrada, ainda em validação.',
+          'Um lead declinado não pode ser reaberto. Uma nova entrada deve ser criada.',
+        );
+      if (isClosedStage(row.stage) && !isClosedStage(input.stage))
+        throw new DomainError(
+          'REENTRY_PENDING',
+          'Uma qualificação encerrada não pode voltar ao atendimento ativo.',
         );
       await tx.query('UPDATE contacts SET name=$2,email=$3,instagram=$4 WHERE id=$1', [
         row.contact_id,
@@ -510,16 +528,31 @@ export class CRM {
         input.instagram,
       ]);
       await tx.query(
-        `UPDATE opportunities SET interest=$2,unit=$3,stage=$4,next_action=$5,version=version+1,
-        state=CASE WHEN $4='LOST' THEN 'CANCELLED' ELSE state END WHERE id=$1`,
-        [id, input.interest, input.unit, input.stage, input.next_action],
+        `UPDATE opportunities SET interest=$2,unit=$3,stage=$4,next_action=$5,procedure_date=$6,
+        version=version+1,
+        state=CASE WHEN $4 IN (${closedStageSql}) THEN 'CANCELLED' ELSE state END,
+        reserved_to=CASE WHEN $4 IN (${closedStageSql}) THEN NULL ELSE reserved_to END,
+        expires_at=CASE WHEN $4 IN (${closedStageSql}) THEN NULL ELSE expires_at END
+        WHERE id=$1`,
+        [
+          id,
+          input.interest,
+          input.unit,
+          input.stage,
+          input.next_action,
+          input.stage === 'CLOSED_WITH_DATE' ? input.procedure_date : null,
+        ],
       );
+      const previousLabel = stageLabels[row.stage];
+      const nextLabel = stageLabels[input.stage];
       await this.audit(
         tx,
         id,
         user.id,
         'opportunity.updated',
-        `Cadastro atualizado por ${user.name}. Etapa: ${input.stage}.`,
+        row.stage === input.stage
+          ? `Cadastro atualizado por ${user.name}.`
+          : `Qualificação alterada por ${user.name}: ${previousLabel} → ${nextLabel}.`,
         {
           previous_stage: row.stage,
           next_stage: input.stage,
@@ -530,6 +563,7 @@ export class CRM {
             'interest',
             'unit',
             'stage',
+            'procedure_date',
             'next_action',
           ],
         },
@@ -551,7 +585,7 @@ export class CRM {
         throw new DomainError('NOT_FOUND', 'Lead não encontrado.', 404);
       if (row.version !== input.expected_version)
         throw new DomainError('VERSION_CONFLICT', 'O lead mudou. Reabra a ficha.');
-      if (['LOST', 'WON'].includes(row.stage))
+      if (isClosedStage(row.stage))
         throw new DomainError('CLOSED', 'A oportunidade está encerrada.');
       if (new Date(input.starts_at) <= (await this.now(tx)))
         throw new DomainError('INVALID_DATE', 'Escolha um horário futuro.', 400);
@@ -565,23 +599,31 @@ export class CRM {
       )
         throw new DomainError(
           'OPEN_APPOINTMENT',
-          'Já existe uma avaliação agendada. Remarque ou cancele a avaliação atual.',
+          'Já existe uma consulta agendada. Remarque ou cancele a consulta atual.',
         );
       const appointmentId = randomUUID();
       await tx.query(
         'INSERT INTO appointments(id,opportunity_id,starts_at,unit,created_by) VALUES ($1,$2,$3,$4,$5)',
         [appointmentId, id, input.starts_at, input.unit, user.id],
       );
-      await tx.query(
-        `UPDATE opportunities SET stage='EVALUATION_SCHEDULED',version=version+1 WHERE id=$1`,
-        [id],
-      );
+      await tx.query(`UPDATE opportunities SET stage='FOLLOW_UP',version=version+1 WHERE id=$1`, [
+        id,
+      ]);
       await this.audit(
         tx,
         id,
         user.id,
         'appointment.created',
-        `Avaliação agendada por ${user.name} para ${new Date(input.starts_at).toISOString()}.`,
+        `Consulta agendada por ${user.name} para ${new Date(input.starts_at).toISOString()}.${
+          row.stage === 'FOLLOW_UP'
+            ? ''
+            : ` Qualificação: ${stageLabels[row.stage]} → ${stageLabels.FOLLOW_UP}.`
+        }`,
+        {
+          appointment_id: appointmentId,
+          previous_stage: row.stage,
+          next_stage: 'FOLLOW_UP',
+        },
       );
       return { id: appointmentId };
     });

@@ -212,7 +212,8 @@ export async function checkDeleteShared(ops: Ops, manager: User, users: User[]) 
     email: '',
     instagram: '',
     next_action: '',
-    stage: 'LOST',
+    stage: 'DECLINED',
+    procedure_date: null,
   });
   const returning = await ops.ingest(input(), randomUUID(), manager.id);
   const preserved = await ops.detail(manager, returning.id);

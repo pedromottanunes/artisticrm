@@ -396,7 +396,7 @@ test('HTTP libera WhatsApp somente para vencedora, inclusive pausada no rodízio
     await app.close();
   }
 });
-test('cadastro usa controle de versão e bloqueia venda sem contrato', async () => {
+test('cadastro usa controle de versão e exige data no fechamento correspondente', async () => {
   const { id } = await create();
   const update = {
     version: 1,
@@ -405,14 +405,47 @@ test('cadastro usa controle de versão e bloqueia venda sem contrato', async () 
     instagram: '',
     interest: 'Avaliação',
     unit: 'Teste',
-    stage: 'NEGOTIATION',
+    stage: 'FOLLOW_UP',
+    procedure_date: null,
     next_action: 'Retornar amanhã',
   };
   await crm.update(manager, id, update);
   await assert.rejects(() => crm.update(manager, id, update), { code: 'VERSION_CONFLICT' });
-  await assert.rejects(() => crm.update(manager, id, { ...update, version: 2, stage: 'WON' }), {
-    code: 'CONTRACT_REQUIRED',
+  await assert.rejects(
+    () =>
+      crm.update(manager, id, {
+        ...update,
+        version: 2,
+        stage: 'CLOSED_WITH_DATE',
+        procedure_date: null,
+      }),
+    { code: 'PROCEDURE_DATE_REQUIRED' },
+  );
+  await assert.rejects(
+    () =>
+      crm.update(manager, id, {
+        ...update,
+        version: 2,
+        stage: 'CLOSED_WITH_DATE',
+        procedure_date: '2026-02-30',
+      }),
+    { code: 'PROCEDURE_DATE_REQUIRED' },
+  );
+  await crm.update(manager, id, {
+    ...update,
+    version: 2,
+    stage: 'CLOSED_WITH_DATE',
+    procedure_date: '2026-10-20',
   });
+  const closed = await get(id);
+  assert.equal(
+    closed.procedure_date instanceof Date
+      ? closed.procedure_date.toISOString().slice(0, 10)
+      : closed.procedure_date,
+    '2026-10-20',
+  );
+  assert.equal(closed.state, 'CANCELLED');
+  assert.equal(closed.reserved_to, null);
 });
 test('agendamento confirma data futura e mantém histórico', async () => {
   const { id } = await create();
@@ -431,7 +464,7 @@ test('agendamento confirma data futura e mantém histórico', async () => {
     expected_version: 1,
   });
   assert.equal(await count('appointments'), 1);
-  assert.equal((await get(id)).stage, 'EVALUATION_SCHEDULED');
+  assert.equal((await get(id)).stage, 'FOLLOW_UP');
   assert.equal(await count('audit_events'), 2);
 });
 test('HTTP exige sessão, protege origem e restringe ações de gestão', async () => {

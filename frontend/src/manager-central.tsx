@@ -9,7 +9,7 @@ import {
   Shuffle,
   Users,
 } from 'lucide-react';
-import { api, ApiError, stages, type Lead, type Snapshot } from './api';
+import { api, ApiError, isClosedStage, stages, type Lead, type Snapshot } from './api';
 import { Avatar, Badge, Countdown, Empty, Modal } from './components';
 import { QueueSettings } from './forms';
 
@@ -482,7 +482,7 @@ export function ManagerCentral({
                     const responsible = board.users.find(
                       (user) => user.id === responsibleFor(lead),
                     );
-                    const closed = ['WON', 'LOST'].includes(lead.stage);
+                    const closed = isClosedStage(lead.stage);
                     return (
                       <tr key={lead.id}>
                         <td data-label="Lead">

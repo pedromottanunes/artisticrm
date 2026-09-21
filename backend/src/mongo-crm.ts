@@ -2,14 +2,21 @@ import { createHash, randomUUID } from 'node:crypto';
 import { enqueuePushEvent } from './push-store.js';
 import { deleteLeadData, wasDeleted, type DeleteLeadInput } from './lead-deletion.js';
 import { MongoStore, MongoTx, mongoUser } from './mongo-store.js';
-import { DomainError, requireManager, type User, type Opportunity } from './types.js';
+import {
+  DomainError,
+  isClosedStage,
+  isValidDateOnly,
+  requireManager,
+  stageLabels,
+  type User,
+  type Opportunity,
+} from './types.js';
 import type { CRM, LeadInput } from './crm.js';
 import type { Operations } from './operations.js';
 import { hashPassword, verifyPassword } from './auth.js';
 import type { Document } from 'mongodb';
 
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-const closed = (stage: string) => ['WON', 'LOST'].includes(stage);
 export function publicUser(user: Document): User {
   const {
     id,
@@ -222,7 +229,8 @@ export class MongoOperations {
         needs_review: returning,
         open: true,
         next_action: '',
-        stage: 'TO_QUALIFY',
+        stage: 'CONSULTATION_NOT_SCHEDULED',
+        procedure_date: null,
         version: 1,
       });
       if (next)
@@ -530,15 +538,27 @@ export class MongoOperations {
         throw new DomainError('NOT_FOUND', 'Lead não encontrado.', 404);
       if (row.version !== input.version)
         throw new DomainError('VERSION_CONFLICT', 'O cadastro mudou.');
-      if (input.stage === 'WON')
-        throw new DomainError('CONTRACT_REQUIRED', 'Validação de contrato ainda não implementada.');
+      if (input.stage === 'CLOSED_WITH_DATE' && !isValidDateOnly(input.procedure_date))
+        throw new DomainError(
+          'PROCEDURE_DATE_REQUIRED',
+          'Informe a data do procedimento para concluir como fechado com data.',
+          400,
+        );
       if (
-        input.stage === 'LOST' &&
+        input.stage === 'DECLINED' &&
         (await tx.count('appointments', { opportunity_id: id, status: 'scheduled' }))
       )
-        throw new DomainError('OPEN_APPOINTMENTS', 'Conclua ou cancele as avaliações.');
-      if (row.stage === 'LOST' && input.stage !== 'LOST')
-        throw new DomainError('REENTRY_PENDING', 'Reabertura depende da política de reentrada.');
+        throw new DomainError('OPEN_APPOINTMENTS', 'Conclua ou cancele as consultas.');
+      if (row.stage === 'DECLINED' && input.stage !== 'DECLINED')
+        throw new DomainError(
+          'REENTRY_PENDING',
+          'Um lead declinado não pode ser reaberto. Uma nova entrada deve ser criada.',
+        );
+      if (isClosedStage(row.stage) && !isClosedStage(input.stage))
+        throw new DomainError(
+          'REENTRY_PENDING',
+          'Uma qualificação encerrada não pode voltar ao atendimento ativo.',
+        );
       await tx.update(
         'contacts',
         { id: row.contact_id },
@@ -552,9 +572,11 @@ export class MongoOperations {
             interest: input.interest,
             unit: input.unit,
             stage: input.stage,
+            procedure_date: input.stage === 'CLOSED_WITH_DATE' ? input.procedure_date : null,
             next_action: input.next_action,
-            state: input.stage === 'LOST' ? 'CANCELLED' : row.state,
-            open: !closed(input.stage),
+            state: isClosedStage(input.stage) ? 'CANCELLED' : row.state,
+            ...(isClosedStage(input.stage) ? { reserved_to: null, expires_at: null } : {}),
+            open: !isClosedStage(input.stage),
           },
           $inc: { version: 1 },
         },
@@ -564,7 +586,9 @@ export class MongoOperations {
         id,
         user.id,
         'opportunity.updated',
-        `Cadastro atualizado por ${user.name}. Etapa: ${input.stage}.`,
+        row.stage === input.stage
+          ? `Cadastro atualizado por ${user.name}.`
+          : `Qualificação alterada por ${user.name}: ${stageLabels[row.stage]} → ${stageLabels[input.stage]}.`,
         { previous_stage: row.stage, next_stage: input.stage },
       );
       return { id, version: row.version + 1 };
@@ -578,11 +602,11 @@ export class MongoOperations {
         throw new DomainError('NOT_FOUND', 'Lead não encontrado.', 404);
       if (row.version !== input.expected_version)
         throw new DomainError('VERSION_CONFLICT', 'O lead mudou.');
-      if (closed(row.stage)) throw new DomainError('CLOSED', 'Oportunidade encerrada.');
+      if (isClosedStage(row.stage)) throw new DomainError('CLOSED', 'Oportunidade encerrada.');
       if (new Date(input.starts_at) <= (await this.now(tx)))
         throw new DomainError('INVALID_DATE', 'Escolha um horário futuro.', 400);
       if (await tx.count('appointments', { opportunity_id: id, status: 'scheduled' }))
-        throw new DomainError('OPEN_APPOINTMENT', 'Já existe uma avaliação agendada.');
+        throw new DomainError('OPEN_APPOINTMENT', 'Já existe uma consulta agendada.');
       const appointmentId = randomUUID();
       await tx.insert('appointments', {
         id: appointmentId,
@@ -596,14 +620,23 @@ export class MongoOperations {
       await tx.update(
         'opportunities',
         { id },
-        { $set: { stage: 'EVALUATION_SCHEDULED' }, $inc: { version: 1 } },
+        { $set: { stage: 'FOLLOW_UP' }, $inc: { version: 1 } },
       );
       await this.audit(
         tx,
         id,
         user.id,
         'appointment.created',
-        `Avaliação agendada por ${user.name}.`,
+        `Consulta agendada por ${user.name}.${
+          row.stage === 'FOLLOW_UP'
+            ? ''
+            : ` Qualificação: ${stageLabels[row.stage]} → ${stageLabels.FOLLOW_UP}.`
+        }`,
+        {
+          appointment_id: appointmentId,
+          previous_stage: row.stage,
+          next_stage: 'FOLLOW_UP',
+        },
       );
       return { id: appointmentId };
     });
@@ -751,7 +784,7 @@ export class MongoOperations {
         if (!row) throw new DomainError('NOT_FOUND', 'Lead não encontrado.', 404);
         if (row.version !== input.expected_version)
           throw new DomainError('VERSION_CONFLICT', 'O lead mudou.');
-        if (closed(row.stage)) throw new DomainError('CLOSED', 'Oportunidade encerrada.');
+        if (isClosedStage(row.stage)) throw new DomainError('CLOSED', 'Oportunidade encerrada.');
         if (row.owner_id === target.id)
           throw new DomainError('SAME_OWNER', 'A atendente já é responsável.');
         await this.assign(tx, row, target, actor, input.reason);
@@ -835,13 +868,13 @@ export class MongoOperations {
             ? await tx.one<Opportunity>('opportunities', { id: a.opportunity_id })
             : null;
           if (!a || !row || (actor.role !== 'manager' && row.owner_id !== actor.id))
-            throw new DomainError('NOT_FOUND', 'Avaliação não encontrada.', 404);
+            throw new DomainError('NOT_FOUND', 'Consulta não encontrada.', 404);
           if (a.version !== input.expected_version)
-            throw new DomainError('VERSION_CONFLICT', 'A avaliação mudou.');
+            throw new DomainError('VERSION_CONFLICT', 'A consulta mudou.');
           if (a.status !== 'scheduled')
             throw new DomainError(
               'APPOINTMENT_CLOSED',
-              'Avaliação encerrada não pode ser reescrita.',
+              'Consulta encerrada não pode ser reescrita.',
             );
           const now = await this.now(tx);
           if (
@@ -862,7 +895,7 @@ export class MongoOperations {
             row.id,
             actor.id,
             'appointment.updated',
-            `Avaliação atualizada. Motivo: ${input.reason}`,
+            `Consulta atualizada. Motivo: ${input.reason}`,
             {
               appointment_id: id,
               before: { starts_at: a.starts_at, unit: a.unit, status: a.status },

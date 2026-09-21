@@ -186,7 +186,8 @@ export async function checkDistribution(
       instagram: detail.instagram ?? '',
       interest: detail.interest,
       unit: detail.unit,
-      stage: 'LOST',
+      stage: 'DECLINED',
+      procedure_date: null,
       next_action: detail.next_action,
     });
     const openAfterClose = await board({ scope: 'OPEN' });
@@ -194,10 +195,10 @@ export async function checkDistribution(
     const closed = await board({ scope: 'CLOSED' });
     assert.equal(closed.total, 1);
     assert.equal(closed.rows[0].id, first.id);
-    assert.equal(closed.rows[0].stage, 'LOST');
+    assert.equal(closed.rows[0].stage, 'DECLINED');
     assert.equal((await board({ scope: 'ALL' })).total, 506);
-    assert.equal((await board({ scope: 'ALL', stage: 'LOST' })).total, 1);
-    assert.equal((await board({ scope: 'ALL', stage: 'TO_QUALIFY' })).total, 505);
+    assert.equal((await board({ scope: 'ALL', stage: 'DECLINED' })).total, 1);
+    assert.equal((await board({ scope: 'ALL', stage: 'CONSULTATION_NOT_SCHEDULED' })).total, 505);
     const recent = await board({ scope: 'ALL', order: 'RECENT' });
     assert.notEqual(recent.rows[0].id, first.id);
     assert.equal((await board({ scope: 'CLOSED', attendant: users[2].id })).total, 1);

@@ -290,22 +290,12 @@ async function login(page: Page, profile = 'cadu') {
   if (cookies) await page.context().addCookies(cookies);
   await page.goto('/');
   if (cookies) {
-    let session = await page.request.get('/api/v1/me');
-    if (session.status() === 429) {
-      await expect
-        .poll(
-          async () => {
-            session = await page.request.get('/api/v1/me');
-            return session.status();
-          },
-          { timeout: 20_000, intervals: [1_000] },
-        )
-        .toBe(200);
-      await page.reload();
-    }
-    if (session.ok()) {
+    try {
       await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
       return;
+    } catch {
+      // A sessão de demonstração pode ter sido revogada por um cenário anterior.
+      // Nesse caso, o fluxo abaixo autentica novamente pela própria interface.
     }
   }
   await page.getByLabel('Escolha um perfil de demonstração').selectOption(profile);
@@ -667,11 +657,13 @@ test('funil alterna entre quadro e lista completa com filtros', async ({ page })
   await expect(page.locator('.pipeline-table tbody tr').first()).toBeVisible();
   await expect(page.locator('.pipeline-list-summary strong')).toHaveText('12');
 
-  await page.getByLabel('Filtrar por etapa').selectOption('EVALUATION_SCHEDULED');
-  await expect(page.locator('.pipeline-table tbody tr')).toHaveCount(2);
+  await page.getByLabel('Filtrar por etapa').selectOption('FOLLOW_UP');
+  await expect(page.locator('.pipeline-table tbody tr')).toHaveCount(4);
   await expect(page.locator('.pipeline-table .stage-pill')).toHaveText([
-    'Avaliação agendada',
-    'Avaliação agendada',
+    'Em follow-up',
+    'Em follow-up',
+    'Em follow-up',
+    'Em follow-up',
   ]);
 
   await page.getByLabel('Filtrar por etapa').selectOption('ALL');
@@ -819,7 +811,7 @@ test('atendimento móvel acessa bolsão e confirma aceite sem abrir contato fict
   await page.getByRole('button', { name: 'Lista', exact: true }).click();
   await page.screenshot({ path: 'test-results/atendente-lista-compacta.png', fullPage: true });
 });
-test('ficha edita cadastro, agenda avaliação e preserva histórico', async ({ page }) => {
+test('ficha edita cadastro, agenda consulta e preserva histórico', async ({ page }) => {
   await login(page);
   await page
     .getByRole('navigation', { name: 'Menu principal' })
@@ -831,18 +823,18 @@ test('ficha edita cadastro, agenda avaliação e preserva histórico', async ({ 
   await dialog.getByLabel('Próxima ação').fill('Retorno de teste agendado');
   await dialog.getByRole('button', { name: 'Salvar alterações' }).click();
   await expect(dialog.getByRole('button', { name: 'Salvar alterações' })).toBeEnabled();
-  await dialog.getByRole('button', { name: 'Agendar avaliação', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Agendar consulta', exact: true }).click();
   await dialog.getByLabel('Data e horário').fill('2027-10-01T15:30');
-  await dialog.getByRole('button', { name: 'Confirmar avaliação' }).click();
-  await expect(dialog.getByText(/Avaliação agendada por Cadu/).first()).toBeVisible();
-  await dialog.getByRole('button', { name: 'Avaliações', exact: true }).click();
-  await dialog.getByRole('button', { name: 'Alterar avaliação' }).click();
-  await dialog.getByLabel('Ação na avaliação').selectOption('cancelled');
+  await dialog.getByRole('button', { name: 'Confirmar consulta' }).click();
+  await expect(dialog.getByText(/Consulta agendada por Cadu/).first()).toBeVisible();
+  await dialog.getByRole('button', { name: 'Consultas', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Alterar consulta' }).click();
+  await dialog.getByLabel('Ação na consulta').selectOption('cancelled');
   await dialog.getByLabel('Motivo', { exact: true }).fill('Cancelamento solicitado no teste');
-  await dialog.getByRole('button', { name: 'Salvar avaliação' }).click();
+  await dialog.getByRole('button', { name: 'Salvar consulta' }).click();
   await expect(dialog.getByText(/· Cancelada/)).toBeVisible();
   await dialog.getByRole('button', { name: 'Histórico', exact: true }).click();
-  await expect(dialog.getByText(/Avaliação cancelada/)).toBeVisible();
+  await expect(dialog.getByText(/Consulta cancelada/)).toBeVisible();
 });
 test('painel móvel sem transbordamento e menu utilizável', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });

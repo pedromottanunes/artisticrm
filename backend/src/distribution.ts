@@ -2,23 +2,13 @@ import { z } from 'zod';
 import type { Document } from 'mongodb';
 import type { Database } from './db.js';
 import type { MongoStore } from './mongo-store.js';
-import { requireManager, type User } from './types.js';
+import { closedStages, requireManager, stages, type User } from './types.js';
 
 export const distributionQuery = z
   .object({
     state: z.enum(['ALL', 'RESERVED', 'POOL', 'CLAIMED', 'PENDING']).default('ALL'),
     scope: z.enum(['OPEN', 'CLOSED', 'ALL']).default('OPEN'),
-    stage: z
-      .enum([
-        'ALL',
-        'TO_QUALIFY',
-        'EVALUATION_SCHEDULED',
-        'NEGOTIATION',
-        'CONTRACT_PENDING',
-        'WON',
-        'LOST',
-      ])
-      .default('ALL'),
+    stage: z.enum(['ALL', ...stages]).default('ALL'),
     order: z.enum(['PRIORITY', 'RECENT']).default('PRIORITY'),
     attendant: z.union([z.string().uuid(), z.literal('')]).default(''),
     search: z.string().trim().max(100).default(''),
@@ -27,6 +17,8 @@ export const distributionQuery = z
   })
   .strict();
 const states = ['RESERVED', 'POOL', 'CLAIMED', 'PENDING'];
+const closedStageList = [...closedStages];
+const closedStageSql = closedStages.map((stage) => `'${stage}'`).join(',');
 const kinds = [
   'lead.created',
   'reservation.created',
@@ -176,12 +168,12 @@ async function readDistributionBoard(
         timeout_minutes: configuration.timeout_minutes,
         last_position: configuration.last_position,
       };
-      const open = { state: { $in: states }, stage: { $nin: ['LOST', 'WON'] } };
+      const open = { state: { $in: states }, stage: { $nin: closedStageList } };
       const filter: Document =
         query.scope === 'OPEN'
           ? { ...open }
           : query.scope === 'CLOSED'
-            ? { stage: { $in: ['LOST', 'WON'] } }
+            ? { stage: { $in: closedStageList } }
             : {};
       if (query.stage !== 'ALL') {
         if (filter.stage !== undefined) {
@@ -376,9 +368,8 @@ async function readDistributionBoard(
         'SELECT version,timeout_minutes,last_position FROM distribution_settings WHERE id=1',
       )
     ).rows[0];
-    const open =
-      "o.state IN ('RESERVED','POOL','CLAIMED','PENDING') AND o.stage NOT IN ('WON','LOST')";
-    const selectedScope = `($4='ALL' OR ($4='OPEN' AND ${open}) OR ($4='CLOSED' AND o.stage IN ('WON','LOST')))`;
+    const open = `o.state IN ('RESERVED','POOL','CLAIMED','PENDING') AND o.stage NOT IN (${closedStageSql})`;
+    const selectedScope = `($4='ALL' OR ($4='OPEN' AND ${open}) OR ($4='CLOSED' AND o.stage IN (${closedStageSql})))`;
     const where = `${selectedScope} AND ($1='ALL' OR o.state=$1)
       AND ($2='' OR (o.state='RESERVED' AND o.reserved_to::text=$2) OR (o.state='CLAIMED' AND o.owner_id::text=$2) OR ($4<>'OPEN' AND o.owner_id::text=$2))
       AND ($3='' OR strpos(lower(c.name),lower($3))>0 OR strpos(c.phone,$3)>0)

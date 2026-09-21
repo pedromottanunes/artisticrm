@@ -1,4 +1,4 @@
-import { useState, useRef, type FormEvent } from 'react';
+import { useEffect, useState, useRef, type FormEvent } from 'react';
 import {
   ArrowRight,
   Check,
@@ -9,7 +9,7 @@ import {
   ShieldCheck,
   Trash2,
 } from 'lucide-react';
-import { api, stages, type Detail, type Snapshot, type User } from './api';
+import { api, isClosedStage, stages, type Detail, type Snapshot, type User } from './api';
 import { Transfer, AppointmentEditor } from './operations';
 import { Modal, Source, Badge, Avatar, dateLabel } from './components';
 
@@ -152,9 +152,11 @@ export function LeadDetail({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [tab, setTab] = useState(initialTab);
+  const [selectedStage, setSelectedStage] = useState(detail.stage);
   const [confirmation, setConfirmation] = useState('');
   const deleteCommand = useRef<{ key: string; version: number } | null>(null);
   const deleting = useRef(false);
+  useEffect(() => setSelectedStage(detail.stage), [detail.id, detail.stage]);
   const remove = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (deleting.current || saving || !connected || confirmation !== 'EXCLUIR') return;
@@ -186,7 +188,12 @@ export function LeadDetail({
     try {
       await api(`/opportunities/${detail.id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ ...fields, version: detail.version }),
+        body: JSON.stringify({
+          ...fields,
+          procedure_date:
+            selectedStage === 'CLOSED_WITH_DATE' ? String(fields.procedure_date) : null,
+          version: detail.version,
+        }),
       });
       await onSaved();
     } catch (err) {
@@ -235,7 +242,8 @@ export function LeadDetail({
       <div className="detail-tabs">
         {[
           'cadastro',
-          ...(detail.can_edit ? ['agendar', 'avaliacoes', 'historico'] : []),
+          ...(detail.can_edit && !isClosedStage(detail.stage) ? ['agendar'] : []),
+          ...(detail.can_edit ? ['avaliacoes', 'historico'] : []),
           ...(isManager ? ['transferir'] : []),
           ...(detail.can_edit ? ['excluir'] : []),
         ].map((item) => (
@@ -252,9 +260,9 @@ export function LeadDetail({
             {item === 'cadastro'
               ? 'Cadastro'
               : item === 'agendar'
-                ? 'Agendar avaliação'
+                ? 'Agendar consulta'
                 : item === 'avaliacoes'
-                  ? 'Avaliações'
+                  ? 'Consultas'
                   : item === 'transferir'
                     ? 'Atribuir / transferir'
                     : item === 'excluir'
@@ -363,16 +371,37 @@ export function LeadDetail({
               <input name="unit" defaultValue={detail.unit} maxLength={160} />
             </label>
             <label className="full">
-              Etapa no funil
-              <select name="stage" defaultValue={detail.stage}>
+              Qualificação
+              <select
+                name="stage"
+                value={selectedStage}
+                onChange={(event) => setSelectedStage(event.target.value)}
+              >
                 {Object.entries(stages).map(([key, label]) => (
-                  <option disabled={key === 'WON'} key={key} value={key}>
+                  <option
+                    disabled={
+                      (detail.stage === 'DECLINED' && key !== 'DECLINED') ||
+                      (isClosedStage(detail.stage) && !isClosedStage(key))
+                    }
+                    key={key}
+                    value={key}
+                  >
                     {label}
-                    {key === 'WON' ? ' — requer validação de contrato' : ''}
                   </option>
                 ))}
               </select>
             </label>
+            {selectedStage === 'CLOSED_WITH_DATE' && (
+              <label className="full">
+                Data do procedimento
+                <input
+                  name="procedure_date"
+                  type="date"
+                  defaultValue={detail.procedure_date?.slice(0, 10) ?? ''}
+                  required
+                />
+              </label>
+            )}
             <label className="full">
               Próxima ação
               <textarea
@@ -485,8 +514,8 @@ export function LeadDetail({
             <div className="inline-info full">
               <CalendarDays size={20} />
               <span>
-                O agendamento é registrado no CRM. Confirmações ao paciente devem ser feitas pela
-                atendente.
+                A consulta será registrada na Agenda e o lead passará automaticamente para Em
+                follow-up.
               </span>
             </div>
             <label className="full">
@@ -514,7 +543,7 @@ export function LeadDetail({
           </div>
           <div className="modal-actions">
             <button className="button gold" disabled={!connected || saving}>
-              {saving ? 'Agendando…' : 'Confirmar avaliação'}
+              {saving ? 'Agendando…' : 'Confirmar consulta'}
               <Check size={16} />
             </button>
           </div>
@@ -530,9 +559,7 @@ export function LeadDetail({
               onSaved={onSaved}
             />
           ))}
-          {!detail.appointments.length && (
-            <p className="help-text">Nenhuma avaliação registrada.</p>
-          )}
+          {!detail.appointments.length && <p className="help-text">Nenhuma consulta registrada.</p>}
         </div>
       )}
       {tab === 'transferir' && isManager && (

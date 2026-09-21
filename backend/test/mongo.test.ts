@@ -98,7 +98,8 @@ const lose = {
   instagram: '',
   interest: 'Avaliação',
   unit: 'Teste',
-  stage: 'LOST',
+  stage: 'DECLINED',
+  procedure_date: null,
   next_action: '',
 };
 const key = () => randomUUID();
@@ -374,8 +375,14 @@ test('Mongo: atualização e agendamento concorrentes respeitam versões e avali
     ops.changeAppointment(users[0], appt.id, { ...change, expected_version: 2 }, key()),
     { code: 'APPOINTMENT_CLOSED' },
   );
-  await ops.update(users[0], id, { ...lose, version: 4 });
+  await ops.update(users[0], id, {
+    ...lose,
+    version: 4,
+    stage: 'CLOSED_WITH_DATE',
+    procedure_date: '2026-10-20',
+  });
   assert.equal((await row(id)).open, false);
+  assert.equal((await row(id)).procedure_date, '2026-10-20');
 });
 test('Mongo: retorno após perdido preserva histórico e exige revisão', async () => {
   const { id } = await lead();
@@ -387,12 +394,18 @@ test('Mongo: retorno após perdido preserva histórico e exige revisão', async 
   assert.equal((await row(returned.id)).state, 'PENDING');
   assert.equal(await db.count('contacts'), 1);
   assert.equal(await db.count('opportunities'), 2);
-  await assert.rejects(ops.update(manager, id, { ...lose, version: 2, stage: 'NEGOTIATION' }), {
+  await assert.rejects(ops.update(manager, id, { ...lose, version: 2, stage: 'FOLLOW_UP' }), {
     code: 'REENTRY_PENDING',
   });
-  await assert.rejects(ops.update(manager, returned.id, { ...lose, version: 1, stage: 'WON' }), {
-    code: 'CONTRACT_REQUIRED',
-  });
+  await assert.rejects(
+    ops.update(manager, returned.id, {
+      ...lose,
+      version: 1,
+      stage: 'CLOSED_WITH_DATE',
+      procedure_date: null,
+    }),
+    { code: 'PROCEDURE_DATE_REQUIRED' },
+  );
 });
 test('Mongo: criação com login simples, senha curta, reset e revogação', async () => {
   const createKey = key(),

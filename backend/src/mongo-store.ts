@@ -126,6 +126,41 @@ export async function openMongo(uri: string, databaseName = 'artisti') {
 }
 
 export async function initializeMongo(db: MongoStore) {
+  const stageMigration = {
+    TO_QUALIFY: 'CONSULTATION_NOT_SCHEDULED',
+    EVALUATION_SCHEDULED: 'FOLLOW_UP',
+    NEGOTIATION: 'FOLLOW_UP',
+    WON: 'CLOSED_WITHOUT_DATE',
+    LOST: 'DECLINED',
+  } as const;
+  const closedStages = ['CONTRACT_PENDING', 'CLOSED_WITH_DATE', 'CLOSED_WITHOUT_DATE', 'DECLINED'];
+  for (const [previous, next] of Object.entries(stageMigration)) {
+    const closed = closedStages.includes(next);
+    await db.collection('opportunities').updateMany(
+      { stage: previous },
+      {
+        $set: {
+          stage: next,
+          open: !closed,
+          ...(closed ? { state: 'CANCELLED', reserved_to: null, expires_at: null } : {}),
+        },
+      },
+    );
+  }
+  await db.collection('opportunities').updateMany(
+    { stage: { $in: closedStages } },
+    {
+      $set: {
+        open: false,
+        state: 'CANCELLED',
+        reserved_to: null,
+        expires_at: null,
+      },
+    },
+  );
+  await db
+    .collection('opportunities')
+    .updateMany({ procedure_date: { $exists: false } }, { $set: { procedure_date: null } });
   for (const name of ['users', 'contacts', 'opportunities', 'appointments', 'audit_events'])
     await db.collection(name).createIndex({ id: 1 }, { unique: true });
   await db.collection('users').createIndex({ email: 1 }, { unique: true });

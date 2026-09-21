@@ -71,9 +71,9 @@ Estados de distribuição: `RESERVED`, `POOL`, `CLAIMED`, `CANCELLED`. Oportunid
 
 Cadastro automático exige identidade de WhatsApp, não nome completo. Cadastro manual precisa de identificação mínima e decisão de responsável/distribuição conforme política validada. Telefone completo fica restrito ao proprietário autorizado e à gestão; no bolsão entregar resumo mínimo.
 
-Etapas comerciais propostas: `TO_QUALIFY`, `EVALUATION_SCHEDULED`, `NEGOTIATION`, `CONTRACT_PENDING`, `WON`, `LOST`. Avaliação realizada é situação de agendamento, podendo virar etapa adicional se necessário.
+Qualificações comerciais: `CONSULTATION_NOT_SCHEDULED`, `FOLLOW_UP`, `CONTRACT_PENDING`, `CLOSED_WITH_DATE`, `CLOSED_WITHOUT_DATE` e `DECLINED`. A consulta é um agendamento separado: ao ser marcada, move automaticamente o lead de consulta não agendada para follow-up, sem criar uma coluna própria no funil.
 
-Guardar cancelamentos e remarcações. Permitir histórico de múltiplas avaliações. Atualizar etapa não deve apagar agendamento anterior.
+Guardar cancelamentos e remarcações. Permitir histórico de múltiplas consultas. Atualizar a qualificação não deve apagar agendamento anterior.
 
 Contrato assinado precisa de validação administrativa ou evento de provedor confiável. Assinatura é condição necessária para comissão, não regra financeira completa. Beneficiário e fórmula ficam congelados no registro de apuração; mudanças de proprietário posteriores não reescrevem comissões. Cancelamentos geram ajustes auditados. Separar valor contratado de recebimentos; registrar recebimentos somente se incluídos no escopo operacional.
 

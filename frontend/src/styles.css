@@ -914,19 +914,19 @@ main {
   border-radius: 50%;
   background: #e0b172;
 }
-.stage-dot.EVALUATION_SCHEDULED {
+.stage-dot.FOLLOW_UP {
   background: #9eb7d4;
-}
-.stage-dot.NEGOTIATION {
-  background: #b6a3d4;
 }
 .stage-dot.CONTRACT_PENDING {
   background: #c4b08b;
 }
-.stage-dot.WON {
+.stage-dot.CLOSED_WITH_DATE {
   background: #89bca6;
 }
-.stage-dot.LOST {
+.stage-dot.CLOSED_WITHOUT_DATE {
+  background: #a8b9a7;
+}
+.stage-dot.DECLINED {
   background: #8a919d;
 }
 .kanban-cards {

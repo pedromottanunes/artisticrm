@@ -75,7 +75,8 @@ const update = {
   instagram: '',
   interest: 'Avaliação',
   unit: 'Teste',
-  stage: 'LOST',
+  stage: 'DECLINED',
+  procedure_date: null,
   next_action: '',
 };
 
@@ -255,7 +256,7 @@ test('retorno de encerrado aguarda revisão e não é liberado ao salvar fila', 
     randomUUID(),
   );
   assert.equal((await row(returning.id)).state, 'CLAIMED');
-  assert.equal((await row(id)).stage, 'LOST');
+  assert.equal((await row(id)).stage, 'DECLINED');
 });
 test('remarcação preserva antes/depois, cancelamento não pode ser reescrito', async () => {
   const { id } = await lead();

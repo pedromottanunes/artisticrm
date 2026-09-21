@@ -67,17 +67,21 @@ export async function seedDemo(crm: CRM, withLeads = true) {
         row.version,
         `seed-claim-${i}`,
       );
-      const stage = ['TO_QUALIFY', 'EVALUATION_SCHEDULED', 'NEGOTIATION', 'CONTRACT_PENDING'][
+      const stage = ['CONSULTATION_NOT_SCHEDULED', 'FOLLOW_UP', 'FOLLOW_UP', 'CONTRACT_PENDING'][
         i % 4
       ];
       await crm.db.query(
-        'UPDATE opportunities SET stage=$2,next_action=$3,created_at=$4 WHERE id=$1',
+        `UPDATE opportunities SET stage=$2,next_action=$3,created_at=$4,
+        state=CASE WHEN $2='CONTRACT_PENDING' THEN 'CANCELLED' ELSE state END,
+        reserved_to=CASE WHEN $2='CONTRACT_PENDING' THEN NULL ELSE reserved_to END,
+        expires_at=CASE WHEN $2='CONTRACT_PENDING' THEN NULL ELSE expires_at END
+        WHERE id=$1`,
         [
           created.id,
           stage,
           [
             'Confirmar melhor horário para contato',
-            'Lembrar avaliação agendada',
+            'Acompanhar consulta agendada',
             'Retornar sobre proposta',
             'Aguardar documentação',
           ][i % 4],

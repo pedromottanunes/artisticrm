@@ -1,6 +1,14 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { KeyRound, Plus, ShieldCheck, Users, Save } from 'lucide-react';
-import { api, ApiError, type Snapshot, type User, type Detail, type Appointment } from './api';
+import {
+  api,
+  ApiError,
+  isClosedStage,
+  type Snapshot,
+  type User,
+  type Detail,
+  type Appointment,
+} from './api';
 import { Avatar, Modal, dateLabel } from './components';
 
 // Keep the same command key after an ambiguous network failure. Do not let changed
@@ -443,7 +451,7 @@ export function Transfer({
       <div className="modal-actions">
         <button
           className="button gold"
-          disabled={busy || !connected || ['WON', 'LOST'].includes(detail.stage)}
+          disabled={busy || !connected || isClosedStage(detail.stage)}
         >
           {busy ? 'Transferindo…' : 'Confirmar atribuição'}
         </button>
@@ -509,7 +517,7 @@ export function AppointmentEditor({
             disabled={!connected || busy}
             onClick={() => setEditing(!editing)}
           >
-            {editing ? 'Fechar edição' : 'Alterar avaliação'}
+            {editing ? 'Fechar edição' : 'Alterar consulta'}
           </button>
         )}
       </header>
@@ -517,11 +525,11 @@ export function AppointmentEditor({
         <form onSubmit={submit}>
           <fieldset className="form-grid" disabled={busy || !connected}>
             <label className="full">
-              Ação na avaliação
+              Ação na consulta
               <select name="status" defaultValue="scheduled">
                 <option value="scheduled">Remarcar</option>
                 <option value="completed">Marcar como concluída</option>
-                <option value="cancelled">Cancelar avaliação</option>
+                <option value="cancelled">Cancelar consulta</option>
               </select>
             </label>
             <label>
@@ -553,7 +561,7 @@ export function AppointmentEditor({
             )}
           </fieldset>
           <button className="button gold" disabled={busy || !connected}>
-            {busy ? 'Confirmando…' : 'Salvar avaliação'}
+            {busy ? 'Confirmando…' : 'Salvar consulta'}
           </button>
         </form>
       )}

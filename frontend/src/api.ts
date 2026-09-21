@@ -43,6 +43,7 @@ export interface Lead {
   source: string;
   source_evidence: string;
   stage: string;
+  procedure_date: string | null;
   state: string;
   reserved_to: string | null;
   owner_id: string | null;
@@ -94,13 +95,20 @@ export interface Snapshot {
   limit: number;
 }
 export const stages: Record<string, string> = {
-  TO_QUALIFY: 'A qualificar',
-  EVALUATION_SCHEDULED: 'Avaliação agendada',
-  NEGOTIATION: 'Em negociação',
+  CONSULTATION_NOT_SCHEDULED: 'Consulta não agendada',
+  FOLLOW_UP: 'Em follow-up',
   CONTRACT_PENDING: 'Contrato pendente',
-  WON: 'Conquistados',
-  LOST: 'Não avançaram',
+  CLOSED_WITH_DATE: 'Fechado com data',
+  CLOSED_WITHOUT_DATE: 'Fechado sem data',
+  DECLINED: 'Declinado',
 };
+export const closedStages = [
+  'CONTRACT_PENDING',
+  'CLOSED_WITH_DATE',
+  'CLOSED_WITHOUT_DATE',
+  'DECLINED',
+] as const;
+export const isClosedStage = (stage: string) => (closedStages as readonly string[]).includes(stage);
 export const stateLabels: Record<string, string> = {
   RESERVED: 'Nova reserva',
   POOL: 'No bolsão',

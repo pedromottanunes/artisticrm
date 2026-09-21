@@ -10,6 +10,10 @@ import { pushConfig } from './push.js';
 import { openMongo, initializeMongo, bootstrapMongo } from './mongo-store.js';
 
 const production = process.env.NODE_ENV === 'production';
+const testRateLimitMax =
+  !production && process.env.ARTISTI_EPHEMERAL_DB === '1'
+    ? Number(process.env.ARTISTI_TEST_RATE_LIMIT_MAX) || undefined
+    : undefined;
 const whatsapp = whatsappConfig(process.env);
 if (process.env.MONGODB_URI && process.env.DATABASE_URL)
   throw new Error('Configure apenas MONGODB_URI ou DATABASE_URL, nunca ambos.');
@@ -51,6 +55,7 @@ const { app } = await buildApp(db, {
   whatsapp,
   push: pushConfig(process.env),
   appOrigin,
+  rateLimitMax: testRateLimitMax,
   staticRoot: production
     ? fileURLToPath(new URL('../../frontend/dist', import.meta.url))
     : undefined,

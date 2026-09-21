@@ -51,7 +51,7 @@ A ficha agora inclui `appointments`. `needs_review` identifica uma nova oportuni
 | `POST /opportunities/:id/transfer` | Transferência administrativa com justificativa |
 | `GET /opportunities/:id/history` | Eventos e atividades autorizados |
 | `POST /opportunities/:id/activities` | Registrar tarefa/observação |
-| `POST /opportunities/:id/appointments` | Agendar avaliação |
+| `POST /opportunities/:id/appointments` | Agendar consulta e mover a qualificação para follow-up |
 | `PATCH /appointments/:id` | Remarcar, concluir ou cancelar mantendo histórico |
 | `POST /opportunities/:id/contracts` | Cadastrar contrato e documento privado |
 | `POST /contracts/:id/validate-signature` | Validação administrativa autorizada |

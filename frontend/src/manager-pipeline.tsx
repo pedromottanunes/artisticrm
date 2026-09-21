@@ -214,11 +214,7 @@ export function ManagerPipeline({
                     </button>
                   ))}
                   {!rows.length && (
-                    <p className="column-empty">
-                      {key === 'WON'
-                        ? 'A validação de contratos estará disponível na próxima etapa.'
-                        : 'Nenhuma oportunidade nesta etapa.'}
-                    </p>
+                    <p className="column-empty">Nenhuma oportunidade nesta etapa.</p>
                   )}
                 </div>
               </section>
