@@ -331,10 +331,7 @@ export function LeadDetail({
       )}
       {tab === 'cadastro' && (
         <form ref={formRef} onSubmit={save} key={detail.id + ':' + detail.version}>
-          <fieldset
-            className="modal-body form-grid"
-            disabled={!detail.can_edit || !connected || saving}
-          >
+          <fieldset className="modal-body form-grid" disabled={!detail.can_edit || saving}>
             <label>
               Nome
               <input

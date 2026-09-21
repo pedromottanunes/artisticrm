@@ -827,6 +827,23 @@ test('ficha edita cadastro, agenda consulta e preserva histórico', async ({ pag
       .locator('.detail-tabs')
       .evaluate((element) => element.scrollWidth <= element.clientWidth),
   ).toBe(true);
+  let boardUnavailable = true;
+  await page.route('**/api/v1/distribution/board?*', async (route) => {
+    if (boardUnavailable) {
+      await route.fulfill({ status: 503, json: { message: 'Falha temporária no teste' } });
+      return;
+    }
+    await route.continue();
+  });
+  const refresh = page.locator('.central-commandbar').getByRole('button', { name: 'Atualizar' });
+  await refresh.click({ force: true });
+  await expect(page.getByRole('alert')).toContainText('Falha temporária');
+  await expect(dialog.getByLabel('Próxima ação')).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: 'Salvar alterações' })).toBeDisabled();
+  boardUnavailable = false;
+  await refresh.click({ force: true });
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Salvar alterações' })).toBeEnabled();
   await dialog.getByLabel('Próxima ação').fill('Retorno de teste agendado');
   await dialog.getByRole('button', { name: 'Salvar alterações' }).click();
   await expect(dialog.getByRole('button', { name: 'Salvar alterações' })).toBeEnabled();
