@@ -233,6 +233,7 @@ export function LeadDetail({
         if (!deleting.current) onClose();
       }}
       wide
+      className="lead-detail-modal"
     >
       <div className="detail-summary">
         <Badge state={detail.state} />
@@ -370,38 +371,40 @@ export function LeadDetail({
               Unidade
               <input name="unit" defaultValue={detail.unit} maxLength={160} />
             </label>
-            <label className="full">
-              Qualificação
-              <select
-                name="stage"
-                value={selectedStage}
-                onChange={(event) => setSelectedStage(event.target.value)}
-              >
-                {Object.entries(stages).map(([key, label]) => (
-                  <option
-                    disabled={
-                      (detail.stage === 'DECLINED' && key !== 'DECLINED') ||
-                      (isClosedStage(detail.stage) && !isClosedStage(key))
-                    }
-                    key={key}
-                    value={key}
-                  >
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {selectedStage === 'CLOSED_WITH_DATE' && (
-              <label className="full">
-                Data do procedimento
-                <input
-                  name="procedure_date"
-                  type="date"
-                  defaultValue={detail.procedure_date?.slice(0, 10) ?? ''}
-                  required
-                />
+            <div className="qualification-fields full">
+              <label>
+                Qualificação
+                <select
+                  name="stage"
+                  value={selectedStage}
+                  onChange={(event) => setSelectedStage(event.target.value)}
+                >
+                  {Object.entries(stages).map(([key, label]) => (
+                    <option
+                      disabled={
+                        (detail.stage === 'DECLINED' && key !== 'DECLINED') ||
+                        (isClosedStage(detail.stage) && !isClosedStage(key))
+                      }
+                      key={key}
+                      value={key}
+                    >
+                      {label}
+                    </option>
+                  ))}
+                </select>
               </label>
-            )}
+              {selectedStage === 'CLOSED_WITH_DATE' && (
+                <label className="procedure-date-field">
+                  Data do procedimento
+                  <input
+                    name="procedure_date"
+                    type="date"
+                    defaultValue={detail.procedure_date?.slice(0, 10) ?? ''}
+                    required
+                  />
+                </label>
+              )}
+            </div>
             <label className="full">
               Próxima ação
               <textarea
@@ -518,23 +521,25 @@ export function LeadDetail({
                 follow-up.
               </span>
             </div>
-            <label className="full">
-              Data e horário
-              <input name="starts_at" type="datetime-local" required />
-              <small>
-                Fuso deste dispositivo: {Intl.DateTimeFormat().resolvedOptions().timeZone}.
-              </small>
-            </label>
-            <label className="full">
-              Unidade
-              <input
-                name="unit"
-                defaultValue={detail.unit}
-                required
-                minLength={2}
-                maxLength={160}
-              />
-            </label>
+            <div className="schedule-fields full">
+              <label className="schedule-date-field">
+                Data e horário
+                <input name="starts_at" type="datetime-local" required />
+                <small>
+                  Fuso deste dispositivo: {Intl.DateTimeFormat().resolvedOptions().timeZone}.
+                </small>
+              </label>
+              <label>
+                Unidade
+                <input
+                  name="unit"
+                  defaultValue={detail.unit}
+                  required
+                  minLength={2}
+                  maxLength={160}
+                />
+              </label>
+            </div>
             {error && (
               <p className="form-error full" role="alert">
                 {error}

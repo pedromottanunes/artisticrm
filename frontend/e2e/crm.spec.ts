@@ -820,10 +820,24 @@ test('ficha edita cadastro, agenda consulta e preserva histórico', async ({ pag
   await page.getByLabel('Buscar nome ou telefone').fill('Gustavo Pereira');
   await page.getByRole('button', { name: 'Abrir ficha de Gustavo Pereira' }).click();
   const dialog = page.getByRole('dialog');
+  const initialBox = (await dialog.boundingBox())!;
+  expect(initialBox.width).toBeGreaterThan(900);
+  expect(
+    await dialog
+      .locator('.detail-tabs')
+      .evaluate((element) => element.scrollWidth <= element.clientWidth),
+  ).toBe(true);
   await dialog.getByLabel('Próxima ação').fill('Retorno de teste agendado');
   await dialog.getByRole('button', { name: 'Salvar alterações' }).click();
   await expect(dialog.getByRole('button', { name: 'Salvar alterações' })).toBeEnabled();
   await dialog.getByRole('button', { name: 'Agendar consulta', exact: true }).click();
+  const scheduleBox = (await dialog.boundingBox())!;
+  expect(Math.abs(scheduleBox.width - initialBox.width)).toBeLessThanOrEqual(1);
+  expect(Math.abs(scheduleBox.height - initialBox.height)).toBeLessThanOrEqual(1);
+  const dateField = (await dialog.getByLabel('Data e horário').boundingBox())!;
+  const unitField = (await dialog.getByLabel('Unidade', { exact: true }).boundingBox())!;
+  expect(dateField.width).toBeLessThan(unitField.width);
+  await dialog.screenshot({ path: 'test-results/lead-modal-desktop.png' });
   await dialog.getByLabel('Data e horário').fill('2027-10-01T15:30');
   await dialog.getByRole('button', { name: 'Confirmar consulta' }).click();
   await expect(dialog.getByText(/Consulta agendada por Cadu/).first()).toBeVisible();

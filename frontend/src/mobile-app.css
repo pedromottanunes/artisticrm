@@ -485,6 +485,13 @@ a:focus-visible {
     max-height: min(calc(100dvh - 16px), var(--dialog-max-height, 100dvh));
     border-radius: 16px;
   }
+  .modal.lead-detail-modal {
+    width: min(100%, 860px);
+  }
+  .lead-detail-modal .detail-tabs {
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
   .modal-heading {
     padding: 16px;
     align-items: center;
@@ -518,6 +525,10 @@ a:focus-visible {
   }
   .form-grid {
     gap: 16px;
+  }
+  .qualification-fields,
+  .schedule-fields {
+    grid-template-columns: minmax(0, 1fr) minmax(190px, 0.65fr);
   }
   .login-page {
     grid-template-columns: 1fr;
@@ -586,6 +597,10 @@ a:focus-visible {
       calc(100dvh - env(safe-area-inset-top, 0px) - 8px),
       var(--dialog-max-height, 100dvh)
     );
+  }
+  .qualification-fields,
+  .schedule-fields {
+    grid-template-columns: 1fr;
   }
   .distribution-history summary > span {
     display: block;
