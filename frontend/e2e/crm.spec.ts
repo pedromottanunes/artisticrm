@@ -465,6 +465,15 @@ test('tema clínico contemporâneo mantém as superfícies claras em toda a gest
   expect(loginTheme.scheme).toBe('light');
   expect(lightness(loginTheme.background)).toBeGreaterThan(0.85);
   expect(loginTheme.accent).toBe('#14877c');
+  const storyBox = (await page.locator('.login-story').boundingBox())!;
+  const logoBox = (await page.locator('.login-story > img').boundingBox())!;
+  expect(Math.abs(logoBox.x + logoBox.width / 2 - (storyBox.x + storyBox.width / 2))).toBeLessThan(
+    2,
+  );
+  expect(
+    Math.abs(logoBox.y + logoBox.height / 2 - (storyBox.y + storyBox.height / 2)),
+  ).toBeLessThan(2);
+  expect(logoBox.width).toBeGreaterThan(300);
   await page.screenshot({ path: 'test-results/artisti-login-light.png', fullPage: true });
 
   await login(page);
