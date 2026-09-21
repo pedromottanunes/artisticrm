@@ -5,6 +5,9 @@
   margin-top: 24px;
   align-items: start;
 }
+.settings-extension.settings-page {
+  margin-top: 0;
+}
 .settings-extension-block {
   margin-top: 24px;
 }

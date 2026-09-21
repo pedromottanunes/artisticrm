@@ -510,7 +510,6 @@ export function App() {
             <IconButton label="Central de avisos" onClick={() => setNotifications(true)}>
               <Bell size={19} />
             </IconButton>
-            <Avatar user={data.user} small />
             <span className="desktop-logout">
               <IconButton label="Sair da conta" onClick={() => void logout()}>
                 <LogOut size={18} />
@@ -645,7 +644,7 @@ export function App() {
             </section>
           )}
           {activePage === 'settings' && (
-            <div className="two-columns">
+            <div className="settings-extension settings-page">
               <section className="panel">
                 <div className="panel-heading">
                   <h2>Minha conta</h2>
@@ -662,31 +661,7 @@ export function App() {
                   </button>
                 </div>
               </section>
-              <section className="panel">
-                <div className="panel-heading">
-                  <h2>Conexões do sistema</h2>
-                  <Link2 size={21} />
-                </div>
-                <div className="integration-list">
-                  {['Meta Ads', 'Google Ads', 'Google Tag Manager'].map((name) => (
-                    <div key={name}>
-                      <span>{name}</span>
-                      <span className="badge pending">
-                        <i />
-                        Não conectado
-                      </span>
-                    </div>
-                  ))}
-                </div>
-                <div className="panel-footnote">
-                  <Smartphone size={16} />
-                  Instalação e notificações disponíveis nas configurações deste aparelho.
-                </div>
-              </section>
-            </div>
-          )}
-          {activePage === 'settings' && (
-            <div className="settings-extension">
+              <PasswordChange onDone={passwordDone} />
               <section className="panel device-panel">
                 <div className="panel-heading">
                   <h2>Este aparelho</h2>
@@ -696,7 +671,6 @@ export function App() {
                   <DevicePanel userId={data.user.id} />
                 </div>
               </section>
-              <PasswordChange onDone={passwordDone} />
               {isManager && <Team data={data} connected={connected} onChanged={refresh} />}
               {isManager && <CentralStatusPanel />}
             </div>

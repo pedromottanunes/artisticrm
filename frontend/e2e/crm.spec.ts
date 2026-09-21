@@ -99,6 +99,7 @@ test('gestão móvel: todas as telas pela barra inferior, cartões e formulário
   const navigation = page.getByRole('navigation', { name: 'Atalhos de gestão' });
   await expect(navigation).toBeVisible();
   await expect(page.locator('.sidebar')).toBeHidden();
+  await expect(page.locator('.topbar-right > .avatar')).toHaveCount(0);
   for (const width of [320, 390, 768, 1024]) {
     await page.setViewportSize({ width, height: 844 });
     const logo = page.locator('.mobile-header-logo');
@@ -168,6 +169,10 @@ test('gestão móvel: todas as telas pela barra inferior, cartões e formulário
   await page.setViewportSize({ width: 390, height: 844 });
   await navigation.getByRole('button', { name: 'Configurações', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Este aparelho' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Conexões do sistema' })).toHaveCount(0);
+  await expect(page.getByText('Meta Ads', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Google Ads', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Google Tag Manager', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Sair e acessar outro perfil' }).click();
   await expect(page.getByRole('button', { name: 'Entrar no espaço de trabalho' })).toBeVisible();
 });
