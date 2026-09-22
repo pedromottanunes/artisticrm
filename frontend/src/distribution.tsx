@@ -11,7 +11,7 @@ import {
   History,
 } from 'lucide-react';
 import { api, type Lead, type Snapshot } from './api';
-import { Avatar, Badge, Countdown, Empty, Modal } from './components';
+import { Badge, Countdown, Empty, Modal } from './components';
 import { QueueSettings } from './forms';
 import './distribution.css';
 
@@ -304,7 +304,6 @@ export function Distribution({
                   <span className={i === 0 ? 'next-tag' : 'muted'}>
                     {i === 0 ? 'PRÓXIMA' : i + 1}
                   </span>
-                  <Avatar user={u} small />
                   <button
                     className="team-filter"
                     aria-label={`Filtrar atendimentos de ${u.name}`}
@@ -437,10 +436,7 @@ export function Distribution({
                             </td>
                             <td data-label="Responsável">
                               {user ? (
-                                <span className="distribution-owner">
-                                  <Avatar user={user} small />
-                                  {user.name}
-                                </span>
+                                <span className="distribution-owner">{user.name}</span>
                               ) : lead.state === 'POOL' ? (
                                 'Disponível para a equipe'
                               ) : (
@@ -642,7 +638,6 @@ function OperationalColumns({
                       className="distribution-contact operational-contact"
                       onClick={() => onOpen(lead.id)}
                     >
-                      <Avatar name={lead.name} />
                       <span>
                         <strong>{lead.name}</strong>
                         <small>{lead.source}</small>
@@ -653,10 +648,7 @@ function OperationalColumns({
                         Recebido <time dateTime={lead.created_at}>{dateTime(lead.created_at)}</time>
                       </span>
                       {user ? (
-                        <span className="distribution-owner">
-                          <Avatar user={user} small />
-                          {user.name}
-                        </span>
+                        <span className="distribution-owner">{user.name}</span>
                       ) : (
                         <span>
                           {lead.state === 'POOL'

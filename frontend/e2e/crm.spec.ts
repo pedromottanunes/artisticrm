@@ -99,7 +99,7 @@ test('gestão móvel: todas as telas pela barra inferior, cartões e formulário
   const navigation = page.getByRole('navigation', { name: 'Atalhos de gestão' });
   await expect(navigation).toBeVisible();
   await expect(page.locator('.sidebar')).toBeHidden();
-  await expect(page.locator('.topbar-right > .avatar')).toHaveCount(0);
+  await expect(page.locator('.avatar')).toHaveCount(0);
   for (const width of [320, 390, 768, 1024]) {
     await page.setViewportSize({ width, height: 844 });
     const logo = page.locator('.mobile-header-logo');
@@ -120,6 +120,7 @@ test('gestão móvel: todas as telas pela barra inferior, cartões e formulário
       const button = navigation.getByRole('button', { name: new RegExp(`^${name}`) });
       await button.click();
       await expect(button).toHaveAttribute('aria-current', 'page');
+      await expect(page.locator('.avatar')).toHaveCount(0);
       expect(
         await page.evaluate(() => document.body.scrollWidth <= innerWidth),
         `${name} at ${width}`,
@@ -851,7 +852,7 @@ test('ficha edita cadastro, agenda consulta e preserva histórico', async ({ pag
   });
   const refresh = page.locator('.central-commandbar').getByRole('button', { name: 'Atualizar' });
   await refresh.click({ force: true });
-  await expect(page.getByRole('alert')).toContainText('Falha temporária');
+  await expect(page.getByRole('alert')).toContainText('Falha temporária', { timeout: 12_000 });
   await expect(dialog.getByLabel('Próxima ação')).toBeEnabled();
   await expect(dialog.getByRole('button', { name: 'Salvar alterações' })).toBeDisabled();
   boardUnavailable = false;

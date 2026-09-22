@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowUpRight, Clock3, LayoutGrid, List, Search } from 'lucide-react';
 import { api, ApiError, stages, type Lead, type Snapshot } from './api';
-import { Avatar, Badge, Empty, Source, dateLabel } from './components';
+import { Badge, Empty, Source, dateLabel } from './components';
 
 type PipelineRow = Pick<
   Lead,
@@ -202,12 +202,6 @@ export function ManagerPipeline({
                         {lead.next_action || 'Definir próximo passo'}
                       </span>
                       <footer>
-                        <Avatar
-                          user={users.find(
-                            (user) => user.id === (lead.owner_id ?? lead.reserved_to),
-                          )}
-                          small
-                        />
                         <span>{dateLabel(lead.created_at)}</span>
                         <ArrowUpRight size={14} />
                       </footer>
@@ -329,7 +323,6 @@ export function ManagerPipeline({
                     <tr key={lead.id}>
                       <td data-label="Lead">
                         <button className="pipeline-contact" onClick={() => onOpen(lead.id)}>
-                          <Avatar name={lead.name} />
                           <span>
                             <strong>{lead.name}</strong>
                             <small>{lead.interest || 'Interesse a identificar'}</small>
@@ -344,9 +337,7 @@ export function ManagerPipeline({
                       </td>
                       <td data-label="Atendente">
                         {owner ? (
-                          <span className="pipeline-owner">
-                            <Avatar user={owner} small /> {owner.name}
-                          </span>
+                          <span className="pipeline-owner">{owner.name}</span>
                         ) : (
                           <span className="muted">Sem atendente</span>
                         )}

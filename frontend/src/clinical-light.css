@@ -165,12 +165,6 @@ label small,
   color: var(--light-teal);
 }
 
-.avatar {
-  border-color: #d5e0e6;
-  background: #edf3f6;
-  color: #34536a;
-}
-
 /* Superfícies e controles compartilhados */
 .panel,
 .stat-card,

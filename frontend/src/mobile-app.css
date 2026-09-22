@@ -131,7 +131,6 @@ a:focus-visible {
     flex-shrink: 0;
     gap: 8px;
   }
-  .topbar-right > .avatar,
   .topbar-divider,
   .desktop-logout {
     display: none;
@@ -259,7 +258,7 @@ a:focus-visible {
   }
   .team-list article > div {
     min-width: 0;
-    flex-basis: calc(100% - 62px);
+    flex-basis: 100%;
   }
   .team-list article {
     flex-wrap: wrap;

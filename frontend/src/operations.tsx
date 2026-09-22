@@ -9,7 +9,7 @@ import {
   type Detail,
   type Appointment,
 } from './api';
-import { Avatar, Modal, dateLabel } from './components';
+import { Modal, dateLabel } from './components';
 
 // Keep the same command key after an ambiguous network failure. Do not let changed
 // form data silently replace an operation that the server may already have committed.
@@ -219,7 +219,6 @@ export function Team({
           .filter((u) => u.role === 'attendant')
           .map((user) => (
             <article key={user.id}>
-              <Avatar user={user} />
               <div>
                 <strong>{user.name}</strong>
                 <small>Login: {user.email}</small>

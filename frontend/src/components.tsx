@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { X, ArrowUpRight, Inbox, Clock3 } from 'lucide-react';
-import { stateLabels, type Lead, type User } from './api';
+import { stateLabels, type Lead } from './api';
 
 export function IconButton({
   label,
@@ -15,29 +15,6 @@ export function IconButton({
     <button className="icon-button" aria-label={label} title={label} onClick={onClick}>
       {children}
     </button>
-  );
-}
-export function Avatar({
-  user,
-  name,
-  small = false,
-}: {
-  user?: User;
-  name?: string;
-  small?: boolean;
-}) {
-  const text = user?.name ?? name ?? '?';
-  return (
-    <span
-      className={`avatar ${small ? 'small' : ''}`}
-      style={user ? { color: user.color, background: `${user.color}18` } : undefined}
-    >
-      {text
-        .split(' ')
-        .map((s) => s[0])
-        .slice(0, 2)
-        .join('')}
-    </span>
   );
 }
 export function Badge({ state }: { state: string }) {

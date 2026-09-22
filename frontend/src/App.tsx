@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { api, ApiError, stages, type Snapshot, type Lead, type Detail } from './api';
 import { CentralStatusPanel } from './central';
-import { Avatar, Badge, Source, Empty, Modal, Countdown, IconButton } from './components';
+import { Badge, Source, Empty, Modal, Countdown, IconButton } from './components';
 import { LeadForm, LeadDetail } from './forms';
 import { ManagerCentral } from './manager-central';
 import { ManagerPipeline } from './manager-pipeline';
@@ -369,7 +369,6 @@ export function App() {
             <tr key={lead.id}>
               <td data-label="Contato">
                 <button className="contact-cell" onClick={() => void openDetail(lead.id)}>
-                  <Avatar name={lead.name} />
                   <span>
                     <strong>{lead.name}</strong>
                     <small>{lead.interest || 'Interesse a identificar'}</small>
@@ -387,10 +386,6 @@ export function App() {
               <td data-label="Atendente">
                 {lead.owner_id || lead.state === 'RESERVED' ? (
                   <span className="owner-cell">
-                    <Avatar
-                      user={data.users.find((u) => u.id === (lead.owner_id ?? lead.reserved_to))}
-                      small
-                    />
                     {data.users.find((u) => u.id === (lead.owner_id ?? lead.reserved_to))?.name}
                   </span>
                 ) : (
@@ -651,7 +646,6 @@ export function App() {
                   <ShieldCheck size={21} />
                 </div>
                 <div className="profile-card">
-                  <Avatar user={data.user} />
                   <h2>{data.user.name}</h2>
                   <p>Login: {data.user.email}</p>
                   <span className="stage-pill">{isManager ? 'Gestão' : 'Atendimento'}</span>
