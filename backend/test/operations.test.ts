@@ -501,3 +501,81 @@ test('exclusão permanente exige conta inativa e remove a atendente', async () =
   );
   assert.equal((await db.query('SELECT id FROM users WHERE id=$1', [created.id])).rows.length, 0);
 });
+
+test('exclusão compacta posições e preserva o próximo ponto do rodízio', async () => {
+  const removed = await ops.createAttendant(
+    manager,
+    { name: 'Temporária removida', email: 'temporaria-removida', password: '1', queue_position: 5 },
+    randomUUID(),
+  );
+  const trailing = await ops.createAttendant(
+    manager,
+    { name: 'Temporária final', email: 'temporaria-final', password: '1', queue_position: 6 },
+    randomUUID(),
+  );
+  await ops.updateAttendant(
+    manager,
+    removed.id,
+    {
+      expected_version: 1,
+      name: 'Temporária removida',
+      active: false,
+      reason: 'Remoção definitiva para testar a compactação da fila.',
+    },
+    randomUUID(),
+  );
+  await db.query('UPDATE distribution_settings SET last_position=5 WHERE id=1');
+  await db.query("UPDATE users SET queue_credit=7 WHERE role='attendant'");
+  await ops.deleteAttendant(
+    manager,
+    removed.id,
+    { expected_version: 2, confirmation: 'EXCLUIR' },
+    randomUUID(),
+  );
+  const remaining = (
+    await db.query<{ id: string; queue_position: number; queue_credit: number }>(
+      "SELECT id,queue_position,queue_credit FROM users WHERE role='attendant' ORDER BY queue_position",
+    )
+  ).rows;
+  assert.deepEqual(
+    remaining.map(({ id, queue_position }) => ({ id, queue_position })),
+    [...users.map((user) => user.id), trailing.id].map((id, index) => ({
+      id,
+      queue_position: index + 1,
+    })),
+  );
+  assert.deepEqual(
+    remaining.map((user) => user.queue_credit),
+    [0, 0, 0, 0, 0],
+  );
+  assert.equal(
+    (await db.query<{ last_position: number }>('SELECT last_position FROM distribution_settings'))
+      .rows[0].last_position,
+    4,
+  );
+});
+
+test('migração repara posições antigas que já continham lacunas', async () => {
+  await db.query(
+    "UPDATE users SET queue_position=queue_position+10 WHERE role='attendant' AND queue_position IS NOT NULL",
+  );
+  await db.query(
+    "UPDATE users SET queue_position=queue_position-7 WHERE role='attendant' AND queue_position IS NOT NULL",
+  );
+  await db.query('UPDATE distribution_settings SET last_position=5 WHERE id=1');
+  await db.query("DELETE FROM schema_migrations WHERE version='012'");
+  await migrate(db);
+  assert.deepEqual(
+    (
+      await db.query<{ queue_position: number }>(
+        "SELECT queue_position FROM users WHERE role='attendant' ORDER BY queue_position",
+      )
+    ).rows.map((user) => user.queue_position),
+    [1, 2, 3, 4],
+  );
+  assert.equal(
+    (await db.query<{ last_position: number }>('SELECT last_position FROM distribution_settings'))
+      .rows[0].last_position,
+    2,
+  );
+});

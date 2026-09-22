@@ -11,6 +11,19 @@ export interface WeightedQueueSelection<T extends WeightedQueueParticipant> {
   totalWeight: number;
 }
 
+export function compactQueuePositions<
+  T extends Pick<WeightedQueueParticipant, 'id' | 'queue_position'>,
+>(participants: T[], lastPosition: number) {
+  const ordered = participants
+    .filter((participant) => participant.queue_position !== null)
+    .sort((a, b) => a.queue_position! - b.queue_position! || a.id.localeCompare(b.id));
+  return {
+    positions: new Map(ordered.map((participant, index) => [participant.id, index + 1])),
+    lastPosition: ordered.filter((participant) => participant.queue_position! <= lastPosition)
+      .length,
+  };
+}
+
 const orderedAfter = <T extends WeightedQueueParticipant>(users: T[], lastPosition: number) =>
   [...users].sort(
     (a, b) =>

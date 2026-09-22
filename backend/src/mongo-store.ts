@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { hashPassword } from './auth.js';
 import { loginSchema, passwordSchema } from './credentials.js';
+import { compactQueuePositions } from './weighted-queue.js';
 
 // Native document operations. No SQL emulation and no in-memory source of truth.
 export class MongoTx {
@@ -218,6 +219,49 @@ export async function initializeMongo(db: MongoStore) {
       { $setOnInsert: { id: 1, last_position: 0, timeout_minutes: 10, version: 1, fence: 0 } },
       { upsert: true },
     );
+  const users = await db.many<{ id: string; queue_position: number | null; version: number }>(
+    'users',
+    { role: 'attendant' },
+    { queue_position: 1, id: 1 },
+  );
+  const settings = (await db.one<{ last_position: number }>('distribution_settings', {
+    id: 1,
+  }))!;
+  const planned = compactQueuePositions(users, settings.last_position);
+  const needsCompaction =
+    settings.last_position !== planned.lastPosition ||
+    users.some((user) => user.queue_position !== planned.positions.get(user.id));
+  if (needsCompaction)
+    await db.atomic(async (tx) => {
+      const lockedUsers = await tx.many<{
+        id: string;
+        queue_position: number | null;
+        version: number;
+      }>('users', { role: 'attendant' }, { queue_position: 1, id: 1 });
+      const lockedSettings = (await tx.one<{ last_position: number }>('distribution_settings', {
+        id: 1,
+      }))!;
+      const compacted = compactQueuePositions(lockedUsers, lockedSettings.last_position);
+      for (const user of lockedUsers) {
+        const queuePosition = compacted.positions.get(user.id)!;
+        await tx.update(
+          'users',
+          { id: user.id },
+          {
+            $set: { queue_position: queuePosition, queue_credit: 0 },
+            ...(user.queue_position === queuePosition ? {} : { $inc: { version: 1 } }),
+          },
+        );
+      }
+      await tx.update(
+        'distribution_settings',
+        { id: 1 },
+        {
+          $set: { last_position: compacted.lastPosition },
+          $inc: { version: 1 },
+        },
+      );
+    });
 }
 
 export function mongoUser(input: {

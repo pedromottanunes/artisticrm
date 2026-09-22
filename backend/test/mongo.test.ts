@@ -500,6 +500,73 @@ test('Mongo: exclusão permanente exige conta inativa e remove a atendente', asy
   );
   assert.equal(await db.count('users', { id: created.id }), 0);
 });
+test('Mongo: exclusão compacta posições e preserva o próximo ponto do rodízio', async () => {
+  const removed = await ops.createAttendant(
+    manager,
+    { name: 'Temporária removida', email: 'temporaria-removida', password: '1', queue_position: 5 },
+    key(),
+  );
+  const trailing = await ops.createAttendant(
+    manager,
+    { name: 'Temporária final', email: 'temporaria-final', password: '1', queue_position: 6 },
+    key(),
+  );
+  await ops.updateAttendant(
+    manager,
+    removed.id,
+    {
+      expected_version: 1,
+      name: 'Temporária removida',
+      active: false,
+      reason: 'Remoção definitiva para testar a compactação da fila.',
+    },
+    key(),
+  );
+  await db.update('distribution_settings', { id: 1 }, { $set: { last_position: 5 } });
+  await db.update('users', { role: 'attendant' }, { $set: { queue_credit: 7 } });
+  await ops.deleteAttendant(
+    manager,
+    removed.id,
+    { expected_version: 2, confirmation: 'EXCLUIR' },
+    key(),
+  );
+  const remaining = await db.many('users', { role: 'attendant' }, { queue_position: 1 });
+  assert.deepEqual(
+    remaining.map(({ id, queue_position }) => ({ id, queue_position })),
+    [...users.map((user) => user.id), trailing.id].map((id, index) => ({
+      id,
+      queue_position: index + 1,
+    })),
+  );
+  assert.deepEqual(
+    remaining.map((user) => user.queue_credit),
+    [0, 0, 0, 0, 0],
+  );
+  assert.equal((await db.one('distribution_settings', { id: 1 }))!.last_position, 4);
+});
+test('Mongo: inicialização repara posições antigas que já continham lacunas', async () => {
+  await db.remove('users', { role: 'attendant' });
+  for (let index = 0; index < 4; index++)
+    await db.insert(
+      'users',
+      mongoUser({
+        name: `Legada ${index + 1}`,
+        email: `legada${index + 1}`,
+        password_hash,
+        role: 'attendant',
+        queue_position: index + 4,
+      }),
+    );
+  await db.update('distribution_settings', { id: 1 }, { $set: { last_position: 5 } });
+  await initializeMongo(db);
+  assert.deepEqual(
+    (await db.many('users', { role: 'attendant' }, { queue_position: 1 })).map(
+      (user) => user.queue_position,
+    ),
+    [1, 2, 3, 4],
+  );
+  assert.equal((await db.one('distribution_settings', { id: 1 }))!.last_position, 2);
+});
 test('Mongo: transação abortada não deixa escrita parcial e índices impedem duplicatas', async () => {
   await assert.rejects(
     db.atomic(async (tx) => {

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  compactQueuePositions,
   previewWeightedOrder,
   selectWeightedParticipant,
   type WeightedQueueParticipant,
@@ -46,4 +47,23 @@ test('prévia da equipe não duplica atendente com peso maior', () => {
   const preview = previewWeightedOrder(participants, lastPosition);
   assert.equal(new Set(preview).size, 4);
   assert.deepEqual([...preview].sort(), ['1', '2', '3', '4']);
+});
+
+test('compactação remove lacunas e preserva quem seria o próximo da fila', () => {
+  const compacted = compactQueuePositions(
+    [
+      { id: 'kalleo', queue_position: 4 },
+      { id: 'priscila', queue_position: 5 },
+      { id: 'vanessa', queue_position: 6 },
+      { id: 'vitoria', queue_position: 7 },
+    ],
+    5,
+  );
+  assert.deepEqual(Object.fromEntries(compacted.positions), {
+    kalleo: 1,
+    priscila: 2,
+    vanessa: 3,
+    vitoria: 4,
+  });
+  assert.equal(compacted.lastPosition, 2);
 });

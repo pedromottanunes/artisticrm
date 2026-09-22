@@ -16,6 +16,7 @@ import type { DeleteAttendantInput, Operations } from './operations.js';
 import { hashPassword, verifyPassword } from './auth.js';
 import type { Document } from 'mongodb';
 import {
+  compactQueuePositions,
   selectWeightedParticipant,
   type WeightedQueueParticipant,
   type WeightedQueueSelection,
@@ -978,7 +979,32 @@ export class MongoOperations {
         await tx.remove('operation_receipts', { actor_id: id });
         await tx.remove('push_records', { kind: 'subscription', 'data.userId': id });
         await tx.remove('users', { id });
-        await tx.update('distribution_settings', { id: 1 }, { $inc: { version: 1 } });
+        const settings = (await tx.one('distribution_settings', { id: 1 }))!;
+        const remaining = await tx.many<QueueUser>(
+          'users',
+          { role: 'attendant' },
+          { queue_position: 1, id: 1 },
+        );
+        const compacted = compactQueuePositions(remaining, settings.last_position);
+        for (const attendant of remaining) {
+          const queuePosition = compacted.positions.get(attendant.id)!;
+          await tx.update(
+            'users',
+            { id: attendant.id },
+            {
+              $set: { queue_position: queuePosition, queue_credit: 0 },
+              ...(attendant.queue_position === queuePosition ? {} : { $inc: { version: 1 } }),
+            },
+          );
+        }
+        await tx.update(
+          'distribution_settings',
+          { id: 1 },
+          {
+            $set: { last_position: compacted.lastPosition },
+            $inc: { version: 1 },
+          },
+        );
         return { deleted: true };
       });
     });

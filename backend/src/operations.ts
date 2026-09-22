@@ -12,6 +12,7 @@ import {
   type User,
   type Opportunity,
 } from './types.js';
+import { compactQueuePositions } from './weighted-queue.js';
 
 const closedStageSql = closedStages.map((stage) => `'${stage}'`).join(',');
 
@@ -191,7 +192,11 @@ export class Operations extends CRM {
         400,
       );
     return this.db.transaction(async (tx) => {
-      await tx.query('SELECT id FROM distribution_settings WHERE id=1 FOR UPDATE');
+      const settings = (
+        await tx.query<{ last_position: number }>(
+          'SELECT last_position FROM distribution_settings WHERE id=1 FOR UPDATE',
+        )
+      ).rows[0];
       await lockActor(tx, actor, true);
       return this.command(tx, actor, key, { kind: 'user.delete', id, ...input }, async () => {
         const target = (await tx.query<User>('SELECT * FROM users WHERE id=$1 FOR UPDATE', [id]))
@@ -234,7 +239,23 @@ export class Operations extends CRM {
           [id],
         );
         await tx.query('DELETE FROM users WHERE id=$1', [id]);
-        await tx.query('UPDATE distribution_settings SET version=version+1 WHERE id=1');
+        const remaining = (
+          await tx.query<Pick<User, 'id' | 'queue_position'>>(
+            "SELECT id,queue_position FROM users WHERE role='attendant' ORDER BY queue_position,id FOR UPDATE",
+          )
+        ).rows;
+        const compacted = compactQueuePositions(remaining, settings.last_position);
+        for (const attendant of remaining)
+          await tx.query(
+            `UPDATE users SET queue_position=$2,queue_credit=0,
+            version=version+CASE WHEN queue_position IS DISTINCT FROM $2 THEN 1 ELSE 0 END
+            WHERE id=$1`,
+            [attendant.id, compacted.positions.get(attendant.id)],
+          );
+        await tx.query(
+          'UPDATE distribution_settings SET last_position=$1,version=version+1 WHERE id=1',
+          [compacted.lastPosition],
+        );
         return { deleted: true };
       });
     });
