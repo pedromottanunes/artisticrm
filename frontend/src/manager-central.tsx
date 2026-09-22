@@ -10,7 +10,7 @@ import {
   Users,
 } from 'lucide-react';
 import { api, ApiError, isClosedStage, stages, type Lead, type Snapshot } from './api';
-import { Avatar, Badge, Countdown, Empty, Modal } from './components';
+import { Badge, Countdown, Empty, Modal } from './components';
 import { QueueSettings } from './forms';
 
 type CentralRow = Pick<
@@ -349,7 +349,6 @@ export function ManagerCentral({
               }}
             >
               <span className="attendant-card-head">
-                <Avatar user={user} />
                 <span>
                   <strong>{user.name}</strong>
                   <small>
@@ -487,7 +486,6 @@ export function ManagerCentral({
                       <tr key={lead.id}>
                         <td data-label="Lead">
                           <button className="central-contact" onClick={() => onOpen(lead.id)}>
-                            <Avatar name={lead.name} />
                             <span>
                               <strong>{lead.name}</strong>
                               <small>{lead.source}</small>
@@ -504,9 +502,7 @@ export function ManagerCentral({
                         </td>
                         <td data-label="Atendente">
                           {responsible ? (
-                            <span className="central-owner">
-                              <Avatar user={responsible} small /> {responsible.name}
-                            </span>
+                            <span className="central-owner">{responsible.name}</span>
                           ) : lead.state === 'POOL' ? (
                             <span className="muted">Disponível para a equipe</span>
                           ) : (
