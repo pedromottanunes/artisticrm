@@ -14,6 +14,11 @@ import {
 import { lockActor } from './access.js';
 import { enqueuePushEvent } from './push-store.js';
 import { wasDeleted } from './lead-deletion.js';
+import {
+  selectWeightedParticipant,
+  type WeightedQueueParticipant,
+  type WeightedQueueSelection,
+} from './weighted-queue.js';
 
 const selectOpportunity = `SELECT o.*, c.name, c.phone, c.email, c.instagram, c.is_demo
   FROM opportunities o JOIN contacts c ON c.id = o.contact_id`;
@@ -43,6 +48,8 @@ export interface MetaAttributionInput {
   video_url?: string;
   thumbnail_url?: string;
 }
+
+type QueueUser = User & WeightedQueueParticipant;
 
 async function recordMetaAttribution(
   tx: Sql,
@@ -109,6 +116,23 @@ export class CRM {
       JSON.stringify(details),
     ]);
     await enqueuePushEvent(tx, eventId, id, kind, at);
+  }
+  private async next(
+    tx: Sql,
+    lastPosition: number,
+  ): Promise<WeightedQueueSelection<QueueUser> | undefined> {
+    const users = (
+      await tx.query<QueueUser>(
+        `SELECT * FROM users
+        WHERE role='attendant' AND active AND queue_enabled
+        ORDER BY id FOR UPDATE`,
+      )
+    ).rows;
+    const selection = selectWeightedParticipant(users, lastPosition);
+    if (!selection) return;
+    for (const [id, credit] of selection.credits)
+      await tx.query('UPDATE users SET queue_credit=$2 WHERE id=$1', [id, credit]);
+    return selection;
   }
   async ingest(
     input: LeadInput,
@@ -202,15 +226,8 @@ export class CRM {
       const returning = !!(
         await tx.query('SELECT id FROM opportunities WHERE contact_id=$1 LIMIT 1', [contact.id])
       ).rows.length;
-      const attendant = returning
-        ? undefined
-        : (
-            await tx.query<User>(
-              `SELECT * FROM users WHERE role='attendant' AND active AND queue_enabled
-        ORDER BY CASE WHEN queue_position > $1 THEN 0 ELSE 1 END, queue_position LIMIT 1`,
-              [settings.last_position],
-            )
-          ).rows[0];
+      const selection = returning ? undefined : await this.next(tx, settings.last_position);
+      const attendant = selection?.selected;
       const id = randomUUID();
       const expires = attendant
         ? new Date(now.getTime() + settings.timeout_minutes * 60_000)
@@ -256,6 +273,13 @@ export class CRM {
           : returning
             ? 'Contato retornou após encerramento. Aguardando revisão da gestão.'
             : 'Aguardando distribuição: não há atendente habilitada.',
+        attendant
+          ? {
+              reserved_to: attendant.id,
+              queue_weight: attendant.queue_weight,
+              total_active_weight: selection!.totalWeight,
+            }
+          : {},
       );
       return { id, duplicate: false };
     });
@@ -404,7 +428,7 @@ export class CRM {
     ).rows;
     const users = (
       await this.db.query<User>(
-        'SELECT id,name,email,role,active,queue_enabled,queue_position,color,version,auth_version,must_change_password FROM users ORDER BY queue_position NULLS FIRST',
+        'SELECT id,name,email,role,active,queue_enabled,queue_position,queue_weight,color,version,auth_version,must_change_password FROM users ORDER BY queue_position NULLS FIRST',
       )
     ).rows;
     const opportunities = rows
@@ -633,34 +657,70 @@ export class CRM {
     input: {
       version: number;
       timeout_minutes: number;
-      participants: { id: string; enabled: boolean }[];
+      participants: { id: string; enabled: boolean; weight?: number }[];
     },
   ) {
     requireManager(user);
     return this.db.transaction(async (tx) => {
       const settings = (
-        await tx.query<{ version: number }>(
+        await tx.query<{ version: number; last_position: number; timeout_minutes: number }>(
           'SELECT * FROM distribution_settings WHERE id=1 FOR UPDATE',
         )
       ).rows[0];
       await lockActor(tx, user);
       if (settings.version !== input.version)
         throw new DomainError('VERSION_CONFLICT', 'A configuração mudou. Atualize a tela.');
-      for (const p of input.participants)
-        await tx.query(
-          `UPDATE users SET queue_enabled=$2,version=version+1 WHERE id=$1 AND role='attendant' AND active`,
-          [p.id, p.enabled],
-        );
-      await tx.query(
-        'UPDATE distribution_settings SET timeout_minutes=$1,version=version+1 WHERE id=1',
-        [input.timeout_minutes],
+      if (
+        new Set(input.participants.map((participant) => participant.id)).size !==
+        input.participants.length
+      )
+        throw new DomainError('INVALID_INPUT', 'Atendente repetida na configuração.', 400);
+      const attendants = (
+        await tx.query<QueueUser>(
+          "SELECT * FROM users WHERE role='attendant' ORDER BY id FOR UPDATE",
+        )
+      ).rows;
+      const configured = input.participants.map((participant) => {
+        const target = attendants.find((attendant) => attendant.id === participant.id);
+        if (!target)
+          throw new DomainError('INVALID_INPUT', 'Atendente inválida na configuração.', 400);
+        if (participant.enabled && !target.active)
+          throw new DomainError(
+            'INVALID_INPUT',
+            'Uma conta inativa não pode entrar no rodízio.',
+            400,
+          );
+        const weight = participant.weight ?? target.queue_weight;
+        if (!Number.isInteger(weight) || weight < 1 || weight > 3)
+          throw new DomainError('INVALID_INPUT', 'O peso deve estar entre 1 e 3.', 400);
+        return { target, enabled: participant.enabled && target.active, weight };
+      });
+      const queueChanged = configured.some(
+        ({ target, enabled, weight }) =>
+          target.queue_enabled !== enabled || target.queue_weight !== weight,
       );
+      if (queueChanged) await tx.query("UPDATE users SET queue_credit=0 WHERE role='attendant'");
+      for (const participant of configured)
+        await tx.query(
+          `UPDATE users SET queue_enabled=$2,queue_weight=$3,
+          version=version+CASE WHEN queue_enabled IS DISTINCT FROM $2 OR queue_weight IS DISTINCT FROM $3 THEN 1 ELSE 0 END
+          WHERE id=$1 AND role='attendant'`,
+          [participant.target.id, participant.enabled, participant.weight],
+        );
       await this.audit(
         tx,
         null,
         user.id,
         'queue.updated',
         `Fila atualizada. Prazo para novas reservas: ${input.timeout_minutes} minutos.`,
+        {
+          timeout_minutes: input.timeout_minutes,
+          participants: configured.map(({ target, enabled, weight }) => ({
+            id: target.id,
+            enabled,
+            weight,
+          })),
+        },
       );
       // Reconcile entries that arrived while all attendants were paused.
       const pending = (
@@ -668,12 +728,11 @@ export class CRM {
           `SELECT * FROM opportunities WHERE state='PENDING' AND NOT needs_review ORDER BY created_at,id FOR UPDATE`,
         )
       ).rows;
+      let last = settings.last_position;
       for (const row of pending) {
-        const next = (
-          await tx.query<User>(`SELECT * FROM users WHERE active AND queue_enabled AND role='attendant'
-          ORDER BY CASE WHEN queue_position>(SELECT last_position FROM distribution_settings WHERE id=1) THEN 0 ELSE 1 END,queue_position LIMIT 1`)
-        ).rows[0];
-        if (!next) break;
+        const selection = await this.next(tx, last);
+        if (!selection) break;
+        const next = selection.selected;
         await tx.query(
           `UPDATE opportunities SET state='RESERVED',reserved_to=$2,expires_at=$3,version=version+1 WHERE id=$1`,
           [
@@ -682,17 +741,25 @@ export class CRM {
             new Date((await this.now(tx)).getTime() + input.timeout_minutes * 60_000),
           ],
         );
-        await tx.query('UPDATE distribution_settings SET last_position=$1 WHERE id=1', [
-          next.queue_position,
-        ]);
+        last = next.queue_position!;
         await this.audit(
           tx,
           row.id,
           user.id,
           'reservation.created',
           `Pendência distribuída para ${next.name}.`,
+          {
+            reserved_to: next.id,
+            queue_weight: next.queue_weight,
+            total_active_weight: selection.totalWeight,
+          },
         );
       }
+      await tx.query(
+        `UPDATE distribution_settings
+        SET timeout_minutes=$1,last_position=$2,version=version+1 WHERE id=1`,
+        [input.timeout_minutes, last],
+      );
       return { version: settings.version + 1 };
     });
   }

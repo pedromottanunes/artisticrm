@@ -66,6 +66,7 @@ beforeEach(async () => {
     'TRUNCATE whatsapp_inbox,claims,appointments,lead_attributions,inbound_events,audit_events,opportunities,contacts,sessions',
   );
   await db.query('UPDATE distribution_settings SET last_position=0,timeout_minutes=10');
+  await db.query('UPDATE users SET queue_weight=1,queue_credit=0');
 });
 after(async () => {
   await db.close();

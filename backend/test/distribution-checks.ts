@@ -75,7 +75,12 @@ export async function checkDistribution(
   assert.equal(all.settings.last_position, users[0].queue_position);
   assert.equal(all.users.length, users.length + 1);
   assert.equal(all.users.find((u) => u.id === users[0].id)?.name, users[0].name);
-  assert.ok(all.users.every((u) => !('password_hash' in u) && !('auth_version' in u)));
+  assert.ok(
+    all.users.every(
+      (u) => !('password_hash' in u) && !('auth_version' in u) && !('queue_credit' in u),
+    ),
+  );
+  assert.ok(all.users.every((u) => typeof u.queue_weight === 'number'));
   assert.equal(all.team.find((t) => t.user_id === users[0].id)?.count, 506);
   assert.equal(all.attendants.length, users.length);
   assert.equal(all.attendants.find((u) => u.id === users[0].id)?.reserved_count, 506);

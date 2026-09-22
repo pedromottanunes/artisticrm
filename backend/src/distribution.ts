@@ -3,6 +3,7 @@ import type { Document } from 'mongodb';
 import type { Database } from './db.js';
 import type { MongoStore } from './mongo-store.js';
 import { closedStages, requireManager, stages, type User } from './types.js';
+import { previewWeightedOrder } from './weighted-queue.js';
 
 export const distributionQuery = z
   .object({
@@ -76,10 +77,15 @@ type BoardUser = Pick<
   | 'active'
   | 'queue_enabled'
   | 'queue_position'
+  | 'queue_weight'
   | 'color'
   | 'version'
   | 'must_change_password'
->;
+> & { queue_credit: number };
+
+function publicBoardUser({ queue_credit: _queueCredit, ...user }: BoardUser) {
+  return user;
+}
 
 function attendantSummaries(
   users: BoardUser[],
@@ -87,27 +93,21 @@ function attendantSummaries(
   team: { user_id: string; state: string; count: number }[],
   expired: { user_id: string; count: number }[],
 ) {
-  const eligible = users
-    .filter(
-      (user) =>
-        user.role === 'attendant' &&
-        user.active &&
-        user.queue_enabled &&
-        user.queue_position !== null,
-    )
-    .sort(
-      (a, b) =>
-        (a.queue_position! > settings.last_position ? 0 : 1) -
-          (b.queue_position! > settings.last_position ? 0 : 1) ||
-        a.queue_position! - b.queue_position!,
-    );
-  const ranks = new Map(eligible.map((user, index) => [user.id, index + 1]));
+  const eligible = users.filter(
+    (user) =>
+      user.role === 'attendant' &&
+      user.active &&
+      user.queue_enabled &&
+      user.queue_position !== null,
+  );
+  const upcoming = previewWeightedOrder(eligible, settings.last_position);
+  const ranks = new Map(upcoming.map((id, index) => [id, index + 1]));
   const metric = (userId: string, state: string) =>
     team.find((item) => item.user_id === userId && item.state === state)?.count ?? 0;
   return users
     .filter((user) => user.role === 'attendant')
     .map((user) => ({
-      ...user,
+      ...publicBoardUser(user),
       queue_rank: ranks.get(user.id) ?? null,
       is_next: ranks.get(user.id) === 1,
       claimed_count: metric(user.id, 'CLAIMED'),
@@ -139,6 +139,8 @@ const userFields = [
   'active',
   'queue_enabled',
   'queue_position',
+  'queue_weight',
+  'queue_credit',
   'color',
   'version',
   'must_change_password',
@@ -335,7 +337,7 @@ async function readDistributionBoard(
         .filter((item) => item._id)
         .map((item) => ({ user_id: item._id as string, count: Number(item.count) }));
       return {
-        users,
+        users: (users as unknown as BoardUser[]).map(publicBoardUser),
         attendants: attendantSummaries(
           users as unknown as BoardUser[],
           settings,
@@ -439,7 +441,7 @@ async function readDistributionBoard(
       .filter((item) => item.user_id)
       .map((item) => ({ ...item, count: Number(item.count) }));
     return {
-      users,
+      users: users.map(publicBoardUser),
       attendants: attendantSummaries(users, settings, normalizedTeam, normalizedExpired),
       settings,
       rows,

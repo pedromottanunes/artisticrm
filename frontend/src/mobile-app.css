@@ -234,7 +234,7 @@ a:focus-visible {
     flex-shrink: 0;
   }
   label,
-  .queue-toggle {
+  .queue-participant {
     min-width: 0;
   }
   .panel,
@@ -579,6 +579,31 @@ a:focus-visible {
   }
   .queue-users {
     grid-template-columns: 1fr;
+  }
+  .queue-settings {
+    padding-inline: 16px;
+  }
+  .queue-participant {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 9px;
+    padding: 14px 0;
+  }
+  .queue-participation > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .queue-weight {
+    grid-column: 2 / -1;
+    align-items: stretch;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .queue-weight select {
+    width: 100%;
+    min-width: 0;
   }
   .lead-card {
     padding: 16px;

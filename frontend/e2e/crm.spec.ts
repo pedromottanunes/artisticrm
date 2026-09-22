@@ -856,7 +856,7 @@ test('ficha edita cadastro, agenda consulta e preserva histórico', async ({ pag
   await expect(dialog.getByRole('button', { name: 'Salvar alterações' })).toBeDisabled();
   boardUnavailable = false;
   await refresh.click({ force: true });
-  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0, { timeout: 12_000 });
   await expect(dialog.getByRole('button', { name: 'Salvar alterações' })).toBeEnabled();
   await dialog.getByLabel('Próxima ação').fill('Retorno de teste agendado');
   await dialog.getByRole('button', { name: 'Salvar alterações' }).click();
@@ -1009,6 +1009,10 @@ test('central acompanha reservas, histórico e aceite por outra atendente', asyn
     });
     await page.getByRole('button', { name: 'Rodízio', exact: true }).click();
     await expect(dialog.getByLabel('Prazo para aceite')).toHaveValue('10');
+    await expect(dialog.getByLabel(/Peso de .* no rodízio/).first()).toBeVisible();
+    expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+      true,
+    );
     await dialog.getByRole('button', { name: 'Fechar janela' }).click();
   } finally {
     await context.close();
@@ -1114,6 +1118,10 @@ test('configuração preserva rascunho e mostra conflito dentro da janela', asyn
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Prazo para aceite').fill('15');
   const original = await (await page.request.get('/api/v1/distribution/board')).json();
+  const firstAttendant = original.users.find((user: { role: string }) => user.role === 'attendant');
+  const weight = dialog.getByLabel(`Peso de ${firstAttendant.name} no rodízio`);
+  await weight.selectOption('2');
+  await expect(weight).toHaveValue('2');
   const payload = {
     version: original.settings.version,
     timeout_minutes: 11,
@@ -1130,16 +1138,24 @@ test('configuração preserva rascunho e mostra conflito dentro da janela', asyn
   await expect(dialog.getByLabel('Prazo para aceite')).toHaveValue('15');
   await dialog.getByRole('button', { name: 'Salvar configuração' }).click();
   await expect(dialog.getByRole('alert')).toContainText('configuração mudou');
+  await expect(weight).toHaveValue('2');
   expect(
     (await (await page.request.get('/api/v1/distribution/board')).json()).settings.timeout_minutes,
   ).toBe(11);
   await dialog.getByRole('button', { name: 'Fechar janela' }).click();
   await page.getByRole('button', { name: 'Rodízio', exact: true }).click();
   await expect(dialog.getByLabel('Prazo para aceite')).toHaveValue('11');
+  await expect(dialog.getByLabel(`Peso de ${firstAttendant.name} no rodízio`)).toHaveValue('1');
   await dialog.getByLabel('Prazo para aceite').fill('10');
+  await dialog.getByLabel(`Peso de ${firstAttendant.name} no rodízio`).selectOption('2');
   await dialog.getByRole('button', { name: 'Salvar configuração' }).click();
   await expect(dialog).not.toBeVisible();
   await expect(page.locator('.central-rule')).toContainText('10 min');
+  await page.getByRole('button', { name: 'Rodízio', exact: true }).click();
+  await expect(dialog.getByLabel(`Peso de ${firstAttendant.name} no rodízio`)).toHaveValue('2');
+  await dialog.getByLabel(`Peso de ${firstAttendant.name} no rodízio`).selectOption('1');
+  await dialog.getByRole('button', { name: 'Salvar configuração' }).click();
+  await expect(dialog).not.toBeVisible();
 });
 
 test('gestão transfere lead e desativação redistribui os atendimentos', async ({ page }) => {

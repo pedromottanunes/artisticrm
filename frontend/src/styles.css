@@ -1082,24 +1082,46 @@ main {
 .queue-settings {
   padding: 0 23px 22px;
 }
-.queue-toggle {
-  display: flex;
-  flex-direction: row;
+.queue-participant {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 1fr) auto minmax(180px, 220px);
   align-items: center;
   gap: 12px;
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
 }
-.queue-toggle strong {
+.queue-participant-name {
+  min-width: 0;
+}
+.queue-participant-name strong,
+.queue-participant-name small {
+  display: block;
+}
+.queue-participant-name strong {
   font-size: 16px;
-  flex: 1;
   font-weight: 500;
 }
-.queue-toggle input {
+.queue-participant-name small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.queue-participation,
+.queue-weight {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.queue-participation input {
   width: 32px;
   height: 18px;
   accent-color: var(--gold);
   cursor: pointer;
+}
+.queue-weight select {
+  min-width: 180px;
 }
 .timeout-label {
   margin-top: 22px;

@@ -15,6 +15,13 @@ import type { CRM, LeadInput } from './crm.js';
 import type { DeleteAttendantInput, Operations } from './operations.js';
 import { hashPassword, verifyPassword } from './auth.js';
 import type { Document } from 'mongodb';
+import {
+  selectWeightedParticipant,
+  type WeightedQueueParticipant,
+  type WeightedQueueSelection,
+} from './weighted-queue.js';
+
+type QueueUser = User & WeightedQueueParticipant;
 
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export function publicUser(user: Document): User {
@@ -26,6 +33,7 @@ export function publicUser(user: Document): User {
     active,
     queue_enabled,
     queue_position,
+    queue_weight,
     color,
     version,
     auth_version,
@@ -39,6 +47,7 @@ export function publicUser(user: Document): User {
     active,
     queue_enabled,
     queue_position,
+    queue_weight: queue_weight ?? 1,
     color,
     version,
     auth_version,
@@ -126,13 +135,20 @@ export class MongoOperations {
     });
     return response;
   }
-  private async next(tx: MongoTx, last: number) {
-    const users = await tx.many<User>(
+  private async next(
+    tx: MongoTx,
+    last: number,
+  ): Promise<WeightedQueueSelection<QueueUser> | undefined> {
+    const users = await tx.many<QueueUser>(
       'users',
       { role: 'attendant', active: true, queue_enabled: true },
-      { queue_position: 1 },
+      { id: 1 },
     );
-    return users.find((u) => u.queue_position! > last) ?? users[0];
+    const selection = selectWeightedParticipant(users, last);
+    if (!selection) return;
+    for (const [id, credit] of selection.credits)
+      await tx.update('users', { id }, { $set: { queue_credit: credit } });
+    return selection;
   }
   async ingest(
     input: LeadInput,
@@ -208,7 +224,8 @@ export class MongoOperations {
       }
       const returning = !!(await tx.count('opportunities', { contact_id: contact.id }));
       const settings = (await tx.one('distribution_settings', { id: 1 }))!;
-      const next = returning ? undefined : await this.next(tx, settings.last_position);
+      const selection = returning ? undefined : await this.next(tx, settings.last_position);
+      const next = selection?.selected;
       const id = randomUUID();
       await tx.insert('opportunities', {
         id,
@@ -263,6 +280,13 @@ export class MongoOperations {
           : returning
             ? 'Contato retornou após encerramento. Aguardando revisão da gestão.'
             : 'Aguardando distribuição: não há atendente habilitada.',
+        next
+          ? {
+              reserved_to: next.id,
+              queue_weight: next.queue_weight,
+              total_active_weight: selection!.totalWeight,
+            }
+          : {},
       );
       return { id, duplicate: false };
     });
@@ -648,23 +672,64 @@ export class MongoOperations {
       const settings = (await tx.one('distribution_settings', { id: 1 }))!;
       if (settings.version !== input.version)
         throw new DomainError('VERSION_CONFLICT', 'A configuração mudou.');
-      for (const p of input.participants)
-        await tx.update(
-          'users',
-          { id: p.id, role: 'attendant', active: true },
-          { $set: { queue_enabled: p.enabled }, $inc: { version: 1 } },
-        );
-      await tx.update(
-        'distribution_settings',
-        { id: 1 },
-        { $set: { timeout_minutes: input.timeout_minutes }, $inc: { version: 1 } },
+      if (
+        new Set(input.participants.map((participant) => participant.id)).size !==
+        input.participants.length
+      )
+        throw new DomainError('INVALID_INPUT', 'Atendente repetida na configuração.', 400);
+      const attendants = await tx.many<QueueUser>('users', { role: 'attendant' }, { id: 1 });
+      const configured = input.participants.map((participant) => {
+        const target = attendants.find((attendant) => attendant.id === participant.id);
+        if (!target)
+          throw new DomainError('INVALID_INPUT', 'Atendente inválida na configuração.', 400);
+        if (participant.enabled && !target.active)
+          throw new DomainError(
+            'INVALID_INPUT',
+            'Uma conta inativa não pode entrar no rodízio.',
+            400,
+          );
+        const weight = participant.weight ?? target.queue_weight;
+        if (!Number.isInteger(weight) || weight < 1 || weight > 3)
+          throw new DomainError('INVALID_INPUT', 'O peso deve estar entre 1 e 3.', 400);
+        return { target, enabled: participant.enabled && target.active, weight };
+      });
+      const queueChanged = configured.some(
+        ({ target, enabled, weight }) =>
+          target.queue_enabled !== enabled || target.queue_weight !== weight,
       );
+      if (queueChanged)
+        for (const attendant of attendants)
+          await tx.update('users', { id: attendant.id }, { $set: { queue_credit: 0 } });
+      for (const participant of configured)
+        if (
+          participant.target.queue_enabled !== participant.enabled ||
+          participant.target.queue_weight !== participant.weight
+        )
+          await tx.update(
+            'users',
+            { id: participant.target.id },
+            {
+              $set: {
+                queue_enabled: participant.enabled,
+                queue_weight: participant.weight,
+              },
+              $inc: { version: 1 },
+            },
+          );
       await this.audit(
         tx,
         null,
         user.id,
         'queue.updated',
         `Fila atualizada. Prazo para novas reservas: ${input.timeout_minutes} minutos.`,
+        {
+          timeout_minutes: input.timeout_minutes,
+          participants: configured.map(({ target, enabled, weight }) => ({
+            id: target.id,
+            enabled,
+            weight,
+          })),
+        },
       );
       const pending = await tx.many<Opportunity>(
         'opportunities',
@@ -673,8 +738,9 @@ export class MongoOperations {
       );
       let last = settings.last_position;
       for (const row of pending) {
-        const next = await this.next(tx, last);
-        if (!next) break;
+        const selection = await this.next(tx, last);
+        if (!selection) break;
+        const next = selection.selected;
         await tx.update(
           'opportunities',
           { id: row.id },
@@ -687,16 +753,28 @@ export class MongoOperations {
             $inc: { version: 1 },
           },
         );
-        last = next.queue_position;
+        last = next.queue_position!;
         await this.audit(
           tx,
           row.id,
           user.id,
           'reservation.created',
           `Pendência distribuída para ${next.name}.`,
+          {
+            reserved_to: next.id,
+            queue_weight: next.queue_weight,
+            total_active_weight: selection.totalWeight,
+          },
         );
       }
-      await tx.update('distribution_settings', { id: 1 }, { $set: { last_position: last } });
+      await tx.update(
+        'distribution_settings',
+        { id: 1 },
+        {
+          $set: { timeout_minutes: input.timeout_minutes, last_position: last },
+          $inc: { version: 1 },
+        },
+      );
       return { version: settings.version + 1 };
     });
   }
@@ -725,6 +803,8 @@ export class MongoOperations {
           must_change_password: false,
         });
         await tx.insert('users', user);
+        for (const attendant of await tx.many('users', { role: 'attendant' }, { id: 1 }))
+          await tx.update('users', { id: attendant.id }, { $set: { queue_credit: 0 } });
         await tx.update('distribution_settings', { id: 1 }, { $inc: { version: 1 } });
         await this.audit(
           tx,
@@ -835,10 +915,14 @@ export class MongoOperations {
               name: input.name,
               active: input.active,
               queue_enabled: input.active ? target.queue_enabled : false,
+              ...(!input.active ? { queue_credit: 0 } : {}),
             },
             $inc: { version: 1, auth_version: target.active === input.active ? 0 : 1 },
           },
         );
+        if (target.active !== input.active)
+          for (const attendant of await tx.many('users', { role: 'attendant' }, { id: 1 }))
+            await tx.update('users', { id: attendant.id }, { $set: { queue_credit: 0 } });
         await tx.update('distribution_settings', { id: 1 }, { $inc: { version: 1 } });
         await this.audit(tx, null, actor.id, 'user.updated', `Conta atualizada. ${input.reason}`, {
           user_id: id,

@@ -48,13 +48,20 @@ try {
           must_change_password: false,
         }),
       );
+      for (const attendant of await tx.many('users', { role: 'attendant' }, { id: 1 }))
+        await tx.update('users', { id: attendant.id }, { $set: { queue_credit: 0 } });
       await tx.update('distribution_settings', { id: 1 }, { $inc: { version: 1 } });
     });
   } else
-    await db.query(
-      `INSERT INTO users(id,name,email,password_hash,role,queue_enabled,queue_position,must_change_password) VALUES ($1,$2,$3,$4,'attendant',true,$5,false)`,
-      [randomUUID(), input.name, input.login, await hashPassword(input.password), input.position],
-    );
+    await db.transaction(async (tx) => {
+      await tx.query('SELECT id FROM distribution_settings WHERE id=1 FOR UPDATE');
+      await tx.query(
+        `INSERT INTO users(id,name,email,password_hash,role,queue_enabled,queue_position,must_change_password) VALUES ($1,$2,$3,$4,'attendant',true,$5,false)`,
+        [randomUUID(), input.name, input.login, await hashPassword(input.password), input.position],
+      );
+      await tx.query("UPDATE users SET queue_credit=0 WHERE role='attendant'");
+      await tx.query('UPDATE distribution_settings SET version=version+1 WHERE id=1');
+    });
   console.info(
     'Atendente criada. Nenhuma senha foi registrada no log. Remova as variáveis CREATE_USER_* após o uso.',
   );

@@ -161,6 +161,12 @@ export async function initializeMongo(db: MongoStore) {
   await db
     .collection('opportunities')
     .updateMany({ procedure_date: { $exists: false } }, { $set: { procedure_date: null } });
+  await db
+    .collection('users')
+    .updateMany({ queue_weight: { $exists: false } }, { $set: { queue_weight: 1 } });
+  await db
+    .collection('users')
+    .updateMany({ queue_credit: { $exists: false } }, { $set: { queue_credit: 0 } });
   for (const name of ['users', 'contacts', 'opportunities', 'appointments', 'audit_events'])
     await db.collection(name).createIndex({ id: 1 }, { unique: true });
   await db.collection('users').createIndex({ email: 1 }, { unique: true });
@@ -231,6 +237,8 @@ export function mongoUser(input: {
     auth_version: 1,
     queue_enabled: input.role === 'attendant',
     queue_position: null,
+    queue_weight: 1,
+    queue_credit: 0,
     must_change_password: false,
     color: '#EDB25A',
     ...input,

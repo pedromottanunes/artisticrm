@@ -90,6 +90,7 @@ export class Operations extends CRM {
           VALUES($1,$2,$3,$4,'attendant',$5,true,false)`,
           [id, input.name, input.email.toLowerCase(), hash, input.queue_position],
         );
+        await tx.query("UPDATE users SET queue_credit=0 WHERE role='attendant'");
         await tx.query('UPDATE distribution_settings SET version=version+1 WHERE id=1');
         await this.audit(
           tx,
@@ -162,9 +163,12 @@ export class Operations extends CRM {
         }
         await tx.query(
           `UPDATE users SET name=$2,active=$3,queue_enabled=CASE WHEN NOT $3 THEN false ELSE queue_enabled END,
+          queue_credit=CASE WHEN NOT $3 THEN 0 ELSE queue_credit END,
           version=version+1,auth_version=auth_version+CASE WHEN active IS DISTINCT FROM $3 THEN 1 ELSE 0 END WHERE id=$1`,
           [id, input.name, input.active],
         );
+        if (target.active !== input.active)
+          await tx.query("UPDATE users SET queue_credit=0 WHERE role='attendant'");
         await tx.query('UPDATE distribution_settings SET version=version+1 WHERE id=1');
         await this.audit(
           tx,

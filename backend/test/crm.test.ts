@@ -52,7 +52,9 @@ beforeEach(async () => {
     'TRUNCATE push_records,whatsapp_inbox,claims,appointments,lead_attributions,inbound_events,audit_events,opportunities,contacts,sessions',
   );
   await db.query('UPDATE distribution_settings SET last_position=0,timeout_minutes=10,version=1');
-  await db.query("UPDATE users SET active=true,queue_enabled=(role='attendant')");
+  await db.query(
+    "UPDATE users SET active=true,queue_enabled=(role='attendant'),queue_weight=1,queue_credit=0",
+  );
   now = new Date('2026-09-10T12:00:00Z');
 });
 const input = (n = 1) => ({
@@ -116,6 +118,37 @@ test('oito novos contatos percorrem duas voltas exatas do rodízio', async () =>
   assert.deepEqual(
     assigned,
     [...users, ...users].map((u) => u.id),
+  );
+});
+
+test('peso 2 distribui quatro de dez leads sem alterar reservas existentes', async () => {
+  await crm.configure(manager, {
+    version: 1,
+    timeout_minutes: 10,
+    participants: users.map((user, index) => ({
+      id: user.id,
+      enabled: true,
+      weight: index === 0 ? 2 : 1,
+    })),
+  });
+  for (let index = 201; index <= 210; index++) await create(index, `weighted-${index}`);
+  const counts = (
+    await db.query<{ reserved_to: string; count: string }>(
+      'SELECT reserved_to,count(*) FROM opportunities GROUP BY reserved_to',
+    )
+  ).rows;
+  assert.deepEqual(
+    users.map((user) => Number(counts.find((row) => row.reserved_to === user.id)?.count ?? 0)),
+    [4, 2, 2, 2],
+  );
+  const saved = (
+    await db.query<{ queue_weight: number }>(
+      "SELECT queue_weight FROM users WHERE role='attendant' ORDER BY queue_position",
+    )
+  ).rows;
+  assert.deepEqual(
+    saved.map((user) => user.queue_weight),
+    [2, 1, 1, 1],
   );
 });
 test('reenvio de evento não duplica contato, oportunidade, histórico ou cursor', async () => {

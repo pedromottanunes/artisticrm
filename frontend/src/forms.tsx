@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { api, isClosedStage, stages, type Detail, type Snapshot, type User } from './api';
 import { Transfer, AppointmentEditor } from './operations';
-import { Modal, Source, Badge, Avatar, dateLabel } from './components';
+import { Modal, Source, Badge, dateLabel } from './components';
 
 export function LeadForm({
   onClose,
@@ -613,6 +613,17 @@ export function QueueSettings({
   const [error, setError] = useState('');
   const submitting = useRef(false);
   const members = data.users.filter((u) => u.role === 'attendant');
+  const [participants, setParticipants] = useState(() =>
+    Object.fromEntries(
+      members.map((member) => [
+        member.id,
+        {
+          enabled: member.active && member.queue_enabled,
+          weight: (member.queue_weight ?? 1) as 1 | 2 | 3,
+        },
+      ]),
+    ),
+  );
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (submitting.current || !connected) return;
@@ -626,7 +637,11 @@ export function QueueSettings({
         body: JSON.stringify({
           version: data.settings.version,
           timeout_minutes: Number(fields.get('timeout')),
-          participants: members.map((u) => ({ id: u.id, enabled: fields.get(u.id) === 'on' })),
+          participants: members.map((member) => ({
+            id: member.id,
+            enabled: participants[member.id]?.enabled ?? false,
+            weight: participants[member.id]?.weight ?? 1,
+          })),
         }),
       });
       onNotice('Configuração salva. Reservas existentes mantêm o prazo original.');
@@ -645,24 +660,58 @@ export function QueueSettings({
       <div className="panel-heading">
         <div>
           <h2>Quem participa da fila</h2>
-          <p>A ordem é sequencial, independentemente de estar online.</p>
+          <p>Defina quem recebe novos leads e a prioridade de cada atendente.</p>
         </div>
       </div>
       <form onSubmit={submit}>
         <div className="queue-settings">
           {members.map((u) => (
-            <label className="queue-toggle" key={u.id}>
+            <div className="queue-participant" key={u.id}>
               <span className="queue-number">0{u.queue_position}</span>
-              <Avatar user={u} />
-              <strong>{u.name}</strong>
-              <input
-                type="checkbox"
-                name={u.id}
-                disabled={!u.active}
-                defaultChecked={u.queue_enabled}
-                aria-label={`Habilitar ${u.name} no rodízio`}
-              />
-            </label>
+              <span className="queue-participant-name">
+                <strong>{u.name}</strong>
+                {!u.active && <small>Conta inativa</small>}
+              </span>
+              <label className="queue-participation">
+                <span>Participa</span>
+                <input
+                  type="checkbox"
+                  disabled={!u.active}
+                  checked={participants[u.id]?.enabled ?? false}
+                  aria-label={`Habilitar ${u.name} no rodízio`}
+                  onChange={(event) =>
+                    setParticipants((current) => ({
+                      ...current,
+                      [u.id]: {
+                        ...(current[u.id] ?? { weight: 1 }),
+                        enabled: event.target.checked,
+                      },
+                    }))
+                  }
+                />
+              </label>
+              <label className="queue-weight">
+                <span>Peso</span>
+                <select
+                  value={participants[u.id]?.weight ?? 1}
+                  disabled={!u.active}
+                  aria-label={`Peso de ${u.name} no rodízio`}
+                  onChange={(event) =>
+                    setParticipants((current) => ({
+                      ...current,
+                      [u.id]: {
+                        ...(current[u.id] ?? { enabled: false }),
+                        weight: Number(event.target.value) as 1 | 2 | 3,
+                      },
+                    }))
+                  }
+                >
+                  <option value={1}>1x — Normal</option>
+                  <option value={2}>2x — Prioridade</option>
+                  <option value={3}>3x — Prioridade alta</option>
+                </select>
+              </label>
+            </div>
           ))}
           <label className="timeout-label">
             Prazo para aceite
@@ -679,10 +728,9 @@ export function QueueSettings({
             </div>
           </label>
           <p className="help-text">
-            Pausar uma atendente impede novas reservas. As reservas atuais continuam com ela até o
-            prazo original. Todas as atendentes com acesso ativo podem assumir leads do bolsão,
-            inclusive as pausadas no rodízio. Leads sem destino serão distribuídos ao reativar a
-            equipe.
+            O peso define quantas oportunidades cada atendente recebe proporcionalmente. Ele não
+            altera leads já distribuídos nem capturas do bolsão. Pausar uma atendente impede apenas
+            novas reservas automáticas.
           </p>
           {error && (
             <p className="form-error" role="alert">

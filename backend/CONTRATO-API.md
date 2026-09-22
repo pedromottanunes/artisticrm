@@ -26,6 +26,17 @@ Todas as mutações acima, exceto troca da própria senha, exigem `Idempotency-K
 
 A ficha agora inclui `appointments`. `needs_review` identifica uma nova oportunidade originada de contato com oportunidade encerrada; a configuração do rodízio não libera essas pendências. A atribuição explícita pela gestão resolve a revisão. Históricos antigos permanecem preservados.
 
+### Rodízio ponderado
+
+`PATCH /distribution/settings` recebe `version`, `timeout_minutes` e participantes no formato
+`{ id, enabled, weight }`. `weight` aceita os inteiros `1`, `2` ou `3`; durante a compatibilidade
+com clientes anteriores, sua ausência preserva o peso já salvo. A gestão é a única função
+autorizada a alterar a configuração.
+
+Novas reservas usam rodízio ponderado suave. Peso `1` em toda a equipe preserva o rodízio
+sequencial anterior. Alterar participação ou peso reinicia somente os créditos internos da fila;
+reservas e atendimentos existentes não mudam. O peso não interfere na disputa de leads do bolsão.
+
 - HTTPS, sessão autenticada validada pelo servidor, autorização por recurso e papel.
 - Identificadores opacos; datas ISO 8601 com fuso/UTC; valores monetários em centavos com moeda explícita.
 - Respostas incluem `request_id`; listas usam paginação por cursor e filtros documentados.

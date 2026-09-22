@@ -7,6 +7,7 @@ export interface User {
   active: boolean;
   queue_enabled: boolean;
   queue_position: number | null;
+  queue_weight: number;
   color: string;
   version: number;
   auth_version: number;

@@ -123,7 +123,7 @@ export async function buildApp(
           : undefined
         : (
             await db.query<User>(
-              `SELECT u.id,u.name,u.email,u.role,u.active,u.queue_enabled,u.queue_position,u.color,u.version,u.auth_version,u.must_change_password FROM sessions s
+              `SELECT u.id,u.name,u.email,u.role,u.active,u.queue_enabled,u.queue_position,u.queue_weight,u.color,u.version,u.auth_version,u.must_change_password FROM sessions s
       JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>$2 AND u.active AND s.auth_version=u.auth_version`,
               [tokenHash(token), await crm.now()],
             )
@@ -374,7 +374,15 @@ export async function buildApp(
       .object({
         version: z.number().int().positive(),
         timeout_minutes: z.number().int().min(1).max(60),
-        participants: z.array(z.object({ id: uuid, enabled: z.boolean() })).max(30),
+        participants: z
+          .array(
+            z.object({
+              id: uuid,
+              enabled: z.boolean(),
+              weight: z.number().int().min(1).max(3).optional(),
+            }),
+          )
+          .max(30),
       })
       .strict()
       .parse(request.body);

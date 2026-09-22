@@ -190,6 +190,28 @@ test('Mongo: rodízio sequencial 1→2→3→4→1 e prazo persistente', async (
   }
   assert.equal((await db.one('distribution_settings', { id: 1 }))!.last_position, 1);
 });
+
+test('Mongo: peso 2 distribui quatro de dez leads e persiste a configuração', async () => {
+  await ops.configure(manager, {
+    version: 1,
+    timeout_minutes: 10,
+    participants: users.map((user, index) => ({
+      id: user.id,
+      enabled: true,
+      weight: index === 0 ? 2 : 1,
+    })),
+  });
+  for (let index = 201; index <= 210; index++) await lead(index);
+  const counts = await Promise.all(
+    users.map((user) => db.count('opportunities', { reserved_to: user.id })),
+  );
+  assert.deepEqual(counts, [4, 2, 2, 2]);
+  const saved = await db.many('users', { role: 'attendant' }, { queue_position: 1 });
+  assert.deepEqual(
+    saved.map((user) => user.queue_weight),
+    [2, 1, 1, 1],
+  );
+});
 test('Mongo: entradas simultâneas distribuem sem perder cursor e retries não duplicam', async () => {
   const results = await Promise.all(Array.from({ length: 12 }, (_, i) => lead(i + 1)));
   assert.equal(new Set(results.map((r) => r.id)).size, 12);

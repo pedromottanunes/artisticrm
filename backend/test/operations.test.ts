@@ -38,7 +38,7 @@ beforeEach(async () => {
   const { hashPassword } = await import('../src/auth.js');
   const hash = await hashPassword(DEMO_PASSWORD);
   await db.query(
-    "UPDATE users SET active=true,queue_enabled=(role='attendant'),version=1,auth_version=1,must_change_password=false,password_hash=$1",
+    "UPDATE users SET active=true,queue_enabled=(role='attendant'),queue_weight=1,queue_credit=0,version=1,auth_version=1,must_change_password=false,password_hash=$1",
     [hash],
   );
   await db.query('UPDATE distribution_settings SET last_position=0,timeout_minutes=10,version=1');
