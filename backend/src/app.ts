@@ -446,6 +446,21 @@ export async function buildApp(
       commandKey(request.headers),
     );
   });
+  app.delete('/api/v1/users/:id', async (request) => {
+    const input = z
+      .object({
+        expected_version: z.number().int().positive(),
+        confirmation: z.literal('EXCLUIR'),
+      })
+      .strict()
+      .parse(request.body);
+    return crm.deleteAttendant(
+      request.user,
+      idParams.parse(request.params).id,
+      input,
+      commandKey(request.headers),
+    );
+  });
   app.post(
     '/api/v1/users/:id/reset-password',
     { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },

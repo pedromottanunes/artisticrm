@@ -12,7 +12,7 @@ import {
   type Opportunity,
 } from './types.js';
 import type { CRM, LeadInput } from './crm.js';
-import type { Operations } from './operations.js';
+import type { DeleteAttendantInput, Operations } from './operations.js';
 import { hashPassword, verifyPassword } from './auth.js';
 import type { Document } from 'mongodb';
 
@@ -846,6 +846,56 @@ export class MongoOperations {
           active: input.active,
         });
         return { id, version: target.version + 1 };
+      });
+    });
+  }
+  async deleteAttendant(actor: User, id: string, input: DeleteAttendantInput, key: string) {
+    requireManager(actor);
+    if (input.confirmation !== 'EXCLUIR')
+      throw new DomainError(
+        'CONFIRMATION_REQUIRED',
+        'Digite EXCLUIR para confirmar a exclusão permanente.',
+        400,
+      );
+    return this.db.atomic(async (tx) => {
+      await this.actor(tx, actor);
+      return this.command(tx, actor, key, { kind: 'user.delete', id, ...input }, async () => {
+        const target = await tx.one<User>('users', { id, role: 'attendant' });
+        if (!target) throw new DomainError('NOT_FOUND', 'Atendente não encontrada.', 404);
+        if (target.version !== input.expected_version)
+          throw new DomainError('VERSION_CONFLICT', 'A conta mudou. Atualize antes de excluir.');
+        if (target.active)
+          throw new DomainError(
+            'ACTIVE_USER',
+            'Desative a atendente antes da exclusão permanente.',
+            400,
+          );
+        if (
+          await tx.count('opportunities', {
+            $or: [{ owner_id: id }, { reserved_to: id }],
+          })
+        )
+          throw new DomainError(
+            'USER_HAS_LEADS',
+            'Exclua ou transfira todos os leads vinculados antes de apagar a atendente.',
+            409,
+          );
+        await this.audit(
+          tx,
+          null,
+          actor.id,
+          'user.deleted',
+          'Conta de atendente excluída permanentemente.',
+          { user_id: id, name: target.name, login: target.email },
+        );
+        await tx.update('appointments', { created_by: id }, { $set: { created_by: actor.id } });
+        await tx.remove('sessions', { user_id: id });
+        await tx.remove('claims', { user_id: id });
+        await tx.remove('operation_receipts', { actor_id: id });
+        await tx.remove('push_records', { kind: 'subscription', 'data.userId': id });
+        await tx.remove('users', { id });
+        await tx.update('distribution_settings', { id: 1 }, { $inc: { version: 1 } });
+        return { deleted: true };
       });
     });
   }

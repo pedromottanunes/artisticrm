@@ -23,6 +23,10 @@ export interface AppointmentRow {
   status: string;
   version: number;
 }
+export interface DeleteAttendantInput {
+  expected_version: number;
+  confirmation: 'EXCLUIR';
+}
 export class Operations extends CRM {
   async deleteLead(actor: User, id: string, input: DeleteLeadInput, key: string) {
     return this.db.transaction(async (tx) => {
@@ -171,6 +175,63 @@ export class Operations extends CRM {
           { user_id: id, previous_active: target.active, active: input.active },
         );
         return { id, version: target.version + 1 };
+      });
+    });
+  }
+  async deleteAttendant(actor: User, id: string, input: DeleteAttendantInput, key: string) {
+    requireManager(actor);
+    if (input.confirmation !== 'EXCLUIR')
+      throw new DomainError(
+        'CONFIRMATION_REQUIRED',
+        'Digite EXCLUIR para confirmar a exclusão permanente.',
+        400,
+      );
+    return this.db.transaction(async (tx) => {
+      await tx.query('SELECT id FROM distribution_settings WHERE id=1 FOR UPDATE');
+      await lockActor(tx, actor, true);
+      return this.command(tx, actor, key, { kind: 'user.delete', id, ...input }, async () => {
+        const target = (await tx.query<User>('SELECT * FROM users WHERE id=$1 FOR UPDATE', [id]))
+          .rows[0];
+        if (!target || target.role !== 'attendant')
+          throw new DomainError('NOT_FOUND', 'Atendente não encontrada.', 404);
+        if (target.version !== input.expected_version)
+          throw new DomainError('VERSION_CONFLICT', 'A conta mudou. Atualize antes de excluir.');
+        if (target.active)
+          throw new DomainError(
+            'ACTIVE_USER',
+            'Desative a atendente antes da exclusão permanente.',
+            400,
+          );
+        const linked = await tx.query(
+          'SELECT id FROM opportunities WHERE owner_id=$1 OR reserved_to=$1 LIMIT 1 FOR UPDATE',
+          [id],
+        );
+        if (linked.rows.length)
+          throw new DomainError(
+            'USER_HAS_LEADS',
+            'Exclua ou transfira todos os leads vinculados antes de apagar a atendente.',
+            409,
+          );
+        await this.audit(
+          tx,
+          null,
+          actor.id,
+          'user.deleted',
+          'Conta de atendente excluída permanentemente.',
+          { user_id: id, name: target.name, login: target.email },
+        );
+        await tx.query('UPDATE appointments SET created_by=$2 WHERE created_by=$1', [id, actor.id]);
+        await tx.query('UPDATE audit_events SET actor_id=NULL WHERE actor_id=$1', [id]);
+        await tx.query('DELETE FROM sessions WHERE user_id=$1', [id]);
+        await tx.query('DELETE FROM claims WHERE user_id=$1', [id]);
+        await tx.query('DELETE FROM operation_receipts WHERE actor_id=$1', [id]);
+        await tx.query(
+          "DELETE FROM push_records WHERE kind='subscription' AND data->>'userId'=$1",
+          [id],
+        );
+        await tx.query('DELETE FROM users WHERE id=$1', [id]);
+        await tx.query('UPDATE distribution_settings SET version=version+1 WHERE id=1');
+        return { deleted: true };
       });
     });
   }

@@ -426,6 +426,58 @@ test('Mongo: criação com login simples, senha curta, reset e revogação', asy
   assert.ok(!JSON.stringify(await db.many('operation_receipts')).includes('"password":"1"'));
   assert.ok(!JSON.stringify(await db.many('audit_events')).includes('"password":"2"'));
 });
+test('Mongo: exclusão permanente exige conta inativa e remove a atendente', async () => {
+  const created = await ops.createAttendant(
+    manager,
+    {
+      name: 'Conta Temporária',
+      email: 'temporaria',
+      password: '1',
+      queue_position: 8,
+    },
+    key(),
+  );
+  await assert.rejects(
+    ops.deleteAttendant(
+      manager,
+      created.id,
+      { expected_version: 1, confirmation: 'EXCLUIR' },
+      key(),
+    ),
+    { code: 'ACTIVE_USER' },
+  );
+  await ops.updateAttendant(
+    manager,
+    created.id,
+    {
+      expected_version: 1,
+      name: 'Conta Temporária',
+      active: false,
+      reason: 'Encerramento da conta temporária.',
+    },
+    key(),
+  );
+  const deleteKey = key();
+  assert.deepEqual(
+    await ops.deleteAttendant(
+      manager,
+      created.id,
+      { expected_version: 2, confirmation: 'EXCLUIR' },
+      deleteKey,
+    ),
+    { deleted: true },
+  );
+  assert.deepEqual(
+    await ops.deleteAttendant(
+      manager,
+      created.id,
+      { expected_version: 2, confirmation: 'EXCLUIR' },
+      deleteKey,
+    ),
+    { deleted: true },
+  );
+  assert.equal(await db.count('users', { id: created.id }), 0);
+});
 test('Mongo: transação abortada não deixa escrita parcial e índices impedem duplicatas', async () => {
   await assert.rejects(
     db.atomic(async (tx) => {

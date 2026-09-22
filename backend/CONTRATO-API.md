@@ -16,6 +16,7 @@ As rotas e convenções seguintes continuam como alvo das próximas etapas, incl
 
 - `POST /users`: gestão cria atendente com `name`, `email`, `password` temporária e `queue_position` livre.
 - `PATCH /users/:id`: gestão envia `name`, `active`, `expected_version`, `reason` e, para desligamento com trabalho aberto, `replacement_id`.
+- `DELETE /users/:id`: gestão exclui permanentemente uma atendente já inativa e sem leads vinculados, com `expected_version` e confirmação `EXCLUIR`.
 - `POST /users/:id/reset-password`: `password` temporária e `expected_version`; somente atendentes podem ser alvo desta rota.
 - `POST /auth/password`: `current_password` e `new_password`; encerra todas as sessões após sucesso.
 - `POST /opportunities/:id/transfer`: `target_id`, `expected_version`, `reason`; atribuição administrativa, não aceite.
@@ -36,38 +37,38 @@ A ficha agora inclui `appointments`. `needs_review` identifica uma nova oportuni
 
 ## Rotas principais
 
-| Método/rota | Finalidade |
-| --- | --- |
-| `GET /me` | Perfil, permissões e escopo |
-| `GET /opportunities?view=mine` | Reservas e oportunidades do usuário |
-| `GET /opportunities?view=pool` | Resumo autorizado do bolsão, incluindo elegibilidade por vencimento |
-| `GET /opportunities/:id` | Ficha autorizada e versões atuais |
-| `POST /contacts` | Cadastro manual com validação de identidade |
-| `PATCH /contacts/:id` | Complementar contato sem apagar evidências de origem |
-| `POST /opportunities` | Criar oportunidade manual com regra de atribuição explícita |
-| `PATCH /opportunities/:id` | Interesse, unidade, etapa e dados comerciais permitidos |
-| `POST /opportunities/:id/claim` | Confirmar posse de reserva ou bolsão |
-| `POST /opportunities/:id/whatsapp-link` | Retornar destino somente ao usuário autorizado; não afirma envio de mensagem |
-| `POST /opportunities/:id/transfer` | Transferência administrativa com justificativa |
-| `GET /opportunities/:id/history` | Eventos e atividades autorizados |
-| `POST /opportunities/:id/activities` | Registrar tarefa/observação |
-| `POST /opportunities/:id/appointments` | Agendar consulta e mover a qualificação para follow-up |
-| `PATCH /appointments/:id` | Remarcar, concluir ou cancelar mantendo histórico |
-| `POST /opportunities/:id/contracts` | Cadastrar contrato e documento privado |
-| `POST /contracts/:id/validate-signature` | Validação administrativa autorizada |
-| `GET /commissions` | Comissões conforme perfil e filtros |
-| `GET /distribution/settings` | Regra atual da fila e participantes |
-| `PATCH /distribution/settings` | Atualização administrativa versionada |
-| `GET /reports/overview` | Indicadores operacionais e comerciais |
-| `GET /reports/meta-ads` | Métricas Meta com filtros e atualização |
-| `GET /reports/google-ads` | Métricas Google com filtros e atualização |
-| `GET /integrations/status` | Saúde e última sincronização, sem segredos |
-| `POST /notification-subscriptions` | Registrar dispositivo do próprio usuário |
-| `DELETE /notification-subscriptions/:id` | Revogar assinatura autorizada |
-| `GET /events` | Canal autenticado de atualização, com dados mínimos e escopo |
-| `POST /tracking/clicks` | Registro público limitado/validado da interação do site |
-| `GET /webhooks/whatsapp` | Verificação do endpoint conforme provedor |
-| `POST /webhooks/whatsapp` | Receber eventos assinados e persistir entrada |
+| Método/rota                              | Finalidade                                                                   |
+| ---------------------------------------- | ---------------------------------------------------------------------------- |
+| `GET /me`                                | Perfil, permissões e escopo                                                  |
+| `GET /opportunities?view=mine`           | Reservas e oportunidades do usuário                                          |
+| `GET /opportunities?view=pool`           | Resumo autorizado do bolsão, incluindo elegibilidade por vencimento          |
+| `GET /opportunities/:id`                 | Ficha autorizada e versões atuais                                            |
+| `POST /contacts`                         | Cadastro manual com validação de identidade                                  |
+| `PATCH /contacts/:id`                    | Complementar contato sem apagar evidências de origem                         |
+| `POST /opportunities`                    | Criar oportunidade manual com regra de atribuição explícita                  |
+| `PATCH /opportunities/:id`               | Interesse, unidade, etapa e dados comerciais permitidos                      |
+| `POST /opportunities/:id/claim`          | Confirmar posse de reserva ou bolsão                                         |
+| `POST /opportunities/:id/whatsapp-link`  | Retornar destino somente ao usuário autorizado; não afirma envio de mensagem |
+| `POST /opportunities/:id/transfer`       | Transferência administrativa com justificativa                               |
+| `GET /opportunities/:id/history`         | Eventos e atividades autorizados                                             |
+| `POST /opportunities/:id/activities`     | Registrar tarefa/observação                                                  |
+| `POST /opportunities/:id/appointments`   | Agendar consulta e mover a qualificação para follow-up                       |
+| `PATCH /appointments/:id`                | Remarcar, concluir ou cancelar mantendo histórico                            |
+| `POST /opportunities/:id/contracts`      | Cadastrar contrato e documento privado                                       |
+| `POST /contracts/:id/validate-signature` | Validação administrativa autorizada                                          |
+| `GET /commissions`                       | Comissões conforme perfil e filtros                                          |
+| `GET /distribution/settings`             | Regra atual da fila e participantes                                          |
+| `PATCH /distribution/settings`           | Atualização administrativa versionada                                        |
+| `GET /reports/overview`                  | Indicadores operacionais e comerciais                                        |
+| `GET /reports/meta-ads`                  | Métricas Meta com filtros e atualização                                      |
+| `GET /reports/google-ads`                | Métricas Google com filtros e atualização                                    |
+| `GET /integrations/status`               | Saúde e última sincronização, sem segredos                                   |
+| `POST /notification-subscriptions`       | Registrar dispositivo do próprio usuário                                     |
+| `DELETE /notification-subscriptions/:id` | Revogar assinatura autorizada                                                |
+| `GET /events`                            | Canal autenticado de atualização, com dados mínimos e escopo                 |
+| `POST /tracking/clicks`                  | Registro público limitado/validado da interação do site                      |
+| `GET /webhooks/whatsapp`                 | Verificação do endpoint conforme provedor                                    |
+| `POST /webhooks/whatsapp`                | Receber eventos assinados e persistir entrada                                |
 
 ## Aceite
 
@@ -92,6 +93,7 @@ O script do site deve manter link de contingência para WhatsApp quando o regist
 ## Relatórios
 
 Resposta identifica período, fuso, moeda, nível de agregação, última sincronização e definição das métricas. `null`/indisponível não é convertido em zero. Percentuais com base zero são apresentados como não calculáveis. Cobertura de atribuição é retornada junto aos resultados atribuídos.
+
 # Central WhatsApp implementada
 
 Rotas públicas fora do prefixo `/api/v1`: `GET /webhooks/whatsapp` (desafio Meta) e `POST /webhooks/whatsapp` (HMAC-SHA256 obrigatório sobre corpo original, limite de 1 MiB). Desligadas sem configuração. POST confirma apenas após persistir a inbox normalizada; processamento assíncrono e idempotente. `GET /api/v1/whatsapp/status` é exclusivo da gestão e não devolve IDs ou segredos. Consulte [WHATSAPP.md](../WHATSAPP.md).

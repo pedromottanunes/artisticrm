@@ -449,3 +449,55 @@ test('criação repetida é idempotente e conflito de login ignora caixa', async
     { code: 'USER_CONFLICT' },
   );
 });
+test('exclusão permanente exige conta inativa e remove a atendente', async () => {
+  const created = await ops.createAttendant(
+    manager,
+    {
+      name: 'Conta Temporária',
+      email: 'temporaria',
+      password: '1',
+      queue_position: 8,
+    },
+    randomUUID(),
+  );
+  await assert.rejects(
+    ops.deleteAttendant(
+      manager,
+      created.id,
+      { expected_version: 1, confirmation: 'EXCLUIR' },
+      randomUUID(),
+    ),
+    { code: 'ACTIVE_USER' },
+  );
+  await ops.updateAttendant(
+    manager,
+    created.id,
+    {
+      expected_version: 1,
+      name: 'Conta Temporária',
+      active: false,
+      reason: 'Encerramento da conta temporária.',
+    },
+    randomUUID(),
+  );
+  const deleteKey = randomUUID();
+  assert.deepEqual(
+    await ops.deleteAttendant(
+      manager,
+      created.id,
+      { expected_version: 2, confirmation: 'EXCLUIR' },
+      deleteKey,
+    ),
+    { deleted: true },
+  );
+  assert.deepEqual(
+    await ops.deleteAttendant(
+      manager,
+      created.id,
+      { expected_version: 2, confirmation: 'EXCLUIR' },
+      deleteKey,
+    ),
+    { deleted: true },
+  );
+  assert.equal((await db.query('SELECT id FROM users WHERE id=$1', [created.id])).rows.length, 0);
+});
