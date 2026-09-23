@@ -15,6 +15,7 @@ const config: InstagramConfig = {
   accessToken: 'IGAA-synthetic-token-never-sent-to-meta',
   graphApiVersion: 'v26.0',
   username: 'fulljob.test',
+  profileLookup: false,
 };
 
 const payload = (
@@ -450,4 +451,63 @@ test('envio interrompido deixa de permanecer indefinidamente em sending', async 
     )
   ).rows[0];
   assert.deepEqual(recovered, { status: 'unknown', error_code: 'PROCESS_INTERRUPTED' });
+});
+
+test('consulta o perfil do remetente e exibe nome, usuario e foto sem bloquear o Direct', async () => {
+  const requests: string[] = [];
+  const profileFetch: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    requests.push(url.toString());
+    assert.equal(url.origin, 'https://graph.instagram.com');
+    assert.equal(url.pathname, `/${config.graphApiVersion}/ig-profile-sender`);
+    assert.equal(url.searchParams.get('fields'), 'id,name,username,profile_pic');
+    assert.equal(
+      String((init?.headers as Record<string, string>).Authorization),
+      `Bearer ${config.accessToken}`,
+    );
+    return new Response(
+      JSON.stringify({
+        id: 'ig-profile-sender',
+        name: 'Pedro Perfil',
+        username: 'pedro.perfil',
+        profile_pic: 'https://scontent.cdninstagram.com/profile.jpg',
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  };
+  const central = new InstagramCentral(crm, { ...config, profileLookup: true }, profileFetch);
+  const body = raw(payload('ig-profile-message', 'ig-profile-sender'));
+  await central.receive(body, signature(body));
+  await central.drain();
+
+  const second = raw(payload('ig-profile-message-2', 'ig-profile-sender'));
+  await central.receive(second, signature(second));
+  await central.drain();
+
+  assert.equal(requests.length, 1);
+  assert.equal(
+    (await db.query<{ name: string }>('SELECT name FROM contacts')).rows[0].name,
+    'Pedro Perfil',
+  );
+  const identity = (
+    await db.query<{
+      username: string;
+      display_name: string;
+      profile_picture_url: string;
+      profile_updated_at: Date | null;
+    }>(
+      'SELECT username,display_name,profile_picture_url,profile_updated_at FROM contact_identities',
+    )
+  ).rows[0];
+  assert.equal(identity.username, 'pedro.perfil');
+  assert.equal(identity.display_name, 'Pedro Perfil');
+  assert.equal(identity.profile_picture_url, 'https://scontent.cdninstagram.com/profile.jpg');
+  assert.ok(identity.profile_updated_at);
+  const listed = await central.list(manager, 'all');
+  assert.equal(listed.conversations[0].contact_name, 'Pedro Perfil');
+  assert.equal(listed.conversations[0].instagram_username, 'pedro.perfil');
+  assert.equal(
+    listed.conversations[0].profile_picture_url,
+    'https://scontent.cdninstagram.com/profile.jpg',
+  );
 });

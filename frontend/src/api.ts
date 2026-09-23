@@ -81,6 +81,7 @@ export interface ConversationSummary {
   opportunity_id: string;
   contact_name: string;
   instagram_username: string;
+  profile_picture_url: string;
   state: string;
   owner_id: string | null;
   reserved_to: string | null;

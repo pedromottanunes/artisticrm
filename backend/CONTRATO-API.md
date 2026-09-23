@@ -60,7 +60,7 @@ reservas e atendimentos existentes não mudam. O peso não interfere na disputa 
 | `PATCH /opportunities/:id`               | Interesse, unidade, etapa e dados comerciais permitidos                      |
 | `POST /opportunities/:id/claim`          | Confirmar posse de reserva ou bolsão                                         |
 | `POST /opportunities/:id/whatsapp-link`  | Retornar destino somente ao usuário autorizado; não afirma envio de mensagem |
-| `GET /conversations`                     | Listar conversas Instagram conforme papel, responsável e visão autorizada    |
+| `GET /conversations`                     | Listar conversas Instagram com nome, usuário, foto e visão autorizada        |
 | `GET /conversations/:id/messages`        | Histórico da conversa para gestão ou responsável                             |
 | `POST /conversations/:id/messages`       | Responder Direct como responsável, com `Idempotency-Key`                     |
 | `POST /conversations/:id/read`           | Registrar leitura da conversa pelo usuário                                   |

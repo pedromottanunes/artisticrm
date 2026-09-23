@@ -68,6 +68,7 @@
 }
 
 .instagram-avatar {
+  position: relative;
   display: grid;
   width: 38px;
   height: 38px;
@@ -75,6 +76,15 @@
   border-radius: 50%;
   color: #fff;
   background: linear-gradient(145deg, #7248d8, #db397e 55%, #ef9b3b);
+  overflow: hidden;
+}
+
+.instagram-avatar img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .inbox-conversations button > span:nth-child(2) {

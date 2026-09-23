@@ -1229,6 +1229,7 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
             opportunity_id: 'opportunity-wrong',
             contact_name: 'CONVERSA ERRADA',
             instagram_username: 'wrong',
+            profile_picture_url: '',
             state: 'CLAIMED',
             owner_id: 'other-user',
             reserved_to: null,
@@ -1240,6 +1241,8 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
             opportunity_id: targetId,
             contact_name: 'CONVERSA DESTINO',
             instagram_username: 'target',
+            profile_picture_url:
+              'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="32" height="32"/%3E',
             state: 'CLAIMED',
             owner_id: 'target-user',
             reserved_to: null,
@@ -1276,4 +1279,5 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
   await expect(page).toHaveURL(/#inbox$/);
   await expect(page.locator('.thread-header')).toContainText('CONVERSA DESTINO');
   await expect(page.locator('.thread-header')).not.toContainText('CONVERSA ERRADA');
+  await expect(page.locator('.inbox-conversations .instagram-avatar img')).toHaveCount(1);
 });

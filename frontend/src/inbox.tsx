@@ -213,6 +213,14 @@ export function InstagramInbox({
             >
               <span className="instagram-avatar">
                 <MessageCircle size={18} />
+                {conversation.profile_picture_url && (
+                  <img
+                    src={conversation.profile_picture_url}
+                    alt=""
+                    referrerPolicy="no-referrer"
+                    onError={(event) => event.currentTarget.remove()}
+                  />
+                )}
               </span>
               <span>
                 <strong>{conversation.contact_name}</strong>

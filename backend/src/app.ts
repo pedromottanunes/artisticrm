@@ -93,7 +93,7 @@ export async function buildApp(
         .header('Strict-Transport-Security', 'max-age=31536000')
         .header(
           'Content-Security-Policy',
-          "default-src 'self'; script-src 'self'; worker-src 'self'; manifest-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
+          "default-src 'self'; script-src 'self'; worker-src 'self'; manifest-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.cdninstagram.com https://*.fbcdn.net; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
         );
     if (!request.url.startsWith('/api/')) return;
     if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(request.method)) {

@@ -37,6 +37,7 @@ const instagramTestConfig: InstagramConfig = {
   accountId: '17841435843170000',
   accessToken: 'IGAA-mongo-test-token-never-used',
   graphApiVersion: 'v26.0',
+  profileLookup: false,
 };
 const metaMarketingTestConfig: MetaMarketingConfig = {
   accessToken: 'synthetic-mongo-marketing-token-never-used',
@@ -681,7 +682,27 @@ test('Mongo: webhook assinado persiste lote, deduplica e retoma após nova conex
   assert.equal(await db.count('whatsapp_inbox'), 1);
 });
 test('Mongo: Direct do Instagram cria identidade sem telefone, conversa e mensagem', async () => {
-  const central = new InstagramCentral(ops, instagramTestConfig);
+  const profileRequests: string[] = [];
+  const profileFetch = async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const senderId = decodeURIComponent(url.pathname.split('/').at(-1) ?? '');
+    profileRequests.push(senderId);
+    assert.equal(
+      init?.headers && new Headers(init.headers).get('Authorization'),
+      `Bearer ${instagramTestConfig.accessToken}`,
+    );
+    return new Response(
+      JSON.stringify({
+        id: senderId,
+        name: senderId === 'mongo-ig-scoped-user' ? 'Perfil Mongo' : 'Outro Perfil',
+        username: senderId === 'mongo-ig-scoped-user' ? 'perfil.mongo' : 'outro.perfil',
+        profile_pic: `https://scontent.example.test/${senderId}.jpg`,
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    );
+  };
+  const profileConfig = { ...instagramTestConfig, profileLookup: true };
+  const central = new InstagramCentral(ops, profileConfig, profileFetch);
   const body = Buffer.from(
     JSON.stringify({
       object: 'instagram',
@@ -704,7 +725,10 @@ test('Mongo: Direct do Instagram cria identidade sem telefone, conversa e mensag
     .update(body)
     .digest('hex')}`;
   await Promise.all([central.receive(body, sig), central.receive(body, sig)]);
-  await Promise.all([central.drain(), new InstagramCentral(ops, instagramTestConfig).drain()]);
+  await Promise.all([
+    central.drain(),
+    new InstagramCentral(ops, profileConfig, profileFetch).drain(),
+  ]);
   assert.equal(await db.count('contacts'), 1);
   assert.equal(await db.count('contact_identities'), 1);
   assert.equal(await db.count('opportunities'), 1);
@@ -712,13 +736,30 @@ test('Mongo: Direct do Instagram cria identidade sem telefone, conversa e mensag
   assert.equal(await db.count('messages'), 1);
   const contact = await db.one('contacts', {});
   assert.equal(contact?.phone, undefined);
+  assert.equal(contact?.name, 'Perfil Mongo');
+  assert.equal(contact?.instagram, 'perfil.mongo');
   const identity = await db.one('contact_identities', {});
   assert.equal(identity?.external_user_id, 'mongo-ig-scoped-user');
+  assert.equal(identity?.display_name, 'Perfil Mongo');
+  assert.equal(identity?.username, 'perfil.mongo');
+  assert.equal(
+    identity?.profile_picture_url,
+    'https://scontent.example.test/mongo-ig-scoped-user.jpg',
+  );
+  assert.ok(identity?.profile_updated_at);
   const opportunity = await db.one<{ id: string; version: number }>('opportunities', {});
   const conversation = await db.one<{ id: string }>('conversations', {});
   assert.ok(opportunity && conversation);
   await ops.claim(users[0], opportunity.id, 'reservation', opportunity.version, randomUUID());
-  assert.equal((await central.list(users[0], 'mine')).conversations.length, 1);
+  const listed = await central.list(users[0], 'mine');
+  assert.equal(listed.conversations.length, 1);
+  assert.equal(listed.conversations[0]?.contact_name, 'Perfil Mongo');
+  assert.equal(listed.conversations[0]?.instagram_username, 'perfil.mongo');
+  assert.equal(
+    listed.conversations[0]?.profile_picture_url,
+    'https://scontent.example.test/mongo-ig-scoped-user.jpg',
+  );
+  assert.deepEqual(profileRequests, ['mongo-ig-scoped-user']);
   assert.equal((await central.messages(users[0], conversation.id)).messages.length, 1);
   await db.insert('messages', {
     id: randomUUID(),

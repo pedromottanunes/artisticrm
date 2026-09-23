@@ -70,6 +70,7 @@ export async function migrate(db: Database) {
       '014_meta_marketing.sql',
       '015_channel_backfill.sql',
       '016_outbound_send_recovery.sql',
+      '017_instagram_profile.sql',
     ]) {
       const version = file.split('_')[0];
       const done = await tx.query('SELECT version FROM schema_migrations WHERE version=$1', [

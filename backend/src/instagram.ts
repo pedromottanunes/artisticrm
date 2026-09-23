@@ -14,6 +14,7 @@ export interface InstagramConfig {
   accessToken: string;
   graphApiVersion: string;
   username?: string;
+  profileLookup?: boolean;
 }
 
 export type InstagramFetch = typeof fetch;
@@ -82,6 +83,15 @@ const attachmentSchema = z.object({
     .passthrough()
     .optional(),
 });
+
+const userProfileSchema = z
+  .object({
+    id: identifier,
+    name: z.string().trim().max(200).nullish(),
+    username: z.string().trim().max(100).nullish(),
+    profile_pic: z.string().url().max(4096).nullish(),
+  })
+  .passthrough();
 
 const messagingEventSchema = z
   .object({
@@ -419,6 +429,114 @@ export class InstagramCentral {
     return row ? { sourceEventId: row.source_event_id, attribution: row.attribution } : undefined;
   }
 
+  private async refreshProfile(senderId: string, opportunityId: string) {
+    const config = this.config!;
+    if (config.profileLookup === false) return;
+    const db = this.crm.db;
+    try {
+      const identity =
+        db.kind === 'mongo'
+          ? await db.one('contact_identities', {
+              provider: 'instagram',
+              channel_account_id: config.accountId,
+              external_user_id: senderId,
+            })
+          : (
+              await db.query<{ profile_updated_at: Date | string | null }>(
+                `SELECT profile_updated_at FROM contact_identities
+                 WHERE provider='instagram' AND channel_account_id=$1 AND external_user_id=$2`,
+                [config.accountId, senderId],
+              )
+            ).rows[0];
+      const lastUpdate = identity?.profile_updated_at
+        ? new Date(identity.profile_updated_at as Date | string)
+        : null;
+      const checkedAt = db.kind === 'mongo' ? await db.now() : new Date();
+      if (lastUpdate && checkedAt.getTime() - lastUpdate.getTime() < 24 * 60 * 60_000) return;
+
+      const url = new URL(
+        `https://graph.instagram.com/${config.graphApiVersion}/${encodeURIComponent(senderId)}`,
+      );
+      url.searchParams.set('fields', 'id,name,username,profile_pic');
+      const response = await this.request(url, {
+        headers: { Authorization: `Bearer ${config.accessToken}` },
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (!response.ok) return;
+      const profile = userProfileSchema.safeParse(await response.json());
+      if (!profile.success || profile.data.id !== senderId) return;
+      const displayName = profile.data.name ?? '';
+      const username = profile.data.username ?? '';
+      const picture = profile.data.profile_pic ?? '';
+      const contactName = displayName || (username ? `@${username}` : '');
+
+      if (db.kind === 'mongo')
+        await db.atomic(async (tx) => {
+          const now = await tx.now();
+          const opportunity = await tx.one<Opportunity>('opportunities', { id: opportunityId });
+          if (!opportunity) return;
+          await tx.update(
+            'contact_identities',
+            {
+              contact_id: opportunity.contact_id,
+              provider: 'instagram',
+              channel_account_id: config.accountId,
+              external_user_id: senderId,
+            },
+            {
+              $set: {
+                ...(username ? { username } : {}),
+                ...(displayName ? { display_name: displayName } : {}),
+                ...(picture ? { profile_picture_url: picture } : {}),
+                profile_updated_at: now,
+              },
+            },
+          );
+          const contact = await tx.one('contacts', { id: opportunity.contact_id });
+          if (!contact) return;
+          await tx.update(
+            'contacts',
+            { id: opportunity.contact_id },
+            {
+              $set: {
+                ...(contactName && (!contact.name || contact.name === 'Contato Instagram')
+                  ? { name: contactName }
+                  : {}),
+                ...(username ? { instagram: username } : {}),
+              },
+            },
+          );
+        });
+      else
+        await db.transaction(async (tx) => {
+          const row = (
+            await tx.query<{ contact_id: string }>(
+              `UPDATE contact_identities ci SET
+                 username=CASE WHEN $3='' THEN ci.username ELSE $3 END,
+                 display_name=CASE WHEN $4='' THEN ci.display_name ELSE $4 END,
+                 profile_picture_url=CASE WHEN $5='' THEN ci.profile_picture_url ELSE $5 END,
+                 profile_updated_at=clock_timestamp()
+               FROM opportunities o
+               WHERE o.id=$1 AND ci.contact_id=o.contact_id AND ci.provider='instagram'
+                 AND ci.channel_account_id=$2 AND ci.external_user_id=$6
+               RETURNING ci.contact_id`,
+              [opportunityId, config.accountId, username, displayName, picture, senderId],
+            )
+          ).rows[0];
+          if (!row) return;
+          await tx.query(
+            `UPDATE contacts SET
+               name=CASE WHEN $2<>'' AND (name='' OR name='Contato Instagram') THEN $2 ELSE name END,
+               instagram=CASE WHEN $3='' THEN instagram ELSE $3 END
+             WHERE id=$1`,
+            [row.contact_id, contactName, username],
+          );
+        });
+    } catch {
+      // Profile data is optional. A transient Meta/CDN failure must never block the message.
+    }
+  }
+
   private async persistInbound(
     eventId: string,
     lease: string,
@@ -666,6 +784,7 @@ export class InstagramCentral {
         }
         const result = await this.crm.ingest(value.lead, row.event_id, null);
         await this.persistInbound(row.event_id, lease, value, result.id, pending?.sourceEventId);
+        await this.refreshProfile(value.sender_id, result.id);
       } catch {
         const seconds = Math.min(300, 2 ** Math.min(row.attempts + 1, 8));
         if (db.kind === 'mongo')
@@ -811,6 +930,7 @@ export class InstagramCentral {
           opportunity_id: opportunity.id,
           contact_name: contact?.name ?? 'Contato Instagram',
           instagram_username: identity?.username ?? '',
+          profile_picture_url: identity?.profile_picture_url ?? '',
           state: opportunity.state,
           owner_id: opportunity.owner_id,
           reserved_to: opportunity.reserved_to,
@@ -842,11 +962,13 @@ export class InstagramCentral {
           conversation_id: string;
           contact_name: string;
           instagram_username: string;
+          profile_picture_url: string;
           conversation_last_message_at: Date | string;
         }
       >(
         `SELECT o.*,cv.id AS conversation_id,c.name AS contact_name,
-                ci.username AS instagram_username,cv.last_message_at AS conversation_last_message_at
+                ci.username AS instagram_username,ci.profile_picture_url,
+                cv.last_message_at AS conversation_last_message_at
          FROM conversations cv
          JOIN opportunities o ON o.id=cv.opportunity_id
          JOIN contacts c ON c.id=cv.contact_id
@@ -866,6 +988,7 @@ export class InstagramCentral {
         opportunity_id: row.id,
         contact_name: row.contact_name,
         instagram_username: row.instagram_username,
+        profile_picture_url: row.profile_picture_url,
         state: row.state,
         owner_id: row.owner_id,
         reserved_to: row.reserved_to,
