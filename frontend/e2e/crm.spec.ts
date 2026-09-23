@@ -1197,6 +1197,8 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
 }) => {
   let targetId = '';
   let targetName = '';
+  const profilePicture =
+    'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="58" height="58"/%3E';
   await page.route('**/api/v1/workspace', async (route) => {
     const response = await route.fetch();
     if (response.status() !== 200) return route.fulfill({ response });
@@ -1207,6 +1209,8 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
     );
     if (target) {
       target.channel = 'instagram';
+      target.instagram = 'perfil.destino';
+      target.profile_picture_url = profilePicture;
       targetId = target.id;
       targetName = target.name;
     }
@@ -1216,7 +1220,11 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
     const response = await route.fetch();
     if (response.status() !== 200) return route.fulfill({ response });
     const body = await response.json();
-    if (body.id === targetId) body.channel = 'instagram';
+    if (body.id === targetId) {
+      body.channel = 'instagram';
+      body.instagram = 'perfil.destino';
+      body.profile_picture_url = profilePicture;
+    }
     return route.fulfill({ response, json: body });
   });
   await page.route('**/api/v1/conversations?*', (route) =>
@@ -1241,8 +1249,7 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
             opportunity_id: targetId,
             contact_name: 'CONVERSA DESTINO',
             instagram_username: 'target',
-            profile_picture_url:
-              'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="32" height="32"/%3E',
+            profile_picture_url: profilePicture,
             state: 'CLAIMED',
             owner_id: 'target-user',
             reserved_to: null,
@@ -1275,6 +1282,8 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
   const lead = page.locator('.attendant-lead').filter({ hasText: targetName }).first();
   await lead.getByRole('button', { name: `Abrir ficha de ${targetName}`, exact: true }).click();
   const dialog = page.getByRole('dialog');
+  await expect(dialog.getByLabel('Instagram')).toHaveValue('@perfil.destino');
+  await expect(dialog.locator('.lead-profile-avatar img')).toHaveCount(1);
   await dialog.getByRole('button', { name: 'Abrir conversa', exact: true }).click();
   await expect(page).toHaveURL(/#inbox$/);
   await expect(page.locator('.thread-header')).toContainText('CONVERSA DESTINO');

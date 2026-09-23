@@ -190,6 +190,12 @@ export async function initializeMongo(db: MongoStore) {
     .collection('opportunities')
     .updateMany({ channel: { $exists: false } }, { $set: { channel: 'manual' } });
   await db
+    .collection('opportunities')
+    .updateMany(
+      { channel: 'instagram', interest: '' },
+      { $set: { interest: 'Direct do Instagram' } },
+    );
+  await db
     .collection('users')
     .updateMany({ queue_weight: { $exists: false } }, { $set: { queue_weight: 1 } });
   await db

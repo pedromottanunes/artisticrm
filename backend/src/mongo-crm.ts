@@ -220,9 +220,7 @@ export class MongoOperations {
             },
             $set: {
               ...(input.identity.username ? { username: input.identity.username } : {}),
-              ...(input.identity.display_name
-                ? { display_name: input.identity.display_name }
-                : {}),
+              ...(input.identity.display_name ? { display_name: input.identity.display_name } : {}),
               last_seen_at: now,
             },
           },
@@ -446,18 +444,46 @@ export class MongoOperations {
     row: Opportunity,
     user: User,
     loadedContact?: Document,
+    loadedIdentity?: Document,
   ): Promise<Opportunity> {
     const contact = loadedContact ?? (await tx.one('contacts', { id: row.contact_id }));
     if (!contact) throw new Error('Missing contact');
     const { id: _id, ...fields } = contact;
-    const full = { ...row, ...fields } as Opportunity;
+    const identity =
+      row.channel === 'instagram'
+        ? (loadedIdentity ??
+          (await tx.one('contact_identities', {
+            contact_id: row.contact_id,
+            provider: 'instagram',
+          })))
+        : null;
+    const full = {
+      ...row,
+      ...fields,
+      ...(row.channel === 'instagram'
+        ? {
+            instagram: contact.instagram || identity?.username || '',
+            profile_picture_url: identity?.profile_picture_url || '',
+          }
+        : {}),
+    } as Opportunity;
     if (
       user.role === 'manager' ||
       row.owner_id === user.id ||
       (row.state === 'POOL' && user.role === 'attendant' && user.active)
     )
       return full;
-    const { phone: _phone, email: _email, instagram: _instagram, ...safe } = full;
+    if (row.channel === 'instagram' && row.reserved_to === user.id) {
+      const { phone: _phone, email: _email, ...safe } = full;
+      return { ...safe, next_action: '' };
+    }
+    const {
+      phone: _phone,
+      email: _email,
+      instagram: _instagram,
+      profile_picture_url: _profilePicture,
+      ...safe
+    } = full;
     return {
       ...safe,
       next_action: '',
@@ -479,9 +505,25 @@ export class MongoOperations {
           c,
         ]),
       );
+      const identities = new Map(
+        (
+          await tx.many('contact_identities', {
+            contact_id: { $in: rows.map((r) => r.contact_id) },
+            provider: 'instagram',
+          })
+        ).map((identity) => [identity.contact_id, identity]),
+      );
       const opportunities: Opportunity[] = [];
       for (const row of rows)
-        opportunities.push(await this.enrich(tx, row, user, contacts.get(row.contact_id)));
+        opportunities.push(
+          await this.enrich(
+            tx,
+            row,
+            user,
+            contacts.get(row.contact_id),
+            identities.get(row.contact_id),
+          ),
+        );
       const users = (await tx.many('users', {}, { queue_position: 1 })).map(publicUser);
       const appointments = await tx
         .collection('appointments')

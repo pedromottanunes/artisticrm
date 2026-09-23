@@ -53,6 +53,7 @@ export function Modal({
   description,
   onClose,
   children,
+  leading,
   wide = false,
   className = '',
 }: {
@@ -60,6 +61,7 @@ export function Modal({
   description?: string;
   onClose: () => void;
   children: ReactNode;
+  leading?: ReactNode;
   wide?: boolean;
   className?: string;
 }) {
@@ -101,9 +103,12 @@ export function Modal({
       aria-label={title}
     >
       <div className="modal-heading">
-        <div>
-          <h2>{title}</h2>
-          {description && <p>{description}</p>}
+        <div className="modal-heading-content">
+          {leading}
+          <div>
+            <h2>{title}</h2>
+            {description && <p>{description}</p>}
+          </div>
         </div>
         <IconButton label="Fechar janela" onClick={onClose}>
           <X size={20} />

@@ -8,7 +8,8 @@ O Instagram é um conector adicional. Ativá-lo não desliga, substitui ou alter
 - recebimento assinado `POST /webhooks/instagram`;
 - persistência antes da confirmação e processamento com retry;
 - identidade por IGSID, sem inventar telefone;
-- consulta segura de nome, `@usuario` e foto do remetente, renovada a cada 24 horas;
+- consulta segura de nome, `@usuario` e URL da foto do remetente, renovada a cada 24 horas;
+- preenchimento automático da ficha do lead com nome, perfil, canal e interesse do Direct;
 - criação/reentrada de oportunidade usando o mesmo rodízio ponderado;
 - histórico de Directs e resposta de texto pela Send API;
 - acesso da atendente somente depois do aceite;
@@ -61,6 +62,7 @@ O remetente deve iniciar a conversa. A API responde usando o IGSID recebido no w
 - O endpoint confirma recebimento somente depois da persistência.
 - O token nunca é retornado pelas APIs de status.
 - Falha ao consultar nome ou foto não bloqueia nem descarta a mensagem; a interface usa fallback.
+- O CRM armazena somente a URL temporária fornecida pela Meta, nunca o arquivo da foto.
 - A mensagem de saída exige sessão, posse `CLAIMED` e `Idempotency-Key`.
 
 ## Teste local do código

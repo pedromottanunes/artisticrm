@@ -603,6 +603,10 @@ test('cookie no ambiente publicado é Secure e demo não aparece no snapshot', a
     assert.equal(login.statusCode, 200);
     assert.match(String(login.headers['set-cookie']), /Secure/);
     assert.match(String(login.headers['set-cookie']), /HttpOnly/);
+    assert.match(
+      String(login.headers['content-security-policy']),
+      /img-src[^;]*https:\/\/lookaside\.fbsbx\.com/,
+    );
     const response = await app.inject({
       url: '/api/v1/workspace',
       headers: { cookie: `artisti_session=${login.cookies[0].value}` },

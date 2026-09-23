@@ -136,13 +136,18 @@ test('Direct cria identidade sem telefone, conversa e reserva; reentrega não du
   assert.equal(identity.external_user_id, 'ig-scoped-synthetic-1');
 
   const opportunities = (
-    await db.query<{ id: string; state: string; source: string; reserved_to: string }>(
-      'SELECT * FROM opportunities',
-    )
+    await db.query<{
+      id: string;
+      state: string;
+      source: string;
+      interest: string;
+      reserved_to: string;
+    }>('SELECT * FROM opportunities')
   ).rows;
   assert.equal(opportunities.length, 1);
   assert.equal(opportunities[0].state, 'RESERVED');
   assert.equal(opportunities[0].source, 'Instagram — origem não identificada');
+  assert.equal(opportunities[0].interest, 'Direct do Instagram');
   assert.equal(opportunities[0].reserved_to, attendants[0].id);
   assert.equal((await db.query('SELECT * FROM conversations')).rows.length, 1);
   const messages = (await db.query<{ text: string; direction: string }>('SELECT * FROM messages'))
@@ -504,6 +509,10 @@ test('consulta o perfil do remetente e exibe nome, usuario e foto sem bloquear o
   assert.equal(identity.profile_picture_url, 'https://scontent.cdninstagram.com/profile.jpg');
   assert.ok(identity.profile_updated_at);
   const listed = await central.list(manager, 'all');
+  await db.query("UPDATE contacts SET instagram='' WHERE name='Pedro Perfil'");
+  const reservedDetail = await crm.detail(attendants[0], listed.conversations[0].opportunity_id);
+  assert.equal(reservedDetail.instagram, 'pedro.perfil');
+  assert.equal(reservedDetail.profile_picture_url, 'https://scontent.cdninstagram.com/profile.jpg');
   assert.equal(listed.conversations[0].contact_name, 'Pedro Perfil');
   assert.equal(listed.conversations[0].instagram_username, 'pedro.perfil');
   assert.equal(

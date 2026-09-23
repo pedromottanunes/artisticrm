@@ -38,6 +38,7 @@ export interface Lead {
   phone?: string;
   email?: string;
   instagram?: string;
+  profile_picture_url?: string;
   is_demo: boolean;
   interest: string;
   unit: string;

@@ -8,6 +8,7 @@ import {
   Clock3,
   ShieldCheck,
   Trash2,
+  CircleUserRound,
 } from 'lucide-react';
 import { api, isClosedStage, stages, type Detail, type Snapshot, type User } from './api';
 import { Transfer, AppointmentEditor } from './operations';
@@ -229,6 +230,21 @@ export function LeadDetail({
     <Modal
       title={detail.name}
       description={detail.interest || 'Interesse a identificar'}
+      leading={
+        detail.channel === 'instagram' ? (
+          <span className="lead-profile-avatar" aria-hidden="true">
+            <CircleUserRound size={24} />
+            {detail.profile_picture_url && (
+              <img
+                src={detail.profile_picture_url}
+                alt=""
+                referrerPolicy="no-referrer"
+                onError={(event) => event.currentTarget.remove()}
+              />
+            )}
+          </span>
+        ) : undefined
+      }
       onClose={() => {
         if (!deleting.current) onClose();
       }}
@@ -362,10 +378,13 @@ export function LeadDetail({
               Instagram
               <input
                 name="instagram"
-                defaultValue={detail.instagram ?? ''}
+                defaultValue={detail.instagram ? `@${detail.instagram.replace(/^@+/, '')}` : ''}
                 maxLength={160}
                 placeholder="@perfil (opcional)"
               />
+              {detail.channel === 'instagram' && detail.instagram && (
+                <small>Perfil identificado automaticamente pelo Instagram Direct.</small>
+              )}
             </label>
             <label>
               Interesse

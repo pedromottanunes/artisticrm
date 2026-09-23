@@ -249,7 +249,7 @@ function normalizeEvent(
     },
     lead: {
       name: 'Contato Instagram',
-      interest: '',
+      interest: 'Direct do Instagram',
       unit: 'A definir',
       source: attribution ? 'Meta Ads' : 'Instagram — origem não identificada',
       source_evidence: attribution
@@ -442,8 +442,12 @@ export class InstagramCentral {
               external_user_id: senderId,
             })
           : (
-              await db.query<{ profile_updated_at: Date | string | null }>(
-                `SELECT profile_updated_at FROM contact_identities
+              await db.query<{
+                username: string;
+                profile_picture_url: string;
+                profile_updated_at: Date | string | null;
+              }>(
+                `SELECT username,profile_picture_url,profile_updated_at FROM contact_identities
                  WHERE provider='instagram' AND channel_account_id=$1 AND external_user_id=$2`,
                 [config.accountId, senderId],
               )
@@ -452,7 +456,13 @@ export class InstagramCentral {
         ? new Date(identity.profile_updated_at as Date | string)
         : null;
       const checkedAt = db.kind === 'mongo' ? await db.now() : new Date();
-      if (lastUpdate && checkedAt.getTime() - lastUpdate.getTime() < 24 * 60 * 60_000) return;
+      const completeProfile = Boolean(identity?.username && identity?.profile_picture_url);
+      if (
+        completeProfile &&
+        lastUpdate &&
+        checkedAt.getTime() - lastUpdate.getTime() < 24 * 60 * 60_000
+      )
+        return;
 
       const url = new URL(
         `https://graph.instagram.com/${config.graphApiVersion}/${encodeURIComponent(senderId)}`,

@@ -53,7 +53,7 @@ reservas e atendimentos existentes não mudam. O peso não interfere na disputa 
 | `GET /me`                                | Perfil, permissões e escopo                                                  |
 | `GET /opportunities?view=mine`           | Reservas e oportunidades do usuário                                          |
 | `GET /opportunities?view=pool`           | Resumo autorizado do bolsão, incluindo elegibilidade por vencimento          |
-| `GET /opportunities/:id`                 | Ficha autorizada e versões atuais                                            |
+| `GET /opportunities/:id`                 | Ficha autorizada; inclui perfil e URL da foto do Instagram quando disponíveis |
 | `POST /contacts`                         | Cadastro manual com validação de identidade                                  |
 | `PATCH /contacts/:id`                    | Complementar contato sem apagar evidências de origem                         |
 | `POST /opportunities`                    | Criar oportunidade manual com regra de atribuição explícita                  |

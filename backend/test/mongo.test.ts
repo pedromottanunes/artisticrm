@@ -747,9 +747,20 @@ test('Mongo: Direct do Instagram cria identidade sem telefone, conversa e mensag
     'https://scontent.example.test/mongo-ig-scoped-user.jpg',
   );
   assert.ok(identity?.profile_updated_at);
-  const opportunity = await db.one<{ id: string; version: number }>('opportunities', {});
+  const opportunity = await db.one<{ id: string; contact_id: string; version: number }>(
+    'opportunities',
+    {},
+  );
   const conversation = await db.one<{ id: string }>('conversations', {});
   assert.ok(opportunity && conversation);
+  assert.equal((await db.one('opportunities', {}))?.interest, 'Direct do Instagram');
+  await db.update('contacts', { id: opportunity.contact_id }, { $set: { instagram: '' } });
+  const reservedDetail = await ops.detail(users[0], opportunity.id);
+  assert.equal(reservedDetail.instagram, 'perfil.mongo');
+  assert.equal(
+    reservedDetail.profile_picture_url,
+    'https://scontent.example.test/mongo-ig-scoped-user.jpg',
+  );
   await ops.claim(users[0], opportunity.id, 'reservation', opportunity.version, randomUUID());
   const listed = await central.list(users[0], 'mine');
   assert.equal(listed.conversations.length, 1);

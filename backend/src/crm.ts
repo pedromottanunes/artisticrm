@@ -20,7 +20,17 @@ import {
   type WeightedQueueSelection,
 } from './weighted-queue.js';
 
-const selectOpportunity = `SELECT o.*, c.name, c.phone, c.email, c.instagram, c.is_demo
+const selectOpportunity = `SELECT o.*, c.name, c.phone, c.email, c.is_demo,
+  COALESCE(NULLIF(c.instagram,''),(
+    SELECT ci.username FROM contact_identities ci
+    WHERE ci.contact_id=c.id AND ci.provider='instagram'
+    ORDER BY ci.profile_updated_at DESC NULLS LAST LIMIT 1
+  ),'') AS instagram,
+  COALESCE((
+    SELECT ci.profile_picture_url FROM contact_identities ci
+    WHERE ci.contact_id=c.id AND ci.provider='instagram'
+    ORDER BY ci.profile_updated_at DESC NULLS LAST LIMIT 1
+  ),'') AS profile_picture_url
   FROM opportunities o JOIN contacts c ON c.id = o.contact_id`;
 const closedStageSql = closedStages.map((stage) => `'${stage}'`).join(',');
 export interface LeadInput {
@@ -452,7 +462,17 @@ export class CRM {
       (row.state === 'POOL' && user.role === 'attendant' && user.active)
     )
       return row;
-    const { phone: _phone, email: _email, instagram: _instagram, ...summary } = row;
+    if (row.channel === 'instagram' && row.reserved_to === user.id) {
+      const { phone: _phone, email: _email, ...summary } = row;
+      return { ...summary, next_action: '' };
+    }
+    const {
+      phone: _phone,
+      email: _email,
+      instagram: _instagram,
+      profile_picture_url: _profilePicture,
+      ...summary
+    } = row;
     return {
       ...summary,
       next_action: '',
