@@ -343,8 +343,15 @@ export function LeadDetail({
               />
             </label>
             <label>
-              WhatsApp
-              <input value={detail.phone ?? 'Disponível após assumir'} readOnly />
+              {detail.channel === 'instagram' ? 'Canal de entrada' : 'WhatsApp'}
+              <input
+                value={
+                  detail.channel === 'instagram'
+                    ? 'Instagram Direct'
+                    : (detail.phone ?? 'Disponível após assumir')
+                }
+                readOnly
+              />
               <small>Alteração de identidade exige tratamento de duplicidade.</small>
             </label>
             <label>
@@ -484,7 +491,7 @@ export function LeadDetail({
                 onClick={onWhatsApp}
               >
                 <MessageCircle size={16} />
-                WhatsApp
+                {detail.channel === 'instagram' ? 'Abrir conversa' : 'WhatsApp'}
               </button>
             )}
             {detail.can_edit ? (

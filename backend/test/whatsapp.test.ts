@@ -63,7 +63,7 @@ before(async () => {
 });
 beforeEach(async () => {
   await db.query(
-    'TRUNCATE whatsapp_inbox,claims,appointments,lead_attributions,inbound_events,audit_events,opportunities,contacts,sessions',
+    'TRUNCATE conversation_reads,messages,instagram_webhook_inbox,conversations,contact_identities,channel_accounts,whatsapp_inbox,claims,appointments,lead_attributions,inbound_events,audit_events,opportunities,contacts,sessions',
   );
   await db.query('UPDATE distribution_settings SET last_position=0,timeout_minutes=10');
   await db.query('UPDATE users SET queue_weight=1,queue_credit=0');

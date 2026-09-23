@@ -17,6 +17,28 @@ services:
         value: production
       - key: WHATSAPP_ENABLED
         value: 'false'
+      - key: INSTAGRAM_ENABLED
+        value: 'false'
+      - key: META_MARKETING_ENABLED
+        value: 'false'
+      - key: META_GRAPH_VERSION
+        value: v26.0
+      - key: INSTAGRAM_APP_SECRET
+        sync: false
+      - key: INSTAGRAM_VERIFY_TOKEN
+        sync: false
+      - key: INSTAGRAM_ACCOUNT_ID
+        sync: false
+      - key: INSTAGRAM_ACCESS_TOKEN
+        sync: false
+      - key: INSTAGRAM_USERNAME
+        sync: false
+      - key: META_MARKETING_ACCESS_TOKEN
+        sync: false
+      - key: META_AD_ACCOUNT_ID
+        sync: false
+      - key: META_AD_TIMEZONE
+        value: America/Sao_Paulo
       - key: MONGODB_URI
         sync: false
       - key: MONGODB_DB

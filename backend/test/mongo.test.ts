@@ -13,6 +13,8 @@ import {
 import { MongoOperations, publicUser } from '../src/mongo-crm.js';
 import { buildApp } from '../src/app.js';
 import { WhatsAppCentral } from '../src/whatsapp.js';
+import { InstagramCentral, type InstagramConfig } from '../src/instagram.js';
+import { MetaMarketing, type MetaMarketingConfig } from '../src/meta-marketing.js';
 import { hashPassword } from '../src/auth.js';
 import type { User } from '../src/types.js';
 import { checkDistribution } from './distribution-checks.js';
@@ -29,6 +31,18 @@ let replica: MongoMemoryReplSet, db: MongoStore, ops: MongoOperations, manager: 
 let now: Date;
 const database = `artisti_test_${randomUUID().replaceAll('-', '')}`;
 const password = 'test-password-only';
+const instagramTestConfig: InstagramConfig = {
+  appSecret: 'instagram-mongo-test-secret',
+  verifyToken: 'instagram-mongo-test-verify-token-32-chars',
+  accountId: '17841435843170000',
+  accessToken: 'IGAA-mongo-test-token-never-used',
+  graphApiVersion: 'v26.0',
+};
+const metaMarketingTestConfig: MetaMarketingConfig = {
+  accessToken: 'synthetic-mongo-marketing-token-never-used',
+  adAccountId: 'act_1789815972431863',
+  graphApiVersion: 'v26.0',
+};
 let password_hash: string;
 before(
   async () => {
@@ -567,6 +581,16 @@ test('Mongo: inicialização repara posições antigas que já continham lacunas
   );
   assert.equal((await db.one('distribution_settings', { id: 1 }))!.last_position, 2);
 });
+test('Mongo: migração de canal preserva manual e reconhece evento legado do WhatsApp', async () => {
+  const manual = await ops.ingest(input(90), 'legacy-manual-event', manager.id);
+  const whatsapp = await ops.ingest(input(91), 'whatsapp:legacy-account:legacy-message', null);
+  await db
+    .collection('opportunities')
+    .updateMany({ id: { $in: [manual.id, whatsapp.id] } }, { $unset: { channel: '' } });
+  await initializeMongo(db);
+  assert.equal((await row(manual.id)).channel, 'manual');
+  assert.equal((await row(whatsapp.id)).channel, 'whatsapp');
+});
 test('Mongo: transação abortada não deixa escrita parcial e índices impedem duplicatas', async () => {
   await assert.rejects(
     db.atomic(async (tx) => {
@@ -656,6 +680,120 @@ test('Mongo: webhook assinado persiste lote, deduplica e retoma após nova conex
   await central.receive(unknown, sign(unknown));
   assert.equal(await db.count('whatsapp_inbox'), 1);
 });
+test('Mongo: Direct do Instagram cria identidade sem telefone, conversa e mensagem', async () => {
+  const central = new InstagramCentral(ops, instagramTestConfig);
+  const body = Buffer.from(
+    JSON.stringify({
+      object: 'instagram',
+      entry: [
+        {
+          id: instagramTestConfig.accountId,
+          messaging: [
+            {
+              sender: { id: 'mongo-ig-scoped-user' },
+              recipient: { id: instagramTestConfig.accountId },
+              timestamp: now.getTime(),
+              message: { mid: 'mongo-ig-message-1', text: 'Mensagem Instagram Mongo' },
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  const sig = `sha256=${createHmac('sha256', instagramTestConfig.appSecret)
+    .update(body)
+    .digest('hex')}`;
+  await Promise.all([central.receive(body, sig), central.receive(body, sig)]);
+  await Promise.all([central.drain(), new InstagramCentral(ops, instagramTestConfig).drain()]);
+  assert.equal(await db.count('contacts'), 1);
+  assert.equal(await db.count('contact_identities'), 1);
+  assert.equal(await db.count('opportunities'), 1);
+  assert.equal(await db.count('conversations'), 1);
+  assert.equal(await db.count('messages'), 1);
+  const contact = await db.one('contacts', {});
+  assert.equal(contact?.phone, undefined);
+  const identity = await db.one('contact_identities', {});
+  assert.equal(identity?.external_user_id, 'mongo-ig-scoped-user');
+  const opportunity = await db.one<{ id: string; version: number }>('opportunities', {});
+  const conversation = await db.one<{ id: string }>('conversations', {});
+  assert.ok(opportunity && conversation);
+  await ops.claim(users[0], opportunity.id, 'reservation', opportunity.version, randomUUID());
+  assert.equal((await central.list(users[0], 'mine')).conversations.length, 1);
+  assert.equal((await central.messages(users[0], conversation.id)).messages.length, 1);
+  await db.insert('messages', {
+    id: randomUUID(),
+    conversation_id: conversation.id,
+    direction: 'outbound',
+    type: 'text',
+    text: 'Envio interrompido',
+    status: 'sending',
+    sending_started_at: new Date(now.getTime() - 300_000),
+    created_at: new Date(now.getTime() - 300_000),
+  });
+  assert.equal(await central.recoverStaleSends(), 1);
+  assert.equal((await db.one('messages', { text: 'Envio interrompido' }))?.status, 'unknown');
+
+  const referralBody = Buffer.from(
+    JSON.stringify({
+      object: 'instagram',
+      entry: [
+        {
+          id: instagramTestConfig.accountId,
+          messaging: [
+            {
+              sender: { id: 'mongo-ig-referral-user' },
+              recipient: { id: instagramTestConfig.accountId },
+              timestamp: now.getTime() + 1_000,
+              referral: {
+                source: 'ADS',
+                type: 'OPEN_THREAD',
+                ad_id: 'mongo-standalone-ad',
+                referer_uri: 'https://example.test/mongo-ad',
+              },
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  const referralSig = `sha256=${createHmac('sha256', instagramTestConfig.appSecret)
+    .update(referralBody)
+    .digest('hex')}`;
+  await central.receive(referralBody, referralSig);
+  await central.drain();
+  assert.equal(await db.count('instagram_pending_referrals'), 1);
+  assert.equal(await db.count('opportunities'), 1);
+
+  const attributedMessage = Buffer.from(
+    JSON.stringify({
+      object: 'instagram',
+      entry: [
+        {
+          id: instagramTestConfig.accountId,
+          messaging: [
+            {
+              sender: { id: 'mongo-ig-referral-user' },
+              recipient: { id: instagramTestConfig.accountId },
+              timestamp: now.getTime() + 2_000,
+              message: { mid: 'mongo-message-after-referral', text: 'Vim pelo anuncio' },
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  const attributedSig = `sha256=${createHmac('sha256', instagramTestConfig.appSecret)
+    .update(attributedMessage)
+    .digest('hex')}`;
+  await central.receive(attributedMessage, attributedSig);
+  await central.drain();
+  assert.equal(await db.count('instagram_pending_referrals'), 0);
+  assert.equal(
+    (await db.one('lead_attributions', { source_id: 'mongo-standalone-ad' }))?.source_url,
+    'https://example.test/mongo-ad',
+  );
+  assert.equal((await central.status()).pending, 0);
+});
 test('Mongo: mantém o histórico de referências Meta sem consultar serviços externos', async () => {
   const first = await ops.ingest(
     {
@@ -700,6 +838,76 @@ test('Mongo: mantém o histórico de referências Meta sem consultar serviços e
   assert.ok(!serialized.includes(first.id));
   const reserved = users.find((user) => user.id === detail.reserved_to)!;
   assert.deepEqual((await ops.detail(reserved, first.id)).attributions, []);
+});
+test('Mongo: Marketing API persiste insights e cruza somente evidência explícita', async () => {
+  const request = (async () =>
+    new Response(
+      JSON.stringify({
+        data: [
+          {
+            date_start: '2026-09-10',
+            date_stop: '2026-09-10',
+            account_id: '1789815972431863',
+            account_name: 'Conta Mongo',
+            account_currency: 'BRL',
+            campaign_id: 'mongo-campaign',
+            campaign_name: 'Campanha Mongo',
+            adset_id: 'mongo-adset',
+            adset_name: 'Conjunto Mongo',
+            ad_id: 'mongo-ad',
+            ad_name: 'Anúncio Mongo',
+            spend: '12.50',
+            impressions: '100',
+            reach: '90',
+            clicks: '5',
+            actions: [],
+          },
+        ],
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )) as typeof fetch;
+  const marketing = new MetaMarketing(db, metaMarketingTestConfig, request, () => now);
+  await marketing.sync(1);
+  await ops.ingest(
+    {
+      name: 'Contato Instagram Mongo',
+      interest: 'Direct do Instagram',
+      unit: 'Teste',
+      source: 'Meta Ads — Instagram Direct',
+      source_evidence: 'Referência explícita de anúncio.',
+      identity: {
+        provider: 'instagram',
+        account_id: instagramTestConfig.accountId,
+        external_user_id: 'mongo-marketing-user',
+      },
+      meta_attribution: {
+        provider: 'meta',
+        channel: 'instagram',
+        source_type: 'ad',
+        source_id: 'mongo-ad',
+      },
+    },
+    'mongo-marketing-event',
+    null,
+  );
+  const report = await marketing.report('2026-09-10', '2026-09-10');
+  assert.equal(await db.count('meta_marketing_daily_insights'), 1);
+  assert.equal(report.spend, 12.5);
+  assert.equal(report.instagram_leads, 1);
+  assert.equal(report.matched_attributed_leads, 1);
+  assert.equal(report.cpl, 12.5);
+  const emptyMarketing = new MetaMarketing(
+    db,
+    metaMarketingTestConfig,
+    (async () =>
+      new Response(JSON.stringify({ data: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })) as typeof fetch,
+    () => now,
+  );
+  await emptyMarketing.sync(1);
+  assert.equal(await db.count('meta_marketing_daily_insights'), 0);
 });
 test('Mongo: falha de processamento mantém inbox para retry e lease vencida é recuperada', async () => {
   const central = new WhatsAppCentral(ops, config);

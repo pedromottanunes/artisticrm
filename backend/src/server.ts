@@ -6,6 +6,8 @@ import { seedDemo } from './seed.js';
 import { buildApp } from './app.js';
 import { bootstrapManager } from './bootstrap.js';
 import { whatsappConfig } from './whatsapp.js';
+import { instagramConfig } from './instagram.js';
+import { metaMarketingConfig } from './meta-marketing.js';
 import { pushConfig } from './push.js';
 import { openMongo, initializeMongo, bootstrapMongo } from './mongo-store.js';
 
@@ -15,6 +17,8 @@ const testRateLimitMax =
     ? Number(process.env.ARTISTI_TEST_RATE_LIMIT_MAX) || undefined
     : undefined;
 const whatsapp = whatsappConfig(process.env);
+const instagram = instagramConfig(process.env);
+const metaMarketing = metaMarketingConfig(process.env);
 if (process.env.MONGODB_URI && process.env.DATABASE_URL)
   throw new Error('Configure apenas MONGODB_URI ou DATABASE_URL, nunca ambos.');
 if (production && !process.env.DATABASE_URL && !process.env.MONGODB_URI)
@@ -53,6 +57,8 @@ if (db.kind === 'mongo') {
 const { app } = await buildApp(db, {
   production,
   whatsapp,
+  instagram,
+  metaMarketing,
   push: pushConfig(process.env),
   appOrigin,
   rateLimitMax: testRateLimitMax,

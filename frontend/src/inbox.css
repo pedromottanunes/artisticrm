@@ -1,0 +1,220 @@
+.instagram-inbox {
+  display: grid;
+  grid-template-columns: minmax(250px, 330px) minmax(0, 1fr);
+  gap: 18px;
+  min-height: calc(100vh - 145px);
+}
+
+.instagram-inbox > .panel {
+  margin: 0;
+  min-width: 0;
+}
+
+.inbox-list {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.inbox-list > header,
+.thread-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px;
+  border-bottom: 1px solid var(--border, #e8e4dc);
+}
+
+.inbox-list header span,
+.thread-header span {
+  color: var(--muted, #7b756c);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+}
+
+.inbox-list h2,
+.thread-header h2 {
+  margin: 3px 0 0;
+  font-size: 1rem;
+}
+
+.inbox-conversations {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.inbox-conversations > button {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 15px 18px;
+  border: 0;
+  border-bottom: 1px solid var(--border, #ece8e0);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.inbox-conversations > button:hover,
+.inbox-conversations > button.active {
+  background: #faf6ed;
+}
+
+.instagram-avatar {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: linear-gradient(145deg, #7248d8, #db397e 55%, #ef9b3b);
+}
+
+.inbox-conversations button > span:nth-child(2) {
+  min-width: 0;
+}
+
+.inbox-conversations strong,
+.inbox-conversations small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inbox-conversations small,
+.inbox-conversations time {
+  color: var(--muted, #7b756c);
+  font-size: 0.71rem;
+}
+
+.inbox-empty-list,
+.inbox-loading {
+  display: grid;
+  min-height: 260px;
+  place-content: center;
+  gap: 8px;
+  padding: 28px;
+  color: var(--muted, #7b756c);
+  text-align: center;
+}
+
+.inbox-thread {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.thread-messages {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 360px;
+  max-height: calc(100vh - 325px);
+  padding: 22px;
+  overflow-y: auto;
+  background: #f8f7f3;
+}
+
+.thread-message {
+  align-self: flex-start;
+  max-width: min(72%, 620px);
+  padding: 11px 13px;
+  border: 1px solid #e7e2d9;
+  border-radius: 4px 15px 15px 15px;
+  background: #fff;
+  box-shadow: 0 3px 12px rgb(33 30 25 / 5%);
+}
+
+.thread-message.outbound {
+  align-self: flex-end;
+  border-color: #e8d5a9;
+  border-radius: 15px 4px 15px 15px;
+  background: #fff8e7;
+}
+
+.thread-message p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.thread-message small {
+  display: block;
+  margin-top: 7px;
+  color: var(--muted, #7b756c);
+  font-size: 0.68rem;
+  text-align: right;
+}
+
+.message-attachments {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.message-attachments a,
+.message-attachments span {
+  font-size: 0.75rem;
+}
+
+.thread-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  padding: 16px 18px;
+  border-top: 1px solid var(--border, #e8e4dc);
+}
+
+.thread-composer textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.thread-locked {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 17px 20px;
+  border-top: 1px solid var(--border, #e8e4dc);
+  color: var(--muted, #6f675d);
+  background: #fcfaf6;
+  font-size: 0.84rem;
+}
+
+@media (max-width: 760px) {
+  .instagram-inbox {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+
+  .inbox-list,
+  .inbox-thread {
+    min-height: 360px;
+  }
+
+  .thread-messages {
+    max-height: 52vh;
+  }
+
+  .thread-message {
+    max-width: 88%;
+  }
+
+  .thread-header {
+    align-items: flex-start;
+  }
+
+  .thread-composer {
+    grid-template-columns: 1fr;
+  }
+}

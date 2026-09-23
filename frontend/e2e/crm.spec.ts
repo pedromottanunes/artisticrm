@@ -563,6 +563,8 @@ test('relatórios administrativos mostram período, equipe, bolsão e resultados
   await expect(
     page.getByText('Tempo médio até o primeiro aceite no CRM', { exact: true }),
   ).toBeVisible();
+  await expect(page.getByText('Meta Ads + Instagram Direct', { exact: true })).toBeVisible();
+  await expect(page.getByText('Marketing API ainda não conectada', { exact: true })).toBeVisible();
 
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 950 });
@@ -1188,4 +1190,90 @@ test('gestão transfere lead e desativação redistribui os atendimentos', async
   await dialog.getByRole('button', { name: 'Confirmar alteração' }).click();
   await expect(dialog).not.toBeVisible();
   await expect(member.getByText(/Acesso desativado/)).toBeVisible();
+});
+
+test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira conversa', async ({
+  page,
+}) => {
+  let targetId = '';
+  let targetName = '';
+  await page.route('**/api/v1/workspace', async (route) => {
+    const response = await route.fetch();
+    if (response.status() !== 200) return route.fulfill({ response });
+    const body = await response.json();
+    const target = body.opportunities.find(
+      (lead: { state: string; owner_id: string }) =>
+        lead.state === 'CLAIMED' && lead.owner_id === body.user.id,
+    );
+    if (target) {
+      target.channel = 'instagram';
+      targetId = target.id;
+      targetName = target.name;
+    }
+    return route.fulfill({ response, json: body });
+  });
+  await page.route('**/api/v1/opportunities/*', async (route) => {
+    const response = await route.fetch();
+    if (response.status() !== 200) return route.fulfill({ response });
+    const body = await response.json();
+    if (body.id === targetId) body.channel = 'instagram';
+    return route.fulfill({ response, json: body });
+  });
+  await page.route('**/api/v1/conversations?*', (route) =>
+    route.fulfill({
+      json: {
+        configured: true,
+        conversations: [
+          {
+            id: 'conversation-wrong',
+            opportunity_id: 'opportunity-wrong',
+            contact_name: 'CONVERSA ERRADA',
+            instagram_username: 'wrong',
+            state: 'CLAIMED',
+            owner_id: 'other-user',
+            reserved_to: null,
+            last_message_at: '2026-09-23T15:01:00.000Z',
+            can_send: false,
+          },
+          {
+            id: 'conversation-target',
+            opportunity_id: targetId,
+            contact_name: 'CONVERSA DESTINO',
+            instagram_username: 'target',
+            state: 'CLAIMED',
+            owner_id: 'target-user',
+            reserved_to: null,
+            last_message_at: '2026-09-23T15:00:00.000Z',
+            can_send: true,
+          },
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/v1/conversations/*/messages', (route) => {
+    const id = route.request().url().includes('conversation-target')
+      ? 'conversation-target'
+      : 'conversation-wrong';
+    return route.fulfill({
+      json: {
+        conversation_id: id,
+        opportunity_id: id === 'conversation-target' ? targetId : 'opportunity-wrong',
+        can_send: id === 'conversation-target',
+        messages: [],
+      },
+    });
+  });
+  await page.route('**/api/v1/conversations/*/read', (route) =>
+    route.fulfill({ json: { read: true } }),
+  );
+
+  await login(page, 'vanessa');
+  expect(targetId).not.toBe('');
+  const lead = page.locator('.attendant-lead').filter({ hasText: targetName }).first();
+  await lead.getByRole('button', { name: `Abrir ficha de ${targetName}`, exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Abrir conversa', exact: true }).click();
+  await expect(page).toHaveURL(/#inbox$/);
+  await expect(page.locator('.thread-header')).toContainText('CONVERSA DESTINO');
+  await expect(page.locator('.thread-header')).not.toContainText('CONVERSA ERRADA');
 });

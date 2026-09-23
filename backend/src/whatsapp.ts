@@ -161,6 +161,12 @@ export class WhatsAppCentral {
                 ? 'Webhook WhatsApp assinado com referência de anúncio enviada pela Meta.'
                 : 'Entrada confirmada pelo WhatsApp central. Origem de marketing não atribuída.',
               meta_attribution: attribution,
+              identity: {
+                provider: 'whatsapp',
+                account_id: config.phoneNumberId,
+                external_user_id: msg.from,
+                display_name: name,
+              },
             },
           });
         }

@@ -25,18 +25,27 @@ const selectOpportunity = `SELECT o.*, c.name, c.phone, c.email, c.instagram, c.
 const closedStageSql = closedStages.map((stage) => `'${stage}'`).join(',');
 export interface LeadInput {
   name: string;
-  phone: string;
+  phone?: string;
   interest: string;
   unit: string;
   source: string;
   source_evidence?: string;
   meta_attribution?: MetaAttributionInput;
+  identity?: ChannelIdentityInput;
   is_demo?: boolean;
+}
+
+export interface ChannelIdentityInput {
+  provider: 'whatsapp' | 'instagram';
+  account_id: string;
+  external_user_id: string;
+  username?: string;
+  display_name?: string;
 }
 
 export interface MetaAttributionInput {
   provider: 'meta';
-  channel: 'whatsapp';
+  channel: 'whatsapp' | 'instagram';
   source_type: 'ad';
   source_id?: string;
   source_url?: string;
@@ -150,6 +159,7 @@ export class CRM {
           source: input.source,
           source_evidence: input.source_evidence,
           meta_attribution: input.meta_attribution,
+          identity: input.identity,
           is_demo: input.is_demo ?? false,
         }),
       )
@@ -183,18 +193,49 @@ export class CRM {
         return { id: duplicate.opportunity_id, duplicate: true };
       }
       const now = await this.now(tx);
-      let contact = (
-        await tx.query<{ id: string }>('SELECT id FROM contacts WHERE phone=$1', [input.phone])
-      ).rows[0];
+      let contact = input.identity
+        ? (
+            await tx.query<{ id: string }>(
+              `SELECT c.id FROM contact_identities i
+               JOIN contacts c ON c.id=i.contact_id
+               WHERE i.provider=$1 AND i.channel_account_id=$2 AND i.external_user_id=$3`,
+              [input.identity.provider, input.identity.account_id, input.identity.external_user_id],
+            )
+          ).rows[0]
+        : undefined;
+      if (!contact && input.phone)
+        contact = (
+          await tx.query<{ id: string }>('SELECT id FROM contacts WHERE phone=$1', [input.phone])
+        ).rows[0];
       if (!contact) {
         contact = { id: randomUUID() };
         await tx.query('INSERT INTO contacts(id,name,phone,is_demo) VALUES ($1,$2,$3,$4)', [
           contact.id,
           input.name,
-          input.phone,
+          input.phone ?? null,
           input.is_demo ?? false,
         ]);
       }
+      if (input.identity)
+        await tx.query(
+          `INSERT INTO contact_identities(
+            id,contact_id,provider,channel_account_id,external_user_id,username,display_name,last_seen_at
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+          ON CONFLICT (provider,channel_account_id,external_user_id) DO UPDATE SET
+            username=CASE WHEN EXCLUDED.username='' THEN contact_identities.username ELSE EXCLUDED.username END,
+            display_name=CASE WHEN EXCLUDED.display_name='' THEN contact_identities.display_name ELSE EXCLUDED.display_name END,
+            last_seen_at=EXCLUDED.last_seen_at`,
+          [
+            randomUUID(),
+            contact.id,
+            input.identity.provider,
+            input.identity.account_id,
+            input.identity.external_user_id,
+            input.identity.username ?? '',
+            input.identity.display_name ?? '',
+            now,
+          ],
+        );
       const existing = (
         await tx.query<{ id: string }>(
           `SELECT id FROM opportunities WHERE contact_id=$1 AND stage NOT IN (${closedStageSql}) FOR UPDATE`,
@@ -233,8 +274,8 @@ export class CRM {
         ? new Date(now.getTime() + settings.timeout_minutes * 60_000)
         : null;
       await tx.query(
-        `INSERT INTO opportunities(id,contact_id,interest,unit,source,source_evidence,state,reserved_to,created_at,expires_at,last_message_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$9)`,
+        `INSERT INTO opportunities(id,contact_id,interest,unit,source,source_evidence,channel,state,reserved_to,created_at,expires_at,last_message_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$10)`,
         [
           id,
           contact.id,
@@ -245,6 +286,7 @@ export class CRM {
             ? 'Cenário fictício de demonstração'
             : (input.source_evidence ??
               'Informada manualmente; sem vínculo verificado com anúncio'),
+          input.identity?.provider ?? 'manual',
           attendant ? 'RESERVED' : 'PENDING',
           attendant?.id ?? null,
           now,

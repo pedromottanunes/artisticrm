@@ -165,6 +165,7 @@ export class MongoOperations {
       source: input.source,
       source_evidence: input.source_evidence,
       meta_attribution: input.meta_attribution,
+      identity: input.identity,
       is_demo: input.is_demo ?? false,
     });
     return this.db.atomic(async (tx) => {
@@ -182,18 +183,51 @@ export class MongoOperations {
         return { id: prior.opportunity_id as string, duplicate: true };
       }
       const now = await this.now(tx);
-      let contact = await tx.one('contacts', { phone: input.phone });
+      const identity = input.identity
+        ? await tx.one('contact_identities', {
+            provider: input.identity.provider,
+            channel_account_id: input.identity.account_id,
+            external_user_id: input.identity.external_user_id,
+          })
+        : null;
+      let contact = identity ? await tx.one('contacts', { id: identity.contact_id }) : null;
+      if (!contact && input.phone) contact = await tx.one('contacts', { phone: input.phone });
       if (!contact) {
         contact = {
           id: randomUUID(),
           name: input.name,
-          phone: input.phone,
+          ...(input.phone ? { phone: input.phone } : {}),
           email: '',
           instagram: '',
           is_demo: input.is_demo ?? false,
         };
         await tx.insert('contacts', contact);
       }
+      if (input.identity)
+        await tx.collection('contact_identities').updateOne(
+          {
+            provider: input.identity.provider,
+            channel_account_id: input.identity.account_id,
+            external_user_id: input.identity.external_user_id,
+          },
+          {
+            $setOnInsert: {
+              id: randomUUID(),
+              contact_id: contact.id,
+              provider: input.identity.provider,
+              channel_account_id: input.identity.account_id,
+              external_user_id: input.identity.external_user_id,
+            },
+            $set: {
+              ...(input.identity.username ? { username: input.identity.username } : {}),
+              ...(input.identity.display_name
+                ? { display_name: input.identity.display_name }
+                : {}),
+              last_seen_at: now,
+            },
+          },
+          { upsert: true, session: tx.session },
+        );
       const existing = await tx.one<Opportunity>('opportunities', {
         contact_id: contact.id,
         open: true,
@@ -234,6 +268,7 @@ export class MongoOperations {
         interest: input.interest,
         unit: input.unit,
         source: input.source,
+        channel: input.identity?.provider ?? 'manual',
         source_evidence: input.is_demo
           ? 'Cenário fictício de demonstração'
           : (input.source_evidence ?? 'Informada manualmente; sem vínculo verificado com anúncio'),

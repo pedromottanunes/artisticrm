@@ -42,6 +42,7 @@ export interface Lead {
   interest: string;
   unit: string;
   source: string;
+  channel: 'manual' | 'whatsapp' | 'instagram';
   source_evidence: string;
   stage: string;
   procedure_date: string | null;
@@ -63,7 +64,7 @@ export interface Detail extends Lead {
 export interface MetaAttribution {
   id: string;
   provider: 'meta';
-  channel: 'whatsapp';
+  channel: 'whatsapp' | 'instagram';
   source_type: 'ad';
   source_id?: string | null;
   source_url?: string | null;
@@ -74,6 +75,32 @@ export interface MetaAttribution {
   video_url?: string | null;
   thumbnail_url?: string | null;
   received_at: string;
+}
+export interface ConversationSummary {
+  id: string;
+  opportunity_id: string;
+  contact_name: string;
+  instagram_username: string;
+  state: string;
+  owner_id: string | null;
+  reserved_to: string | null;
+  last_message_at: string;
+  can_send: boolean;
+}
+export interface ConversationMessage {
+  id: string;
+  external_message_id?: string | null;
+  direction: 'inbound' | 'outbound';
+  sender_user_id?: string | null;
+  type: string;
+  text: string;
+  attachments: { type: string; url?: string }[];
+  status: 'received' | 'queued' | 'sending' | 'sent' | 'delivered' | 'read' | 'failed' | 'unknown';
+  error_code?: string | null;
+  sent_at?: string | null;
+  delivered_at?: string | null;
+  read_at?: string | null;
+  created_at: string;
 }
 export interface Appointment {
   version: number;

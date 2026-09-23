@@ -4,7 +4,7 @@ Contrato-alvo; nem todas as rotas abaixo estão implementadas. Prefixo: `/api/v1
 
 ## Rotas da primeira entrega
 
-Implementadas em `src/app.ts`: `POST /auth/login`, `POST /auth/logout`, `GET /me`, `GET /workspace` (snapshot autorizado, até 500 oportunidades), `POST /opportunities`, `GET/PATCH /opportunities/:id`, `POST /opportunities/:id/claim`, `POST /opportunities/:id/whatsapp-link`, `POST /opportunities/:id/appointments`, `PATCH /distribution/settings` e `GET /integrations/status`. Health check público: `GET /api/health`.
+Implementadas em `src/app.ts`: `POST /auth/login`, `POST /auth/logout`, `GET /me`, `GET /workspace` (snapshot autorizado, até 500 oportunidades), `POST /opportunities`, `GET/PATCH /opportunities/:id`, `POST /opportunities/:id/claim`, `POST /opportunities/:id/whatsapp-link`, `POST /opportunities/:id/appointments`, `PATCH /distribution/settings`, caixa de entrada do Instagram e `GET /integrations/status`. Health check público: `GET /api/health`.
 
 Nesta etapa, cadastro manual cria contato e oportunidade numa operação só; edição da ficha atualiza ambos com controle de versão. Histórico vem na ficha. Leituras em tempo real ainda são substituídas por consulta a cada 5 segundos; não há SSE/push ativo. A API exige cookie de sessão e `X-Artisti-Client: web` nas alterações, valida a origem do navegador e exige `Idempotency-Key` no cadastro/aceite. Integrações retornam `not_connected`, sem credenciais.
 
@@ -60,6 +60,10 @@ reservas e atendimentos existentes não mudam. O peso não interfere na disputa 
 | `PATCH /opportunities/:id`               | Interesse, unidade, etapa e dados comerciais permitidos                      |
 | `POST /opportunities/:id/claim`          | Confirmar posse de reserva ou bolsão                                         |
 | `POST /opportunities/:id/whatsapp-link`  | Retornar destino somente ao usuário autorizado; não afirma envio de mensagem |
+| `GET /conversations`                     | Listar conversas Instagram conforme papel, responsável e visão autorizada    |
+| `GET /conversations/:id/messages`        | Histórico da conversa para gestão ou responsável                             |
+| `POST /conversations/:id/messages`       | Responder Direct como responsável, com `Idempotency-Key`                     |
+| `POST /conversations/:id/read`           | Registrar leitura da conversa pelo usuário                                   |
 | `POST /opportunities/:id/transfer`       | Transferência administrativa com justificativa                               |
 | `GET /opportunities/:id/history`         | Eventos e atividades autorizados                                             |
 | `POST /opportunities/:id/activities`     | Registrar tarefa/observação                                                  |
@@ -72,6 +76,8 @@ reservas e atendimentos existentes não mudam. O peso não interfere na disputa 
 | `PATCH /distribution/settings`           | Atualização administrativa versionada                                        |
 | `GET /reports/overview`                  | Indicadores operacionais e comerciais                                        |
 | `GET /reports/meta-ads`                  | Métricas Meta com filtros e atualização                                      |
+| `GET /meta-marketing/status`             | Estado da sincronização Meta, sem devolver credenciais                       |
+| `POST /meta-marketing/sync`              | Sincronizar de 1 a 31 dias; exclusivo da gestão                              |
 | `GET /reports/google-ads`                | Métricas Google com filtros e atualização                                    |
 | `GET /integrations/status`               | Saúde e última sincronização, sem segredos                                   |
 | `POST /notification-subscriptions`       | Registrar dispositivo do próprio usuário                                     |
@@ -80,6 +86,8 @@ reservas e atendimentos existentes não mudam. O peso não interfere na disputa 
 | `POST /tracking/clicks`                  | Registro público limitado/validado da interação do site                      |
 | `GET /webhooks/whatsapp`                 | Verificação do endpoint conforme provedor                                    |
 | `POST /webhooks/whatsapp`                | Receber eventos assinados e persistir entrada                                |
+| `GET /webhooks/instagram`                | Verificação pública do callback do Instagram                                 |
+| `POST /webhooks/instagram`               | Receber mensagens, referrals e postbacks assinados antes do processamento    |
 
 ## Aceite
 

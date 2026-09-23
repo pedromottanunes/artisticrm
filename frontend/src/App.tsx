@@ -30,6 +30,7 @@ import { LeadForm, LeadDetail } from './forms';
 import { ManagerCentral } from './manager-central';
 import { ManagerPipeline } from './manager-pipeline';
 import { ManagerReports } from './manager-reports';
+import { InstagramInbox } from './inbox';
 import { AttendantLeads } from './attendant-leads';
 import { Team, PasswordChange } from './operations';
 import { MobileNavigation } from './mobile-navigation';
@@ -41,6 +42,7 @@ type Page =
   | 'leads'
   | 'pipeline'
   | 'reports'
+  | 'inbox'
   | 'agenda'
   | 'distribution'
   | 'meta'
@@ -51,6 +53,7 @@ type Page =
   | 'pool';
 const navItems: { id: Page; label: string; icon: typeof Users; group: string }[] = [
   { id: 'central', label: 'Central de atendimentos', icon: LayoutDashboard, group: 'workspace' },
+  { id: 'inbox', label: 'Conversas', icon: MessageCircle, group: 'workspace' },
   { id: 'pipeline', label: 'Funil de vendas', icon: GitBranch, group: 'workspace' },
   { id: 'agenda', label: 'Agenda', icon: CalendarDays, group: 'workspace' },
   { id: 'reports', label: 'Relatórios', icon: BarChart3, group: 'workspace' },
@@ -59,6 +62,7 @@ const navItems: { id: Page; label: string; icon: typeof Users; group: string }[]
 ];
 const salesNav = [
   { id: 'mine' as Page, label: 'Meus leads', icon: Users },
+  { id: 'inbox' as Page, label: 'Conversas', icon: MessageCircle },
   { id: 'pool' as Page, label: 'Bolsão', icon: Inbox },
   { id: 'agenda' as Page, label: 'Agenda', icon: CalendarDays },
   { id: 'settings' as Page, label: 'Meu perfil', icon: Settings },
@@ -83,6 +87,7 @@ export function App() {
   const [leadRevision, setLeadRevision] = useState(0);
   const [notifications, setNotifications] = useState(false);
   const [whatsappUrl, setWhatsappUrl] = useState('');
+  const [inboxTargetId, setInboxTargetId] = useState('');
   const [busyId, setBusyId] = useState('');
   const [now, setNow] = useState(Date.now());
   const serverClock = useRef({ server: Date.now(), monotonic: performance.now() });
@@ -182,6 +187,7 @@ export function App() {
     window.location.hash = next;
     window.scrollTo(0, 0);
   };
+  const consumeInboxTarget = useCallback(() => setInboxTargetId(''), []);
   const openDetail = async (id: string, history = false) => {
     const sequence = ++detailSeq.current;
     const epoch = generation.current;
@@ -213,6 +219,16 @@ export function App() {
       setNotice((error as Error).message);
     }
   };
+  const openChannel = async (lead: Lead) => {
+    if (lead.channel === 'instagram') {
+      detailSeq.current++;
+      setDetail(null);
+      setInboxTargetId(lead.id);
+      navigate('inbox');
+      return;
+    }
+    await openWhatsApp(lead);
+  };
   const claim = async (lead: Lead) => {
     if (busyId || !connected) return;
     setBusyId(lead.id);
@@ -229,10 +245,14 @@ export function App() {
         body: JSON.stringify({ mode: command.mode, expected_version: command.version }),
       });
       claims.current.delete(lead.id);
-      setNotice('Lead assumido. A conversa acontece no seu WhatsApp.');
+      setNotice(
+        lead.channel === 'instagram'
+          ? 'Lead assumido. A conversa está disponível na caixa de entrada do CRM.'
+          : 'Lead assumido. A conversa acontece no seu WhatsApp.',
+      );
       setDetail(null);
       await refresh();
-      await openWhatsApp(lead);
+      await openChannel(lead);
     } catch (error) {
       if (error instanceof ApiError && error.status < 500) claims.current.delete(lead.id);
       setNotice((error as Error).message);
@@ -301,7 +321,7 @@ export function App() {
     );
   const isManager = data.user.role === 'manager';
   const activePage =
-    !isManager && !['mine', 'pool', 'agenda', 'settings'].includes(page)
+    !isManager && !['mine', 'pool', 'inbox', 'agenda', 'settings'].includes(page)
       ? 'mine'
       : isManager && ['mine', 'pool'].includes(page)
         ? 'central'
@@ -337,10 +357,10 @@ export function App() {
         <button
           className="button outline compact"
           disabled={!connected}
-          onClick={() => void openWhatsApp(lead)}
+          onClick={() => void openChannel(lead)}
         >
           <MessageCircle size={14} />
-          WhatsApp
+          {lead.channel === 'instagram' ? 'Conversa' : 'WhatsApp'}
         </button>
       );
     return (
@@ -549,6 +569,19 @@ export function App() {
             />
           )}
 
+          {activePage === 'inbox' && (
+            <InstagramInbox
+              user={data.user}
+              connected={connected}
+              targetOpportunityId={inboxTargetId}
+              onTargetConsumed={consumeInboxTarget}
+              onOpenLead={(id) => void openDetail(id)}
+              onNotice={setNotice}
+              onConnectionChange={setConnected}
+              onSessionExpired={refresh}
+            />
+          )}
+
           {activePage === 'agenda' && (
             <section className="panel">
               <div className="panel-heading">
@@ -741,7 +774,7 @@ export function App() {
             await refresh();
           }}
           onClaim={() => void claim(detail)}
-          onWhatsApp={() => void openWhatsApp(detail)}
+          onWhatsApp={() => void openChannel(detail)}
           busy={!!busyId}
         />
       )}

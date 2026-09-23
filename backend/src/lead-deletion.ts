@@ -59,9 +59,16 @@ export async function deleteLeadData(
       ],
     };
     const inbox = await tx.many('whatsapp_inbox', inboxFilter);
+    const instagramInbox = await tx.many('instagram_webhook_inbox', {
+      $or: [
+        { opportunity_id: id },
+        { event_id: { $in: events.map((e) => e.external_id) } },
+      ],
+    });
     for (const externalId of new Set([
       ...events.map((e) => e.external_id),
       ...inbox.map((e) => e.event_id),
+      ...instagramInbox.map((e) => e.event_id),
     ]))
       await tx
         .collection('deleted_inbound_events')
@@ -80,6 +87,17 @@ export async function deleteLeadData(
       'response.id': { $in: [id, ...appointments.map((a) => a.id)] },
     });
     await tx.remove('whatsapp_inbox', inboxFilter);
+    await tx.remove('instagram_webhook_inbox', {
+      $or: [
+        { opportunity_id: id },
+        { event_id: { $in: events.map((e) => e.external_id) } },
+      ],
+    });
+    const conversations = await tx.many('conversations', { opportunity_id: id });
+    const conversationIds = conversations.map((conversation) => conversation.id);
+    await tx.remove('conversation_reads', { conversation_id: { $in: conversationIds } });
+    await tx.remove('messages', { conversation_id: { $in: conversationIds } });
+    await tx.remove('conversations', { opportunity_id: id });
     for (const collection of [
       'appointments',
       'audit_events',
@@ -88,7 +106,10 @@ export async function deleteLeadData(
     ])
       await tx.remove(collection, { opportunity_id: id });
     await tx.remove('opportunities', { id });
-    if (!shared) await tx.remove('contacts', { id: row.contact_id });
+    if (!shared) {
+      await tx.remove('contact_identities', { contact_id: row.contact_id });
+      await tx.remove('contacts', { id: row.contact_id });
+    }
   } else {
     const contact = (
       await tx.query<{ phone: string }>('SELECT phone FROM contacts WHERE id=$1', [row.contact_id])
@@ -112,9 +133,17 @@ export async function deleteLeadData(
         [id, events.map((e) => e.external_id), !shared, contact?.phone ?? ''],
       )
     ).rows;
+    const instagramInbox = (
+      await tx.query<{ event_id: string }>(
+        `SELECT event_id FROM instagram_webhook_inbox
+         WHERE opportunity_id=$1 OR event_id=ANY($2::text[]) FOR UPDATE`,
+        [id, events.map((event) => event.external_id)],
+      )
+    ).rows;
     for (const externalId of new Set([
       ...events.map((e) => e.external_id),
       ...inbox.map((e) => e.event_id),
+      ...instagramInbox.map((e) => e.event_id),
     ]))
       await tx.query('INSERT INTO deleted_inbound_events(hash) VALUES($1) ON CONFLICT DO NOTHING', [
         eventHash(externalId),
@@ -133,6 +162,20 @@ export async function deleteLeadData(
     await tx.query('DELETE FROM whatsapp_inbox WHERE event_id=ANY($1::text[])', [
       inbox.map((e) => e.event_id),
     ]);
+    await tx.query('DELETE FROM instagram_webhook_inbox WHERE event_id=ANY($1::text[])', [
+      instagramInbox.map((event) => event.event_id),
+    ]);
+    await tx.query(
+      `DELETE FROM conversation_reads WHERE conversation_id IN
+       (SELECT id FROM conversations WHERE opportunity_id=$1)`,
+      [id],
+    );
+    await tx.query(
+      `DELETE FROM messages WHERE conversation_id IN
+       (SELECT id FROM conversations WHERE opportunity_id=$1)`,
+      [id],
+    );
+    await tx.query('DELETE FROM conversations WHERE opportunity_id=$1', [id]);
     await tx.query('DELETE FROM appointments WHERE opportunity_id=$1', [id]);
     await tx.query('DELETE FROM audit_events WHERE opportunity_id=$1', [id]);
     await tx.query('DELETE FROM lead_attributions WHERE opportunity_id=$1', [id]);

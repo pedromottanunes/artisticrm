@@ -24,6 +24,7 @@ export interface Opportunity {
   interest: string;
   unit: string;
   source: string;
+  channel: 'manual' | 'whatsapp' | 'instagram';
   source_evidence: string;
   stage: Stage;
   procedure_date: string | Date | null;

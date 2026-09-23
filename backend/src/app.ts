@@ -5,6 +5,12 @@ import fastifyStatic from '@fastify/static';
 import { randomBytes } from 'node:crypto';
 import { z, ZodError } from 'zod';
 import { registerWhatsApp, type WhatsAppConfig } from './whatsapp.js';
+import { registerInstagram, type InstagramConfig, type InstagramFetch } from './instagram.js';
+import {
+  registerMetaMarketing,
+  type MetaMarketingConfig,
+  type MetaMarketingFetch,
+} from './meta-marketing.js';
 import type { Database } from './db.js';
 import { Operations } from './operations.js';
 import { MongoOperations, publicUser } from './mongo-crm.js';
@@ -48,6 +54,10 @@ export async function buildApp(
     appOrigin?: string;
     staticRoot?: string;
     whatsapp?: WhatsAppConfig;
+    instagram?: InstagramConfig;
+    instagramFetch?: InstagramFetch;
+    metaMarketing?: MetaMarketingConfig;
+    metaMarketingFetch?: MetaMarketingFetch;
     push?: PushConfig;
     pushSender?: PushSender;
     rateLimitMax?: number;
@@ -63,6 +73,13 @@ export async function buildApp(
     db.kind === 'mongo'
       ? new MongoOperations(db, options.clock)
       : new Operations(db, options.clock);
+  const metaMarketingRuntime = registerMetaMarketing(
+    db,
+    options.metaMarketing,
+    options.reconcile !== false,
+    options.metaMarketingFetch,
+    options.clock,
+  );
   await app.register(cookie);
   await app.register(rateLimit, { max: options.rateLimitMax ?? 240, timeWindow: '1 minute' });
   app.decorateRequest('user');
@@ -339,6 +356,12 @@ export async function buildApp(
       );
     if (row.is_demo)
       throw new DomainError('DEMO_CONTACT', 'Contato fictício: nenhum WhatsApp será aberto.', 400);
+    if (!row.phone)
+      throw new DomainError(
+        'PHONE_UNAVAILABLE',
+        'Este contato chegou por outro canal e ainda não informou um telefone.',
+        400,
+      );
     return { url: `https://wa.me/${row.phone}` };
   });
   app.patch('/api/v1/opportunities/:id', async (request) => {
@@ -390,13 +413,17 @@ export async function buildApp(
   });
   app.get('/api/v1/integrations/status', async (request) => {
     requireManager(request.user);
-    return ['whatsapp', 'meta-ads', 'google-ads', 'web-push', 'gtm'].map((id) => ({
+    const metaMarketingStatus = await metaMarketingRuntime.marketing.status();
+    return ['whatsapp', 'instagram', 'meta-ads', 'google-ads', 'web-push', 'gtm'].map((id) => ({
       id,
       status:
-        (id === 'whatsapp' && options.whatsapp) || (id === 'web-push' && options.push)
+        (id === 'whatsapp' && options.whatsapp) ||
+        (id === 'instagram' && options.instagram) ||
+        (id === 'meta-ads' && metaMarketingStatus.configured) ||
+        (id === 'web-push' && options.push)
           ? 'configured'
           : 'not_connected',
-      last_sync: null,
+      last_sync: id === 'meta-ads' ? metaMarketingStatus.last_completed_at : null,
     }));
   });
   const commandKey = (headers: Record<string, unknown>) =>
@@ -534,6 +561,13 @@ export async function buildApp(
     );
   });
   const central = await registerWhatsApp(app, crm, options.whatsapp, options.reconcile !== false);
+  const instagram = await registerInstagram(
+    app,
+    crm,
+    options.instagram,
+    options.reconcile !== false,
+    options.instagramFetch,
+  );
   const push = registerPush(
     app,
     db,
@@ -545,6 +579,57 @@ export async function buildApp(
   app.get('/api/v1/whatsapp/status', async (request) => {
     requireManager(request.user);
     return central.status();
+  });
+  app.get('/api/v1/instagram/status', async (request) => {
+    requireManager(request.user);
+    return instagram.status();
+  });
+  app.get('/api/v1/meta-marketing/status', async (request) => {
+    requireManager(request.user);
+    return metaMarketingRuntime.marketing.status();
+  });
+  app.post('/api/v1/meta-marketing/sync', async (request) => {
+    requireManager(request.user);
+    const input = z
+      .object({ days: z.number().int().min(1).max(31).default(7) })
+      .strict()
+      .parse(request.body ?? {});
+    return metaMarketingRuntime.marketing.sync(input.days);
+  });
+  app.get('/api/v1/reports/meta-ads', async (request) => {
+    requireManager(request.user);
+    const query = z
+      .object({ from: z.string().date(), to: z.string().date() })
+      .strict()
+      .parse(request.query);
+    return metaMarketingRuntime.marketing.report(query.from, query.to);
+  });
+  app.get('/api/v1/conversations', async (request) => {
+    const query = z
+      .object({ view: z.enum(['mine', 'reserved', 'pool', 'all']).optional() })
+      .parse(request.query);
+    return instagram.list(
+      request.user,
+      query.view ?? (request.user.role === 'manager' ? 'all' : 'mine'),
+    );
+  });
+  app.get('/api/v1/conversations/:id/messages', async (request) =>
+    instagram.messages(request.user, idParams.parse(request.params).id),
+  );
+  app.post('/api/v1/conversations/:id/read', async (request) =>
+    instagram.markRead(request.user, idParams.parse(request.params).id),
+  );
+  app.post('/api/v1/conversations/:id/messages', async (request) => {
+    const input = z
+      .object({ text: z.string().trim().min(1).max(1000) })
+      .strict()
+      .parse(request.body);
+    return instagram.send(
+      request.user,
+      idParams.parse(request.params).id,
+      input.text,
+      commandKey(request.headers),
+    );
   });
   let reconciling = false;
   const timer =
@@ -563,6 +648,7 @@ export async function buildApp(
   timer?.unref();
   app.addHook('onClose', async () => {
     if (timer) clearInterval(timer);
+    await metaMarketingRuntime.close();
   });
   if (options.staticRoot) {
     await app.register(fastifyStatic, { root: options.staticRoot, index: ['index.html'] });
@@ -574,5 +660,5 @@ export async function buildApp(
       return reply.status(404).send({ message: 'Não encontrado.' });
     });
   }
-  return { app, crm, central, push };
+  return { app, crm, central, instagram, metaMarketing: metaMarketingRuntime.marketing, push };
 }

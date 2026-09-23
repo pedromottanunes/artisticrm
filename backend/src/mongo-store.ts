@@ -162,6 +162,33 @@ export async function initializeMongo(db: MongoStore) {
   await db
     .collection('opportunities')
     .updateMany({ procedure_date: { $exists: false } }, { $set: { procedure_date: null } });
+  const legacyInstagramIds = (
+    await db.many<{ opportunity_id: string }>('inbound_events', {
+      external_id: { $regex: '^instagram:' },
+    })
+  ).map((event) => event.opportunity_id);
+  const legacyWhatsappIds = (
+    await db.many<{ opportunity_id: string }>('inbound_events', {
+      external_id: { $regex: '^whatsapp:' },
+    })
+  ).map((event) => event.opportunity_id);
+  if (legacyInstagramIds.length)
+    await db
+      .collection('opportunities')
+      .updateMany(
+        { id: { $in: legacyInstagramIds }, channel: { $exists: false } },
+        { $set: { channel: 'instagram' } },
+      );
+  if (legacyWhatsappIds.length)
+    await db
+      .collection('opportunities')
+      .updateMany(
+        { id: { $in: legacyWhatsappIds }, channel: { $exists: false } },
+        { $set: { channel: 'whatsapp' } },
+      );
+  await db
+    .collection('opportunities')
+    .updateMany({ channel: { $exists: false } }, { $set: { channel: 'manual' } });
   await db
     .collection('users')
     .updateMany({ queue_weight: { $exists: false } }, { $set: { queue_weight: 1 } });
@@ -177,7 +204,17 @@ export async function initializeMongo(db: MongoStore) {
       { queue_position: 1 },
       { unique: true, partialFilterExpression: { queue_position: { $type: 'number' } } },
     );
-  await db.collection('contacts').createIndex({ phone: 1 }, { unique: true });
+  const currentPhoneIndex = (await db.collection('contacts').listIndexes().toArray()).find(
+    (index) => index.name === 'phone_1',
+  );
+  if (currentPhoneIndex && !currentPhoneIndex.partialFilterExpression)
+    await db.collection('contacts').dropIndex('phone_1');
+  await db
+    .collection('contacts')
+    .createIndex(
+      { phone: 1 },
+      { unique: true, partialFilterExpression: { phone: { $type: 'string' } } },
+    );
   await db
     .collection('opportunities')
     .createIndex({ contact_id: 1 }, { unique: true, partialFilterExpression: { open: true } });
@@ -205,6 +242,55 @@ export async function initializeMongo(db: MongoStore) {
   await db.collection('sessions').createIndex({ token_hash: 1 }, { unique: true });
   await db.collection('sessions').createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 });
   await db.collection('whatsapp_inbox').createIndex({ event_id: 1 }, { unique: true });
+  await db.collection('channel_accounts').createIndex({ id: 1 }, { unique: true });
+  await db
+    .collection('channel_accounts')
+    .createIndex({ provider: 1, external_account_id: 1 }, { unique: true });
+  await db.collection('contact_identities').createIndex({ id: 1 }, { unique: true });
+  await db
+    .collection('contact_identities')
+    .createIndex({ provider: 1, channel_account_id: 1, external_user_id: 1 }, { unique: true });
+  await db.collection('contact_identities').createIndex({ contact_id: 1 });
+  await db.collection('conversations').createIndex({ id: 1 }, { unique: true });
+  await db
+    .collection('conversations')
+    .createIndex({ channel_account_id: 1, opportunity_id: 1 }, { unique: true });
+  await db.collection('conversations').createIndex({ contact_id: 1, last_message_at: -1 });
+  await db.collection('messages').createIndex({ id: 1 }, { unique: true });
+  await db
+    .collection('messages')
+    .createIndex(
+      { external_message_id: 1 },
+      { unique: true, partialFilterExpression: { external_message_id: { $type: 'string' } } },
+    );
+  await db
+    .collection('messages')
+    .createIndex(
+      { client_request_id: 1 },
+      { unique: true, partialFilterExpression: { client_request_id: { $type: 'string' } } },
+    );
+  await db.collection('messages').createIndex({ conversation_id: 1, created_at: 1, id: 1 });
+  await db
+    .collection('conversation_reads')
+    .createIndex({ conversation_id: 1, user_id: 1 }, { unique: true });
+  await db.collection('instagram_webhook_inbox').createIndex({ event_id: 1 }, { unique: true });
+  await db
+    .collection('instagram_webhook_inbox')
+    .createIndex({ instagram_account_id: 1, processed_at: 1, available_at: 1 });
+  await db
+    .collection('instagram_pending_referrals')
+    .createIndex({ account_id: 1, sender_external_id: 1 }, { unique: true });
+  await db
+    .collection('instagram_pending_referrals')
+    .createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 });
+  await db.collection('meta_marketing_accounts').createIndex({ account_id: 1 }, { unique: true });
+  await db
+    .collection('meta_marketing_daily_insights')
+    .createIndex({ account_id: 1, date_start: 1, ad_id: 1 }, { unique: true });
+  await db
+    .collection('meta_marketing_daily_insights')
+    .createIndex({ campaign_id: 1, date_start: 1 });
+  await db.collection('meta_marketing_sync_state').createIndex({ account_id: 1 }, { unique: true });
   await db.collection('push_records').createIndex({ id: 1 }, { unique: true });
   await db.collection('push_records').createIndex({ kind: 1, available_at: 1 });
   await db.collection('push_records').createIndex({ expires_at: 1 });
