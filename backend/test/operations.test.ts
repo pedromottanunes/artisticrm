@@ -382,6 +382,8 @@ test('venda salva ficha estruturada sem depender da assinatura do contrato', asy
       name: 'Pedro Victor da Silva Prudencio',
       phone: '5548999990002',
       residence_city: 'Criciúma',
+      instagram: '@pedro.victor',
+      next_action: 'Aguardar confirmação do contrato.',
       consultant: 'Rafa',
       total_value_cents: 1_500_000,
       down_payment_cents: 150_000,
@@ -398,9 +400,10 @@ test('venda salva ficha estruturada sem depender da assinatura do contrato', asy
   assert.equal(sold.contract_status, 'awaiting');
   assert.equal(sold.sale_seller_name, manager.name);
   assert.equal(sold.total_value_cents, 1_500_000);
+  assert.equal(sold.next_action, 'Aguardar confirmação do contrato.');
   const contact = (
-    await db.query<{ name: string; phone: string; residence_city: string }>(
-      'SELECT name,phone,residence_city FROM contacts WHERE id=$1',
+    await db.query<{ name: string; phone: string; residence_city: string; instagram: string }>(
+      'SELECT name,phone,residence_city,instagram FROM contacts WHERE id=$1',
       [sold.contact_id],
     )
   ).rows[0];
@@ -408,6 +411,7 @@ test('venda salva ficha estruturada sem depender da assinatura do contrato', asy
     name: 'Pedro Victor da Silva Prudencio',
     phone: '5548999990002',
     residence_city: 'Criciúma',
+    instagram: '@pedro.victor',
   });
 });
 test('edições concorrentes de agenda confirmam uma única versão', async () => {

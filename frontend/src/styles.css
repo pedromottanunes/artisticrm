@@ -1491,7 +1491,8 @@ main {
   background: #c97f7912;
   color: #dfaaa4;
 }
-.sale-form-heading {
+.sale-form-heading,
+.commercial-section-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1499,22 +1500,46 @@ main {
   padding-bottom: 16px;
   border-bottom: 1px solid var(--line);
 }
-.sale-form-heading span {
+.sale-form-heading span,
+.commercial-section-heading span {
   color: var(--gold);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 1.5px;
 }
-.sale-form-heading h3 {
+.sale-form-heading h3,
+.commercial-section-heading h3 {
   margin-top: 6px;
   font-size: 20px;
 }
-.sale-form-heading > strong {
+.sale-form-heading > strong,
+.commercial-section-heading > strong {
   color: #99d1bd;
   font-size: 13px;
 }
+.commercial-section-heading:not(:first-child) {
+  margin-top: 8px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+.commercial-section-heading > p {
+  max-width: 390px;
+  color: #8fa2b4;
+  font-size: 13px;
+  line-height: 1.55;
+  text-align: right;
+}
 .sale-actions {
   justify-content: space-between;
+}
+.commercial-actions {
+  justify-content: space-between;
+}
+.commercial-action-group {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-left: auto;
 }
 .form-grid fieldset,
 fieldset.form-grid {
@@ -1595,12 +1620,31 @@ fieldset.form-grid {
   border-bottom: 1px solid var(--line);
 }
 .lead-detail-modal .detail-tabs {
-  justify-content: space-between;
-  gap: 12px;
-  overflow-x: visible;
+  justify-content: flex-start;
+  gap: 24px;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 .lead-detail-modal .detail-tabs > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
   font-size: 15px;
+}
+.tab-step {
+  display: inline-grid;
+  width: 21px;
+  height: 21px;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+}
+.detail-tabs > button.destructive {
+  margin-left: auto;
+  color: #cc8d8d;
 }
 .qualification-fields,
 .schedule-fields {

@@ -452,6 +452,8 @@ test('Mongo: falta mantém follow-up e venda estrutura os dados comerciais', asy
       name: 'Paciente Mongo',
       phone: '5548999990002',
       residence_city: 'Criciúma',
+      instagram: '@paciente.mongo',
+      next_action: 'Aguardar confirmação do contrato.',
       consultant: 'Rafa',
       total_value_cents: 1_500_000,
       down_payment_cents: 150_000,
@@ -467,9 +469,11 @@ test('Mongo: falta mantém follow-up e venda estrutura os dados comerciais', asy
   assert.equal(sold.stage, 'CLOSED_WITHOUT_DATE');
   assert.equal(sold.contract_status, 'awaiting');
   assert.equal(sold.sale_seller_name, manager.name);
+  assert.equal(sold.next_action, 'Aguardar confirmação do contrato.');
   const contact = (await db.one('contacts', { id: sold.contact_id }))!;
   assert.equal(contact.name, 'Paciente Mongo');
   assert.equal(contact.residence_city, 'Criciúma');
+  assert.equal(contact.instagram, '@paciente.mongo');
 });
 test('Mongo: retorno após perdido preserva histórico e exige revisão', async () => {
   const { id } = await lead();

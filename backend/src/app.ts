@@ -400,6 +400,8 @@ export async function buildApp(
         name: shortText.min(2),
         phone: optionalPhone.refine((value) => value !== null, 'Informe o telefone do paciente.'),
         residence_city: shortText.min(2),
+        instagram: shortText.optional(),
+        next_action: z.string().trim().max(1000).optional(),
         consultant: shortText.min(2),
         total_value_cents: z.number().int().min(0).max(2_000_000_000),
         down_payment_cents: z.number().int().min(0).max(2_000_000_000),

@@ -515,6 +515,18 @@ a:focus-visible {
     flex: 1 1 120px;
     white-space: normal;
   }
+  .modal-actions.commercial-actions .button {
+    flex: 0 0 auto;
+    min-height: 44px;
+  }
+  .modal-actions.commercial-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .commercial-actions .commercial-action-group {
+    display: contents;
+  }
   .detail-tabs {
     gap: 14px;
     padding: 0 16px;

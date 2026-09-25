@@ -352,6 +352,27 @@
   }
 }
 @media (max-width: 760px) {
+  .commercial-section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .commercial-section-heading > p {
+    max-width: none;
+    text-align: left;
+  }
+  .commercial-actions,
+  .commercial-action-group {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
+  }
+  .commercial-action-group {
+    margin-left: 0;
+  }
+  .commercial-actions .button {
+    flex: 0 0 auto;
+    min-height: 44px;
+  }
   .sidebar {
     width: 250px;
     transform: translateX(-100%);

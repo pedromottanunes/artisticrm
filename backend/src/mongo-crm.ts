@@ -1224,6 +1224,7 @@ export class MongoOperations {
               name: input.name,
               phone: input.phone,
               residence_city: input.residence_city,
+              ...(input.instagram === undefined ? {} : { instagram: input.instagram }),
             },
           },
         );
@@ -1249,6 +1250,7 @@ export class MongoOperations {
               hair_grade_classification: input.hair_grade_classification,
               has_pack: input.has_pack,
               contract_status: input.contract_status,
+              ...(input.next_action === undefined ? {} : { next_action: input.next_action }),
             },
             $inc: { version: 1 },
           },

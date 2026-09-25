@@ -447,12 +447,11 @@ export class Operations extends CRM {
             'Este telefone já pertence a outro contato. Abra a ficha correspondente.',
             409,
           );
-        await tx.query('UPDATE contacts SET name=$2,phone=$3,residence_city=$4 WHERE id=$1', [
-          row.contact_id,
-          input.name,
-          input.phone,
-          input.residence_city,
-        ]);
+        await tx.query(
+          `UPDATE contacts SET name=$2,phone=$3,residence_city=$4,
+             instagram=COALESCE($5,instagram) WHERE id=$1`,
+          [row.contact_id, input.name, input.phone, input.residence_city, input.instagram ?? null],
+        );
         const now = await this.now(tx);
         const stage = input.procedure_date ? 'CLOSED_WITH_DATE' : 'CLOSED_WITHOUT_DATE';
         await tx.query(
@@ -461,7 +460,8 @@ export class Operations extends CRM {
              sale_completed_at=COALESCE(sale_completed_at,$5),
              sale_seller_name=CASE WHEN sale_completed_at IS NULL THEN $6 ELSE sale_seller_name END,
              consultant=$7,total_value_cents=$8,down_payment_cents=$9,
-             hair_grade_classification=$10,has_pack=$11,contract_status=$12,version=version+1
+             hair_grade_classification=$10,has_pack=$11,contract_status=$12,
+             next_action=COALESCE($13,next_action),version=version+1
            WHERE id=$1`,
           [
             id,
@@ -476,6 +476,7 @@ export class Operations extends CRM {
             input.hair_grade_classification,
             input.has_pack,
             input.contract_status,
+            input.next_action ?? null,
           ],
         );
         await this.audit(

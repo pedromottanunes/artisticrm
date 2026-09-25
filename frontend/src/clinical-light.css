@@ -522,15 +522,18 @@ label small,
 }
 
 .sale-form-heading,
+.commercial-section-heading,
 .attendance-confirmation {
   border-color: var(--light-border);
 }
 
-.sale-form-heading h3 {
+.sale-form-heading h3,
+.commercial-section-heading h3 {
   color: var(--light-ink);
 }
 
 .sale-form-heading > strong,
+.commercial-section-heading > strong,
 .attendance-yes {
   color: #166f66;
 }

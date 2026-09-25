@@ -764,10 +764,10 @@ test('gestão navega, filtra e cadastra lead persistente', async ({ page }) => {
   await page.getByRole('button', { name: 'Abrir ficha de Teste Navegador' }).click();
   await expect(dialog.getByLabel('Qualificação')).toHaveValue('NEW_LEAD');
   await expect(dialog.getByText('Ainda não definido', { exact: true })).toHaveCount(0);
+  await dialog.screenshot({ path: 'test-results/cadastro-comercial-desktop.png' });
   await dialog.getByLabel('Qualificação').selectOption('CONSULTATION_NOT_SCHEDULED');
-  await dialog.getByRole('button', { name: 'Salvar alterações' }).click();
+  await dialog.getByRole('button', { name: 'Salvar cadastro' }).click();
   await expect(dialog.locator('.consultation-badge')).toHaveText('Consulta não agendada');
-  await dialog.getByRole('button', { name: 'Venda', exact: true }).click();
   await expect(dialog.getByRole('button', { name: 'Copiar para WhatsApp' })).toBeDisabled();
   await dialog.getByLabel('Cidade de residência').fill('Criciúma');
   await dialog.getByLabel('Consultor').fill('Rafa');
@@ -833,8 +833,13 @@ test('atendimento móvel acessa bolsão e confirma aceite sem abrir contato fict
   await expect(firstLead.getByRole('button', { name: 'Ver ficha', exact: true })).toHaveCount(0);
   await expect(firstLead.locator('.source, .lead-card-info, .next-action, time')).toHaveCount(0);
   await firstLead.getByRole('button', { name: `Abrir ficha de ${name}`, exact: true }).click();
-  await expect(page.getByRole('dialog')).toBeVisible();
-  await page.getByRole('dialog').getByRole('button', { name: 'Fechar janela' }).click();
+  const mobileDialog = page.getByRole('dialog');
+  await expect(mobileDialog).toBeVisible();
+  expect(
+    await mobileDialog.evaluate((element) => element.scrollWidth <= element.clientWidth),
+  ).toBe(true);
+  await mobileDialog.screenshot({ path: 'test-results/cadastro-comercial-mobile.png' });
+  await mobileDialog.getByRole('button', { name: 'Fechar janela' }).click();
   const count = await page.locator('.attendant-lead').count();
   await page.getByRole('button', { name: 'Cartões', exact: true }).click();
   await expect(page.locator('.attendant-lead')).toHaveCount(count);
@@ -877,14 +882,14 @@ test('ficha edita cadastro, agenda consulta e preserva histórico', async ({ pag
   await refresh.click({ force: true });
   await expect(page.getByRole('alert')).toContainText('Falha temporária', { timeout: 12_000 });
   await expect(dialog.getByLabel('Próxima ação')).toBeEnabled();
-  await expect(dialog.getByRole('button', { name: 'Salvar alterações' })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Salvar cadastro' })).toBeDisabled();
   boardUnavailable = false;
   await refresh.click({ force: true });
   await expect(page.getByRole('alert')).toHaveCount(0, { timeout: 12_000 });
-  await expect(dialog.getByRole('button', { name: 'Salvar alterações' })).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: 'Salvar cadastro' })).toBeEnabled();
   await dialog.getByLabel('Próxima ação').fill('Retorno de teste agendado');
-  await dialog.getByRole('button', { name: 'Salvar alterações' }).click();
-  await expect(dialog.getByRole('button', { name: 'Salvar alterações' })).toBeEnabled();
+  await dialog.getByRole('button', { name: 'Salvar cadastro' }).click();
+  await expect(dialog.getByRole('button', { name: 'Salvar cadastro' })).toBeEnabled();
   await dialog.getByRole('button', { name: 'Agendar consulta', exact: true }).click();
   const scheduleBox = (await dialog.boundingBox())!;
   expect(Math.abs(scheduleBox.width - initialBox.width)).toBeLessThanOrEqual(1);

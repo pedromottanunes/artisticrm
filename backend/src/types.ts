@@ -65,6 +65,8 @@ export interface SaleInput {
   name: string;
   phone: string;
   residence_city: string;
+  instagram?: string;
+  next_action?: string;
   consultant: string;
   total_value_cents: number;
   down_payment_cents: number;
