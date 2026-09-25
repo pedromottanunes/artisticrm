@@ -485,7 +485,7 @@ a:focus-visible {
     border-radius: 16px;
   }
   .modal.lead-detail-modal {
-    width: min(100%, 860px);
+    width: 100%;
   }
   .lead-detail-modal .detail-tabs {
     justify-content: flex-start;

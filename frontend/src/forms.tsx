@@ -416,202 +416,222 @@ export function LeadDetail({
       )}
       {tab === 'cadastro' && (
         <form ref={formRef} onSubmit={save} key={detail.id + ':' + detail.version}>
-          <fieldset className="modal-body form-grid" disabled={!detail.can_edit || saving}>
-            <div className="commercial-section-heading full">
-              <div>
-                <span>DADOS DO LEAD</span>
-                <h3>Identificação e origem</h3>
+          <fieldset className="modal-body commercial-form" disabled={!detail.can_edit || saving}>
+            <section className="commercial-panel commercial-identification">
+              <div className="commercial-section-heading">
+                <div>
+                  <span>DADOS DO LEAD</span>
+                  <h3>Identificação e origem</h3>
+                </div>
+                <p>
+                  Canal e origem são preenchidos automaticamente.
+                </p>
               </div>
-              <p>
-                Canal e origem são preenchidos automaticamente sempre que estiverem disponíveis.
-              </p>
-            </div>
-            <label>
-              Nome completo do paciente
-              <input
-                name="name"
-                defaultValue={detail.name}
-                required
-                minLength={2}
-                maxLength={160}
-              />
-            </label>
-            <label>
-              Canal de entrada
-              <input value={channelLabel(detail.channel)} readOnly />
-            </label>
-            <label>
-              Telefone com país e DDD
-              <input
-                name="phone"
-                type="tel"
-                defaultValue={detail.phone ?? ''}
-                placeholder="+55 (48) 99999-9999"
-                maxLength={24}
-                required
-              />
-              <small>Será obrigatório para registrar uma venda.</small>
-            </label>
-            <label>
-              Instagram
-              <input
-                name="instagram"
-                defaultValue={detail.instagram ? `@${detail.instagram.replace(/^@+/, '')}` : ''}
-                maxLength={160}
-                placeholder="@perfil (opcional)"
-              />
-              {detail.channel === 'instagram' && detail.instagram && (
-                <small>Perfil identificado automaticamente pelo Instagram Direct.</small>
-              )}
-            </label>
-            <label>
-              Cidade de residência
-              <input
-                name="residence_city"
-                defaultValue={detail.residence_city ?? ''}
-                minLength={2}
-                maxLength={160}
-                placeholder="Ex.: Criciúma"
-                required
-              />
-            </label>
-            <label>
-              Origem
-              <input value={saleOrigin(detail)} readOnly />
-            </label>
-            <label>
-              Cidade onde opera / unidade
-              <input
-                name="unit"
-                defaultValue={detail.unit}
-                minLength={2}
-                maxLength={160}
-                required
-              />
-            </label>
-            <input type="hidden" name="interest" value={detail.interest} />
-            <div className="commercial-section-heading full">
-              <div>
-                <span>ATENDIMENTO</span>
-                <h3>Qualificação e próximo passo</h3>
+              <div className="commercial-fields">
+                <label>
+                  Nome completo do paciente
+                  <input
+                    name="name"
+                    defaultValue={detail.name}
+                    required
+                    minLength={2}
+                    maxLength={160}
+                  />
+                </label>
+                <label>
+                  Canal de entrada
+                  <input value={channelLabel(detail.channel)} readOnly />
+                </label>
+                <label>
+                  Telefone com país e DDD
+                  <input
+                    name="phone"
+                    type="tel"
+                    defaultValue={detail.phone ?? ''}
+                    placeholder="+55 (48) 99999-9999"
+                    maxLength={24}
+                    required
+                  />
+                  <small>Obrigatório para registrar uma venda.</small>
+                </label>
+                <label>
+                  Instagram
+                  <input
+                    name="instagram"
+                    defaultValue={detail.instagram ? `@${detail.instagram.replace(/^@+/, '')}` : ''}
+                    maxLength={160}
+                    placeholder="@perfil (opcional)"
+                  />
+                  {detail.channel === 'instagram' && detail.instagram && (
+                    <small>Identificado pelo Instagram Direct.</small>
+                  )}
+                </label>
+                <label>
+                  Cidade de residência
+                  <input
+                    name="residence_city"
+                    defaultValue={detail.residence_city ?? ''}
+                    minLength={2}
+                    maxLength={160}
+                    placeholder="Ex.: Criciúma"
+                    required
+                  />
+                </label>
+                <label>
+                  Origem
+                  <input value={saleOrigin(detail)} readOnly />
+                </label>
+                <label>
+                  Cidade onde opera / unidade
+                  <input
+                    name="unit"
+                    defaultValue={detail.unit}
+                    minLength={2}
+                    maxLength={160}
+                    required
+                  />
+                </label>
+                <input type="hidden" name="interest" value={detail.interest} />
               </div>
-              <p>Classifique o lead e registre a ação que deve acontecer em seguida.</p>
-            </div>
-            <div className="qualification-fields full">
-              <label>
-                Qualificação
-                <select
-                  name="stage"
-                  value={selectedStage}
-                  onChange={(event) => setSelectedStage(event.target.value)}
-                >
-                  {Object.entries(stages).map(([key, label]) => (
-                    <option
-                      disabled={
-                        (detail.stage === 'DECLINED' && key !== 'DECLINED') ||
-                        (isClosedStage(detail.stage) && !isClosedStage(key))
-                      }
-                      key={key}
-                      value={key}
-                    >
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <label className="full">
-              Próxima ação
-              <textarea
-                name="next_action"
-                defaultValue={detail.next_action}
-                maxLength={1000}
-                placeholder="Qual é o próximo passo deste atendimento?"
-                rows={3}
-              />
-            </label>
-            <div className="commercial-section-heading full">
-              <div>
-                <span>FECHAMENTO</span>
-                <h3>{detail.sale_completed_at ? 'Dados da venda' : 'Registrar venda concluída'}</h3>
+            </section>
+
+            <section className="commercial-panel commercial-followup">
+              <div className="commercial-section-heading">
+                <div>
+                  <span>ATENDIMENTO</span>
+                  <h3>Qualificação e próximo passo</h3>
+                </div>
+                <p>Classifique o lead e registre a ação que deve acontecer em seguida.</p>
               </div>
-              {detail.sale_completed_at ? (
-                <strong>Venda registrada</strong>
-              ) : (
-                <p>Preencha esta etapa somente quando a venda for concluída.</p>
-              )}
-            </div>
-            <label>
-              Quem fez a venda
-              <input
-                value={detail.sale_seller_name || 'Será preenchido automaticamente ao registrar'}
-                readOnly
-              />
-            </label>
-            <label>
-              Consultor
-              <input
-                name="consultant"
-                defaultValue={detail.consultant}
-                minLength={2}
-                maxLength={160}
-                required
-              />
-            </label>
-            <label>
-              Valor total
-              <input
-                name="total_value"
-                inputMode="decimal"
-                defaultValue={currencyInput(detail.total_value_cents)}
-                placeholder="15.000,00"
-                required
-              />
-            </label>
-            <label>
-              Valor da entrada
-              <input
-                name="down_payment"
-                inputMode="decimal"
-                defaultValue={currencyInput(detail.down_payment_cents)}
-                placeholder="1.500,00"
-                required
-              />
-            </label>
-            <label className="full">
-              Grau e classificação A
-              <input
-                name="hair_grade_classification"
-                defaultValue={detail.hair_grade_classification}
-                maxLength={160}
-                placeholder="Ex.: grau 3 A1"
-                required
-              />
-            </label>
-            <label>
-              Teve pack?
-              <select name="has_pack" defaultValue={detail.has_pack === true ? 'true' : 'false'}>
-                <option value="false">Não</option>
-                <option value="true">Sim</option>
-              </select>
-            </label>
-            <label>
-              Data da cirurgia
-              <input
-                name="procedure_date"
-                type="date"
-                defaultValue={detail.procedure_date?.slice(0, 10) ?? ''}
-                required={selectedStage === 'CLOSED_WITH_DATE'}
-              />
-            </label>
-            <label>
-              Assinou contrato?
-              <select name="contract_status" defaultValue={detail.contract_status ?? 'awaiting'}>
-                <option value="awaiting">Aguardando</option>
-                <option value="signed">Sim</option>
-                <option value="not_signed">Não</option>
-              </select>
-            </label>
+              <div className="commercial-fields">
+                <label>
+                  Qualificação
+                  <select
+                    name="stage"
+                    value={selectedStage}
+                    onChange={(event) => setSelectedStage(event.target.value)}
+                  >
+                    {Object.entries(stages).map(([key, label]) => (
+                      <option
+                        disabled={
+                          (detail.stage === 'DECLINED' && key !== 'DECLINED') ||
+                          (isClosedStage(detail.stage) && !isClosedStage(key))
+                        }
+                        key={key}
+                        value={key}
+                      >
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Próxima ação
+                  <textarea
+                    name="next_action"
+                    defaultValue={detail.next_action}
+                    maxLength={1000}
+                    placeholder="Qual é o próximo passo deste atendimento?"
+                    rows={4}
+                  />
+                </label>
+              </div>
+            </section>
+
+            <section className="commercial-panel commercial-closing">
+              <div className="commercial-section-heading">
+                <div>
+                  <span>FECHAMENTO</span>
+                  <h3>
+                    {detail.sale_completed_at ? 'Dados da venda' : 'Registrar venda concluída'}
+                  </h3>
+                </div>
+                {detail.sale_completed_at ? (
+                  <strong>Venda registrada</strong>
+                ) : (
+                  <p>Preencha somente quando a venda for concluída.</p>
+                )}
+              </div>
+              <div className="commercial-fields">
+                <label>
+                  Quem fez a venda
+                  <input
+                    value={detail.sale_seller_name || 'Preenchido automaticamente ao registrar'}
+                    readOnly
+                  />
+                </label>
+                <label>
+                  Consultor
+                  <input
+                    name="consultant"
+                    defaultValue={detail.consultant}
+                    minLength={2}
+                    maxLength={160}
+                    required
+                  />
+                </label>
+                <label>
+                  Valor total
+                  <input
+                    name="total_value"
+                    inputMode="decimal"
+                    defaultValue={currencyInput(detail.total_value_cents)}
+                    placeholder="15.000,00"
+                    required
+                  />
+                </label>
+                <label>
+                  Valor da entrada
+                  <input
+                    name="down_payment"
+                    inputMode="decimal"
+                    defaultValue={currencyInput(detail.down_payment_cents)}
+                    placeholder="1.500,00"
+                    required
+                  />
+                </label>
+                <label>
+                  Grau e classificação A
+                  <input
+                    name="hair_grade_classification"
+                    defaultValue={detail.hair_grade_classification}
+                    maxLength={160}
+                    placeholder="Ex.: grau 3 A1"
+                    required
+                  />
+                </label>
+                <label>
+                  Teve pack?
+                  <select
+                    name="has_pack"
+                    defaultValue={detail.has_pack === true ? 'true' : 'false'}
+                  >
+                    <option value="false">Não</option>
+                    <option value="true">Sim</option>
+                  </select>
+                </label>
+                <label>
+                  Data da cirurgia
+                  <input
+                    name="procedure_date"
+                    type="date"
+                    defaultValue={detail.procedure_date?.slice(0, 10) ?? ''}
+                    required={selectedStage === 'CLOSED_WITH_DATE'}
+                  />
+                </label>
+                <label>
+                  Assinou contrato?
+                  <select
+                    name="contract_status"
+                    defaultValue={detail.contract_status ?? 'awaiting'}
+                  >
+                    <option value="awaiting">Aguardando</option>
+                    <option value="signed">Sim</option>
+                    <option value="not_signed">Não</option>
+                  </select>
+                </label>
+              </div>
+            </section>
           </fieldset>
           <div className="detail-evidence">
             <LinkEvidence />

@@ -1369,9 +1369,9 @@ main {
   width: 710px;
 }
 .modal.lead-detail-modal {
-  width: min(1040px, calc(100vw - 48px));
-  height: min(780px, calc(100dvh - 40px), var(--dialog-max-height, 94dvh));
-  max-height: min(94dvh, var(--dialog-max-height, 94dvh));
+  width: min(1760px, calc(100vw - 32px));
+  height: min(980px, calc(100dvh - 24px), var(--dialog-max-height, 97dvh));
+  max-height: min(97dvh, var(--dialog-max-height, 97dvh));
 }
 .modal.lead-detail-modal[open] {
   display: flex;
@@ -1419,9 +1419,9 @@ main {
 .lead-profile-avatar {
   position: relative;
   display: grid;
-  flex: 0 0 58px;
-  width: 58px;
-  height: 58px;
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
   place-items: center;
   overflow: hidden;
   border-radius: 50%;
@@ -1449,6 +1449,22 @@ main {
   margin-top: 8px;
   line-height: 1.8;
 }
+.lead-detail-modal .modal-heading {
+  padding: 14px 22px;
+}
+.lead-detail-modal .modal-heading-content {
+  gap: 13px;
+}
+.lead-detail-modal .modal-heading h2 {
+  margin-top: 0;
+  font-size: 23px;
+  line-height: 1.3;
+}
+.lead-detail-modal .modal-heading p {
+  margin-top: 3px;
+  font-size: 13px;
+  line-height: 1.45;
+}
 .modal-body {
   padding: 24px 28px;
 }
@@ -1460,6 +1476,54 @@ main {
 }
 .form-grid .full {
   grid-column: 1/-1;
+}
+.commercial-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(220px, 0.72fr) minmax(0, 1.2fr);
+  align-content: start;
+  gap: 12px;
+  padding: 12px 22px;
+  border: 0;
+  margin: 0;
+}
+.commercial-panel {
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #ffffff03;
+}
+.commercial-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 8px 12px;
+  margin-top: 10px;
+}
+.commercial-followup .commercial-fields {
+  grid-template-columns: 1fr;
+}
+.commercial-followup textarea {
+  height: 108px;
+  resize: vertical;
+}
+.commercial-form label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 14px;
+}
+.commercial-form input,
+.commercial-form select,
+.commercial-form textarea {
+  min-height: 38px;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+.commercial-form label small {
+  font-size: 11px;
+  line-height: 1.35;
 }
 .consultation-badge {
   display: inline-flex;
@@ -1497,36 +1561,31 @@ main {
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  padding-bottom: 16px;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--line);
 }
 .sale-form-heading span,
 .commercial-section-heading span {
   color: var(--gold);
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 700;
   letter-spacing: 1.5px;
 }
 .sale-form-heading h3,
 .commercial-section-heading h3 {
-  margin-top: 6px;
-  font-size: 20px;
+  margin-top: 3px;
+  font-size: 16px;
 }
 .sale-form-heading > strong,
 .commercial-section-heading > strong {
   color: #99d1bd;
   font-size: 13px;
 }
-.commercial-section-heading:not(:first-child) {
-  margin-top: 8px;
-  padding-top: 24px;
-  border-top: 1px solid var(--line);
-}
 .commercial-section-heading > p {
-  max-width: 390px;
+  max-width: 210px;
   color: #8fa2b4;
-  font-size: 13px;
-  line-height: 1.55;
+  font-size: 11px;
+  line-height: 1.4;
   text-align: right;
 }
 .sale-actions {
@@ -1534,6 +1593,7 @@ main {
 }
 .commercial-actions {
   justify-content: space-between;
+  padding: 11px 22px;
 }
 .commercial-action-group {
   display: flex;
@@ -1607,6 +1667,10 @@ fieldset.form-grid {
   gap: 17px;
   padding: 21px 28px;
 }
+.lead-detail-modal .detail-summary {
+  gap: 12px;
+  padding: 10px 22px;
+}
 .demo-tag {
   font-size: 12px;
   letter-spacing: 1px;
@@ -1621,7 +1685,8 @@ fieldset.form-grid {
 }
 .lead-detail-modal .detail-tabs {
   justify-content: flex-start;
-  gap: 24px;
+  gap: 22px;
+  padding: 0 22px;
   overflow-x: auto;
   scrollbar-width: thin;
 }
@@ -1630,12 +1695,13 @@ fieldset.form-grid {
   align-items: center;
   gap: 7px;
   flex: 0 0 auto;
-  font-size: 15px;
+  padding: 9px 0 10px;
+  font-size: 14px;
 }
 .tab-step {
   display: inline-grid;
-  width: 21px;
-  height: 21px;
+  width: 19px;
+  height: 19px;
   place-items: center;
   border: 1px solid currentColor;
   border-radius: 50%;

@@ -835,9 +835,9 @@ test('atendimento móvel acessa bolsão e confirma aceite sem abrir contato fict
   await firstLead.getByRole('button', { name: `Abrir ficha de ${name}`, exact: true }).click();
   const mobileDialog = page.getByRole('dialog');
   await expect(mobileDialog).toBeVisible();
-  expect(
-    await mobileDialog.evaluate((element) => element.scrollWidth <= element.clientWidth),
-  ).toBe(true);
+  expect(await mobileDialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+    true,
+  );
   await mobileDialog.screenshot({ path: 'test-results/cadastro-comercial-mobile.png' });
   await mobileDialog.getByRole('button', { name: 'Fechar janela' }).click();
   const count = await page.locator('.attendant-lead').count();
@@ -855,6 +855,7 @@ test('atendimento móvel acessa bolsão e confirma aceite sem abrir contato fict
   await page.screenshot({ path: 'test-results/atendente-lista-compacta.png', fullPage: true });
 });
 test('ficha edita cadastro, agenda consulta e preserva histórico', async ({ page }) => {
+  await page.setViewportSize({ width: 1874, height: 920 });
   await login(page);
   await page
     .getByRole('navigation', { name: 'Menu principal' })
@@ -864,7 +865,8 @@ test('ficha edita cadastro, agenda consulta e preserva histórico', async ({ pag
   await page.getByRole('button', { name: 'Abrir ficha de Gustavo Pereira' }).click();
   const dialog = page.getByRole('dialog');
   const initialBox = (await dialog.boundingBox())!;
-  expect(initialBox.width).toBeGreaterThan(900);
+  expect(initialBox.width).toBeGreaterThan(1700);
+  expect(initialBox.height).toBeGreaterThan(850);
   expect(
     await dialog
       .locator('.detail-tabs')
