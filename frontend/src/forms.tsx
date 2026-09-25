@@ -158,6 +158,7 @@ export function LeadDetail({
   const [selectedStage, setSelectedStage] = useState(detail.stage);
   const [confirmation, setConfirmation] = useState('');
   const [copied, setCopied] = useState(false);
+  const instagramUsername = detail.instagram?.replace(/^@+/, '').trim();
   const deleteCommand = useRef<{ key: string; version: number } | null>(null);
   const saleCommand = useRef<{ key: string; payload: string } | null>(null);
   const deleting = useRef(false);
@@ -200,7 +201,7 @@ export function LeadDetail({
           name: fields.name,
           phone: fields.phone,
           residence_city: fields.residence_city,
-          instagram: fields.instagram,
+          instagram: detail.instagram ?? '',
           interest: fields.interest,
           unit: fields.unit,
           stage: fields.stage,
@@ -229,7 +230,7 @@ export function LeadDetail({
         name: form.get('name'),
         phone: form.get('phone'),
         residence_city: form.get('residence_city'),
-        instagram: form.get('instagram'),
+        instagram: detail.instagram ?? '',
         next_action: form.get('next_action'),
         consultant: form.get('consultant'),
         total_value_cents: currencyToCents(String(form.get('total_value'))),
@@ -294,7 +295,19 @@ export function LeadDetail({
   return (
     <Modal
       title={detail.name}
-      description={`Canal de entrada: ${channelLabel(detail.channel)}`}
+      titleAccessory={
+        instagramUsername ? (
+          <a
+            className="lead-instagram-link"
+            href={`https://www.instagram.com/${encodeURIComponent(instagramUsername)}/`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            @{instagramUsername}
+            <ArrowRight size={13} />
+          </a>
+        ) : undefined
+      }
       leading={
         detail.channel === 'instagram' ? (
           <span className="lead-profile-avatar" aria-hidden="true">
@@ -417,19 +430,16 @@ export function LeadDetail({
       {tab === 'cadastro' && (
         <form ref={formRef} onSubmit={save} key={detail.id + ':' + detail.version}>
           <fieldset className="modal-body commercial-form" disabled={!detail.can_edit || saving}>
-            <section className="commercial-panel commercial-identification">
+            <section className="commercial-panel commercial-lead-data">
               <div className="commercial-section-heading">
                 <div>
                   <span>DADOS DO LEAD</span>
-                  <h3>Identificação e origem</h3>
+                  <h3>Cadastro e atendimento</h3>
                 </div>
-                <p>
-                  Canal e origem são preenchidos automaticamente.
-                </p>
               </div>
               <div className="commercial-fields">
                 <label>
-                  Nome completo do paciente
+                  Nome
                   <input
                     name="name"
                     defaultValue={detail.name}
@@ -439,11 +449,7 @@ export function LeadDetail({
                   />
                 </label>
                 <label>
-                  Canal de entrada
-                  <input value={channelLabel(detail.channel)} readOnly />
-                </label>
-                <label>
-                  Telefone com país e DDD
+                  Telefone
                   <input
                     name="phone"
                     type="tel"
@@ -453,18 +459,6 @@ export function LeadDetail({
                     required
                   />
                   <small>Obrigatório para registrar uma venda.</small>
-                </label>
-                <label>
-                  Instagram
-                  <input
-                    name="instagram"
-                    defaultValue={detail.instagram ? `@${detail.instagram.replace(/^@+/, '')}` : ''}
-                    maxLength={160}
-                    placeholder="@perfil (opcional)"
-                  />
-                  {detail.channel === 'instagram' && detail.instagram && (
-                    <small>Identificado pelo Instagram Direct.</small>
-                  )}
                 </label>
                 <label>
                   Cidade de residência
@@ -478,10 +472,6 @@ export function LeadDetail({
                   />
                 </label>
                 <label>
-                  Origem
-                  <input value={saleOrigin(detail)} readOnly />
-                </label>
-                <label>
                   Cidade onde opera / unidade
                   <input
                     name="unit"
@@ -491,19 +481,6 @@ export function LeadDetail({
                     required
                   />
                 </label>
-                <input type="hidden" name="interest" value={detail.interest} />
-              </div>
-            </section>
-
-            <section className="commercial-panel commercial-followup">
-              <div className="commercial-section-heading">
-                <div>
-                  <span>ATENDIMENTO</span>
-                  <h3>Qualificação e próximo passo</h3>
-                </div>
-                <p>Classifique o lead e registre a ação que deve acontecer em seguida.</p>
-              </div>
-              <div className="commercial-fields">
                 <label>
                   Qualificação
                   <select
@@ -535,6 +512,7 @@ export function LeadDetail({
                     rows={4}
                   />
                 </label>
+                <input type="hidden" name="interest" value={detail.interest} />
               </div>
             </section>
 
@@ -546,11 +524,7 @@ export function LeadDetail({
                     {detail.sale_completed_at ? 'Dados da venda' : 'Registrar venda concluída'}
                   </h3>
                 </div>
-                {detail.sale_completed_at ? (
-                  <strong>Venda registrada</strong>
-                ) : (
-                  <p>Preencha somente quando a venda for concluída.</p>
-                )}
+                {detail.sale_completed_at ? <strong>Venda registrada</strong> : null}
               </div>
               <div className="commercial-fields">
                 <label>

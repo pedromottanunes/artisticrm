@@ -1369,7 +1369,7 @@ main {
   width: 710px;
 }
 .modal.lead-detail-modal {
-  width: min(1760px, calc(100vw - 32px));
+  width: min(1480px, calc(100vw - 32px));
   height: min(980px, calc(100dvh - 24px), var(--dialog-max-height, 97dvh));
   max-height: min(97dvh, var(--dialog-max-height, 97dvh));
 }
@@ -1415,6 +1415,26 @@ main {
 }
 .modal-heading-content > div {
   min-width: 0;
+}
+.modal-title-line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+.lead-instagram-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--gold);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.lead-instagram-link:hover {
+  text-decoration: underline;
 }
 .lead-profile-avatar {
   position: relative;
@@ -1479,7 +1499,7 @@ main {
 }
 .commercial-form {
   display: grid;
-  grid-template-columns: minmax(0, 1.08fr) minmax(220px, 0.72fr) minmax(0, 1.2fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   align-content: start;
   gap: 12px;
   padding: 12px 22px;
@@ -1500,11 +1520,8 @@ main {
   gap: 8px 12px;
   margin-top: 10px;
 }
-.commercial-followup .commercial-fields {
-  grid-template-columns: 1fr;
-}
-.commercial-followup textarea {
-  height: 108px;
+.commercial-lead-data textarea {
+  height: 62px;
   resize: vertical;
 }
 .commercial-form label {

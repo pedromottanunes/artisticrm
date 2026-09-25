@@ -762,9 +762,13 @@ test('gestão navega, filtra e cadastra lead persistente', async ({ page }) => {
   await page.getByLabel('Buscar nome ou telefone').fill('Teste Navegador');
   await expect(page.getByRole('table').getByText('Teste Navegador').first()).toBeVisible();
   await page.getByRole('button', { name: 'Abrir ficha de Teste Navegador' }).click();
-  await expect(dialog.getByLabel('Qualificação')).toHaveValue('NEW_LEAD');
+  await expect(dialog.locator('.commercial-panel')).toHaveCount(2);
+  await expect(dialog.getByLabel('Canal de entrada', { exact: true })).toHaveCount(0);
+  await expect(dialog.getByLabel('Instagram', { exact: true })).toHaveCount(0);
+  await expect(dialog.getByLabel('Origem', { exact: true })).toHaveCount(0);
   await expect(dialog.getByText('Ainda não definido', { exact: true })).toHaveCount(0);
   await dialog.screenshot({ path: 'test-results/cadastro-comercial-desktop.png' });
+  await expect(dialog.getByLabel('Qualificação')).toHaveValue('NEW_LEAD');
   await dialog.getByLabel('Qualificação').selectOption('CONSULTATION_NOT_SCHEDULED');
   await dialog.getByRole('button', { name: 'Salvar cadastro' }).click();
   await expect(dialog.locator('.consultation-badge')).toHaveText('Consulta não agendada');
@@ -865,7 +869,7 @@ test('ficha edita cadastro, agenda consulta e preserva histórico', async ({ pag
   await page.getByRole('button', { name: 'Abrir ficha de Gustavo Pereira' }).click();
   const dialog = page.getByRole('dialog');
   const initialBox = (await dialog.boundingBox())!;
-  expect(initialBox.width).toBeGreaterThan(1700);
+  expect(initialBox.width).toBeGreaterThan(1300);
   expect(initialBox.height).toBeGreaterThan(850);
   expect(
     await dialog
@@ -1310,7 +1314,11 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
   const lead = page.locator('.attendant-lead').filter({ hasText: targetName }).first();
   await lead.getByRole('button', { name: `Abrir ficha de ${targetName}`, exact: true }).click();
   const dialog = page.getByRole('dialog');
-  await expect(dialog.getByLabel('Instagram')).toHaveValue('@perfil.destino');
+  await expect(dialog.getByRole('link', { name: '@perfil.destino' })).toHaveAttribute(
+    'href',
+    'https://www.instagram.com/perfil.destino/',
+  );
+  await dialog.screenshot({ path: 'test-results/instagram-lead-header.png' });
   await expect(dialog.locator('.lead-profile-avatar img')).toHaveCount(1);
   await dialog.getByRole('button', { name: 'Abrir conversa', exact: true }).click();
   await expect(page).toHaveURL(/#inbox$/);

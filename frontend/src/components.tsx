@@ -50,6 +50,7 @@ export function Empty({ title, description }: { title: string; description: stri
 }
 export function Modal({
   title,
+  titleAccessory,
   description,
   onClose,
   children,
@@ -58,6 +59,7 @@ export function Modal({
   className = '',
 }: {
   title: string;
+  titleAccessory?: ReactNode;
   description?: string;
   onClose: () => void;
   children: ReactNode;
@@ -106,7 +108,10 @@ export function Modal({
         <div className="modal-heading-content">
           {leading}
           <div>
-            <h2>{title}</h2>
+            <div className="modal-title-line">
+              <h2>{title}</h2>
+              {titleAccessory}
+            </div>
             {description && <p>{description}</p>}
           </div>
         </div>

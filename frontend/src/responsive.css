@@ -288,13 +288,7 @@
 }
 @media (max-width: 1000px) {
   .commercial-form {
-    grid-template-columns: minmax(0, 1fr) minmax(240px, 0.72fr);
-  }
-  .commercial-closing {
-    grid-column: 1/-1;
-  }
-  .commercial-closing .commercial-fields {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: 1fr;
   }
   .overview-grid {
     grid-template-columns: 1fr;
@@ -364,11 +358,7 @@
   .commercial-form {
     grid-template-columns: 1fr;
   }
-  .commercial-closing {
-    grid-column: auto;
-  }
-  .commercial-fields,
-  .commercial-closing .commercial-fields {
+  .commercial-fields {
     grid-template-columns: 1fr;
   }
   .commercial-section-heading {
