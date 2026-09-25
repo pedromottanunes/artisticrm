@@ -135,7 +135,7 @@ test('relatório separa leads associados, não associados e orgânicos sem inven
       name: 'Contato Instagram',
       interest: 'Direct do Instagram',
       unit: 'A definir',
-      source: 'Instagram — origem não identificada',
+      source: 'Instagram — origem orgânica',
       source_evidence: 'Mensagem sem referência de anúncio.',
       identity: {
         provider: 'instagram',

@@ -659,6 +659,16 @@ test('Mongo: migração classifica leads antigos como novos sem desfazer decisã
   assert.equal((await row(classified.id)).stage, 'CONSULTATION_NOT_SCHEDULED');
   assert.equal((await row(classified.id)).consultation_status, 'NOT_SCHEDULED');
 });
+test('Mongo: migração renomeia origem não identificada para orgânica', async () => {
+  const existing = await lead(94);
+  await db.update(
+    'opportunities',
+    { id: existing.id },
+    { $set: { source: 'Instagram — origem não identificada' } },
+  );
+  await initializeMongo(db);
+  assert.equal((await row(existing.id)).source, 'Instagram — origem orgânica');
+});
 test('Mongo: migração de canal preserva manual e reconhece evento legado do WhatsApp', async () => {
   const manual = await ops.ingest(input(90), 'legacy-manual-event', manager.id);
   const whatsapp = await ops.ingest(input(91), 'whatsapp:legacy-account:legacy-message', null);

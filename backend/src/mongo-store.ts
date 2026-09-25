@@ -127,6 +127,10 @@ export async function openMongo(uri: string, databaseName = 'artisti') {
 }
 
 export async function initializeMongo(db: MongoStore) {
+  await db.collection('opportunities').updateMany(
+    { source: 'Instagram — origem não identificada' },
+    { $set: { source: 'Instagram — origem orgânica' } },
+  );
   const stageMigration = {
     TO_QUALIFY: 'CONSULTATION_NOT_SCHEDULED',
     EVALUATION_SCHEDULED: 'FOLLOW_UP',

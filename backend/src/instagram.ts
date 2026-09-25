@@ -251,7 +251,7 @@ function normalizeEvent(
       name: 'Contato Instagram',
       interest: 'Direct do Instagram',
       unit: 'A definir',
-      source: attribution ? 'Meta Ads' : 'Instagram — origem não identificada',
+      source: attribution ? 'Meta Ads' : 'Instagram — origem orgânica',
       source_evidence: attribution
         ? 'Webhook do Instagram assinado com referência de anúncio enviada pela Meta.'
         : 'Entrada confirmada pelo Instagram Direct; nenhuma referência de anúncio foi fornecida.',

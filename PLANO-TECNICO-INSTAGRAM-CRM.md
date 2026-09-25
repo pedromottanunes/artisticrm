@@ -68,7 +68,7 @@ Assim:
 
 - Direct orgânico: `Instagram orgânico`;
 - Direct com referência válida de anúncio: campanha, conjunto e anúncio são enriquecidos pela Marketing API;
-- Direct sem evidência suficiente: `Instagram — origem não identificada`;
+- Direct sem atribuição de anúncio: `Instagram — origem orgânica`;
 - o CRM nunca inferirá uma campanha apenas por horário, volume ou nome.
 
 A primeira fase inclui um anúncio real de baixo orçamento, direcionado ao Direct, para confirmar exatamente quais dados de referência a Meta entrega hoje nesse tipo de campanha.
@@ -252,7 +252,7 @@ exibi-las. Referral sem interação fica pendente e não cria lead sozinho.
 
 - Um IGSID ainda não conhecido cria contato sem telefone.
 - Cria conversa e oportunidade.
-- A origem é classificada como orgânica, anúncio confirmado ou não identificada.
+- A origem é classificada como orgânica ou anúncio confirmado.
 - A oportunidade entra no rodízio ponderado atual.
 - A reserva mantém o prazo já configurado no CRM.
 

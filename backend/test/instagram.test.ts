@@ -146,7 +146,7 @@ test('Direct cria identidade sem telefone, conversa e reserva; reentrega não du
   ).rows;
   assert.equal(opportunities.length, 1);
   assert.equal(opportunities[0].state, 'RESERVED');
-  assert.equal(opportunities[0].source, 'Instagram — origem não identificada');
+  assert.equal(opportunities[0].source, 'Instagram — origem orgânica');
   assert.equal(opportunities[0].interest, 'Direct do Instagram');
   assert.equal(opportunities[0].reserved_to, attendants[0].id);
   assert.equal((await db.query('SELECT * FROM conversations')).rows.length, 1);
