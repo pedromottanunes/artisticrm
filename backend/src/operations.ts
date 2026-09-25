@@ -434,6 +434,7 @@ export class Operations extends CRM {
             'O valor da entrada não pode superar o valor total.',
             400,
           );
+        await this.prepareAttendance(tx, id, input.attendance);
         if (
           (
             await tx.query('SELECT id FROM contacts WHERE phone=$1 AND id<>$2 LIMIT 1', [
@@ -461,7 +462,8 @@ export class Operations extends CRM {
              sale_seller_name=CASE WHEN sale_completed_at IS NULL THEN $6 ELSE sale_seller_name END,
              consultant=$7,total_value_cents=$8,down_payment_cents=$9,
              hair_grade_classification=$10,has_pack=$11,contract_status=$12,
-             next_action=COALESCE($13,next_action),version=version+1
+             next_action=COALESCE($13,next_action),
+             consultation_status=COALESCE($14::text,consultation_status),version=version+1
            WHERE id=$1`,
           [
             id,
@@ -477,6 +479,7 @@ export class Operations extends CRM {
             input.has_pack,
             input.contract_status,
             input.next_action ?? null,
+            input.attendance ?? null,
           ],
         );
         await this.audit(
@@ -493,6 +496,7 @@ export class Operations extends CRM {
             total_value_cents: input.total_value_cents,
             down_payment_cents: input.down_payment_cents,
             contract_status: input.contract_status,
+            attendance: input.attendance ?? row.consultation_status,
           },
         );
         return { id, version: row.version + 1 };

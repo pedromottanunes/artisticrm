@@ -8,6 +8,7 @@ import {
   requireManager,
   stageLabels,
   type Opportunity,
+  type AttendanceStatus,
   type Stage,
   type User,
 } from './types.js';
@@ -114,6 +115,45 @@ export class CRM {
     return this.clock
       ? this.clock()
       : new Date((await tx.query<{ now: string }>('SELECT clock_timestamp() AS now')).rows[0].now);
+  }
+  protected async prepareAttendance(tx: Sql, opportunityId: string, attendance?: AttendanceStatus) {
+    const scheduled = (
+      await tx.query<{
+        id: string;
+        starts_at: string | Date;
+        status: string;
+      }>(
+        "SELECT id,starts_at,status FROM appointments WHERE opportunity_id=$1 AND status='scheduled' LIMIT 1 FOR UPDATE",
+        [opportunityId],
+      )
+    ).rows[0];
+    if (!attendance) return { hasScheduled: Boolean(scheduled) };
+    const appointmentStatus = attendance === 'ATTENDED' ? 'attended' : 'no_show';
+    if (scheduled) {
+      if (new Date(scheduled.starts_at) > (await this.now(tx)))
+        throw new DomainError(
+          'INVALID_DATE',
+          'O comparecimento só pode ser informado depois do horário da consulta.',
+          400,
+        );
+      await tx.query('UPDATE appointments SET status=$2,version=version+1 WHERE id=$1', [
+        scheduled.id,
+        appointmentStatus,
+      ]);
+      return { hasScheduled: true };
+    }
+    const recorded = (
+      await tx.query<{ status: string }>(
+        "SELECT status FROM appointments WHERE opportunity_id=$1 AND status IN ('attended','no_show') ORDER BY starts_at DESC LIMIT 1",
+        [opportunityId],
+      )
+    ).rows[0];
+    if (recorded && recorded.status !== appointmentStatus)
+      throw new DomainError(
+        'APPOINTMENT_CLOSED',
+        'O comparecimento desta consulta já foi confirmado e permanece no histórico.',
+      );
+    return { hasScheduled: false };
   }
   async audit(
     tx: Sql,
@@ -566,6 +606,7 @@ export class CRM {
       stage: Stage;
       procedure_date: string | null;
       next_action: string;
+      attendance?: AttendanceStatus;
     },
   ) {
     return this.db.transaction(async (tx) => {
@@ -580,31 +621,29 @@ export class CRM {
           'VERSION_CONFLICT',
           'O cadastro foi alterado. Reabra a ficha antes de salvar.',
         );
-      if (input.stage === 'CLOSED_WITH_DATE' && !isValidDateOnly(input.procedure_date))
+      const { hasScheduled } = await this.prepareAttendance(tx, id, input.attendance);
+      const stage =
+        (hasScheduled || input.attendance) &&
+        (input.stage === 'NEW_LEAD' || input.stage === 'CONSULTATION_NOT_SCHEDULED')
+          ? 'FOLLOW_UP'
+          : input.stage;
+      if (stage === 'CLOSED_WITH_DATE' && !isValidDateOnly(input.procedure_date))
         throw new DomainError(
           'PROCEDURE_DATE_REQUIRED',
           'Informe a data do procedimento para concluir como fechado com data.',
           400,
         );
-      if (
-        input.stage === 'DECLINED' &&
-        (
-          await tx.query(
-            "SELECT id FROM appointments WHERE opportunity_id=$1 AND status='scheduled' LIMIT 1",
-            [id],
-          )
-        ).rows.length
-      )
+      if (stage === 'DECLINED' && hasScheduled)
         throw new DomainError(
           'OPEN_APPOINTMENTS',
           'Conclua ou cancele as consultas antes de declinar o lead.',
         );
-      if (row.stage === 'DECLINED' && input.stage !== 'DECLINED')
+      if (row.stage === 'DECLINED' && stage !== 'DECLINED')
         throw new DomainError(
           'REENTRY_PENDING',
           'Um lead declinado não pode ser reaberto. Uma nova entrada deve ser criada.',
         );
-      if (isClosedStage(row.stage) && !isClosedStage(input.stage))
+      if (isClosedStage(row.stage) && !isClosedStage(stage))
         throw new DomainError(
           'REENTRY_PENDING',
           'Uma qualificação encerrada não pode voltar ao atendimento ativo.',
@@ -644,6 +683,7 @@ export class CRM {
       await tx.query(
         `UPDATE opportunities SET interest=$2,unit=$3,stage=$4,next_action=$5,procedure_date=$6,
         consultation_status=CASE
+          WHEN $7::text IS NOT NULL THEN $7::text
           WHEN $4='CONSULTATION_NOT_SCHEDULED' THEN 'NOT_SCHEDULED'
           WHEN $4='NEW_LEAD' THEN 'UNDEFINED'
           ELSE consultation_status
@@ -657,24 +697,29 @@ export class CRM {
           id,
           input.interest,
           input.unit,
-          input.stage,
+          stage,
           input.next_action,
-          input.stage === 'CLOSED_WITH_DATE' ? input.procedure_date : null,
+          stage === 'CLOSED_WITH_DATE' ? input.procedure_date : null,
+          input.attendance ?? null,
         ],
       );
       const previousLabel = stageLabels[row.stage];
-      const nextLabel = stageLabels[input.stage];
+      const nextLabel = stageLabels[stage];
       await this.audit(
         tx,
         id,
         user.id,
         'opportunity.updated',
-        row.stage === input.stage
-          ? `Cadastro atualizado por ${user.name}.`
+        row.stage === stage
+          ? input.attendance && row.consultation_status !== input.attendance
+            ? `Comparecimento atualizado por ${user.name}: ${input.attendance === 'ATTENDED' ? 'sim' : 'não'}.`
+            : `Cadastro atualizado por ${user.name}.`
           : `Qualificação alterada por ${user.name}: ${previousLabel} → ${nextLabel}.`,
         {
           previous_stage: row.stage,
-          next_stage: input.stage,
+          next_stage: stage,
+          previous_attendance: row.consultation_status,
+          next_attendance: input.attendance ?? row.consultation_status,
           changed_fields: [
             'name',
             'phone',
@@ -686,6 +731,7 @@ export class CRM {
             'stage',
             'procedure_date',
             'next_action',
+            'consultation_status',
           ],
         },
       );

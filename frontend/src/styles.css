@@ -1524,6 +1524,9 @@ main {
   height: 62px;
   resize: vertical;
 }
+.commercial-next-action {
+  grid-column: 1/-1;
+}
 .commercial-form label {
   display: flex;
   min-width: 0;

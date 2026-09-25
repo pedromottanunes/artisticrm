@@ -769,9 +769,10 @@ test('gestão navega, filtra e cadastra lead persistente', async ({ page }) => {
   await expect(dialog.getByText('Ainda não definido', { exact: true })).toHaveCount(0);
   await dialog.screenshot({ path: 'test-results/cadastro-comercial-desktop.png' });
   await expect(dialog.getByLabel('Qualificação')).toHaveValue('NEW_LEAD');
-  await dialog.getByLabel('Qualificação').selectOption('CONSULTATION_NOT_SCHEDULED');
+  await dialog.getByLabel('Compareceu?').selectOption('ATTENDED');
+  await expect(dialog.getByLabel('Qualificação')).toHaveValue('FOLLOW_UP');
   await dialog.getByRole('button', { name: 'Salvar cadastro' }).click();
-  await expect(dialog.locator('.consultation-badge')).toHaveText('Consulta não agendada');
+  await expect(dialog.locator('.consultation-badge')).toHaveText('Compareceu à consulta');
   await expect(dialog.getByRole('button', { name: 'Copiar para WhatsApp' })).toBeDisabled();
   await dialog.getByLabel('Cidade de residência').fill('Criciúma');
   await dialog.getByLabel('Consultor').fill('Rafa');
@@ -907,6 +908,9 @@ test('ficha edita cadastro, agenda consulta e preserva histórico', async ({ pag
   await dialog.getByLabel('Data e horário').fill('2027-10-01T15:30');
   await dialog.getByRole('button', { name: 'Confirmar consulta' }).click();
   await expect(dialog.getByText(/Consulta agendada por Cadu/).first()).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cadastro comercial', exact: true }).click();
+  await expect(dialog.getByLabel('Qualificação')).toHaveValue('FOLLOW_UP');
+  await expect(dialog.getByLabel('Compareceu?')).toBeDisabled();
   await dialog.getByRole('button', { name: 'Consultas', exact: true }).click();
   await dialog.getByRole('button', { name: 'Alterar consulta' }).click();
   await dialog.getByLabel('Ação na consulta').selectOption('cancelled');

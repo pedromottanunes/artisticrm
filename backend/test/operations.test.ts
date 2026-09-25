@@ -372,6 +372,62 @@ test('falta à consulta preserva follow-up, histórico e permite reagendamento',
     2,
   );
 });
+test('comparecimento no cadastro cria follow-up e sincroniza uma consulta existente', async () => {
+  const direct = await lead(30);
+  await ops.update(manager, direct.id, {
+    ...update,
+    version: 1,
+    stage: 'NEW_LEAD',
+    attendance: 'ATTENDED',
+  });
+  assert.equal((await row(direct.id)).consultation_status, 'ATTENDED');
+  assert.equal((await row(direct.id)).stage, 'FOLLOW_UP');
+  assert.equal(
+    Number(
+      (
+        await db.query<{ count: string }>(
+          'SELECT count(*) FROM appointments WHERE opportunity_id=$1',
+          [direct.id],
+        )
+      ).rows[0].count,
+    ),
+    0,
+  );
+
+  const scheduled = await lead(31);
+  await ops.schedule(manager, scheduled.id, {
+    expected_version: 1,
+    starts_at: '2026-09-10T13:00:00Z',
+    unit: 'Florianópolis',
+  });
+  await assert.rejects(
+    () =>
+      ops.update(manager, scheduled.id, {
+        ...update,
+        version: 2,
+        stage: 'FOLLOW_UP',
+        attendance: 'NO_SHOW',
+      }),
+    { code: 'INVALID_DATE' },
+  );
+  now = new Date('2026-09-10T14:00:00Z');
+  await ops.update(manager, scheduled.id, {
+    ...update,
+    version: 2,
+    stage: 'FOLLOW_UP',
+    attendance: 'NO_SHOW',
+  });
+  assert.equal((await row(scheduled.id)).consultation_status, 'NO_SHOW');
+  assert.equal(
+    (
+      await db.query<{ status: string }>(
+        'SELECT status FROM appointments WHERE opportunity_id=$1',
+        [scheduled.id],
+      )
+    ).rows[0].status,
+    'no_show',
+  );
+});
 test('venda salva ficha estruturada sem depender da assinatura do contrato', async () => {
   const { id } = await lead(2);
   await ops.recordSale(

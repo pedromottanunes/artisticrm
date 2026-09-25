@@ -156,16 +156,41 @@ export function LeadDetail({
   const [error, setError] = useState('');
   const [tab, setTab] = useState(initialTab);
   const [selectedStage, setSelectedStage] = useState(detail.stage);
+  const [selectedAttendance, setSelectedAttendance] = useState(
+    detail.consultation_status === 'ATTENDED' || detail.consultation_status === 'NO_SHOW'
+      ? detail.consultation_status
+      : '',
+  );
   const [confirmation, setConfirmation] = useState('');
   const [copied, setCopied] = useState(false);
   const instagramUsername = detail.instagram?.replace(/^@+/, '').trim();
+  const scheduledAppointment = detail.appointments.find(
+    (appointment) => appointment.status === 'scheduled',
+  );
+  const attendanceAppointment = scheduledAppointment
+    ? undefined
+    : [...detail.appointments]
+        .filter(
+          (appointment) => appointment.status === 'attended' || appointment.status === 'no_show',
+        )
+        .sort(
+          (left, right) => new Date(right.starts_at).getTime() - new Date(left.starts_at).getTime(),
+        )[0];
+  const attendancePending = Boolean(
+    scheduledAppointment && new Date(scheduledAppointment.starts_at).getTime() > Date.now(),
+  );
   const deleteCommand = useRef<{ key: string; version: number } | null>(null);
   const saleCommand = useRef<{ key: string; payload: string } | null>(null);
   const deleting = useRef(false);
   useEffect(() => {
     setSelectedStage(detail.stage);
+    setSelectedAttendance(
+      detail.consultation_status === 'ATTENDED' || detail.consultation_status === 'NO_SHOW'
+        ? detail.consultation_status
+        : '',
+    );
     setCopied(false);
-  }, [detail.id, detail.stage]);
+  }, [detail.consultation_status, detail.id, detail.stage]);
   const remove = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (deleting.current || saving || !connected || confirmation !== 'EXCLUIR') return;
@@ -206,6 +231,7 @@ export function LeadDetail({
           unit: fields.unit,
           stage: fields.stage,
           next_action: fields.next_action,
+          attendance: fields.attendance || undefined,
           procedure_date:
             selectedStage === 'CLOSED_WITH_DATE' ? String(fields.procedure_date) : null,
           version: detail.version,
@@ -232,6 +258,7 @@ export function LeadDetail({
         residence_city: form.get('residence_city'),
         instagram: detail.instagram ?? '',
         next_action: form.get('next_action'),
+        attendance: form.get('attendance') || undefined,
         consultant: form.get('consultant'),
         total_value_cents: currencyToCents(String(form.get('total_value'))),
         down_payment_cents: currencyToCents(String(form.get('down_payment'))),
@@ -503,6 +530,33 @@ export function LeadDetail({
                   </select>
                 </label>
                 <label>
+                  Compareceu?
+                  <select
+                    name="attendance"
+                    value={selectedAttendance}
+                    disabled={Boolean(attendanceAppointment) || attendancePending}
+                    onChange={(event) => {
+                      const attendance = event.target.value;
+                      setSelectedAttendance(attendance);
+                      if (
+                        attendance &&
+                        (selectedStage === 'NEW_LEAD' ||
+                          selectedStage === 'CONSULTATION_NOT_SCHEDULED')
+                      )
+                        setSelectedStage('FOLLOW_UP');
+                    }}
+                  >
+                    <option value="">
+                      {attendancePending ? 'Disponível após o horário' : 'Não informado'}
+                    </option>
+                    <option value="ATTENDED">Sim</option>
+                    <option value="NO_SHOW">Não</option>
+                  </select>
+                  {attendanceAppointment && (
+                    <small>Confirmação vinculada à consulta registrada.</small>
+                  )}
+                </label>
+                <label className="commercial-next-action">
                   Próxima ação
                   <textarea
                     name="next_action"

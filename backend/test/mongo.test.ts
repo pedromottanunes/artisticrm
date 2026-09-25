@@ -475,6 +475,44 @@ test('Mongo: falta mantém follow-up e venda estrutura os dados comerciais', asy
   assert.equal(contact.residence_city, 'Criciúma');
   assert.equal(contact.instagram, '@paciente.mongo');
 });
+test('Mongo: comparecimento direto cria follow-up sem exigir consulta', async () => {
+  const { id } = await lead(32);
+  await ops.update(manager, id, {
+    ...lose,
+    version: 1,
+    stage: 'NEW_LEAD',
+    attendance: 'ATTENDED',
+  });
+  const updated = await row(id);
+  assert.equal(updated.consultation_status, 'ATTENDED');
+  assert.equal(updated.stage, 'FOLLOW_UP');
+  assert.equal(await db.count('appointments', { opportunity_id: id }), 0);
+
+  const scheduled = await lead(33);
+  await ops.schedule(manager, scheduled.id, {
+    expected_version: 1,
+    starts_at: '2026-09-10T13:00:00Z',
+    unit: 'Florianópolis',
+  });
+  await assert.rejects(
+    ops.update(manager, scheduled.id, {
+      ...lose,
+      version: 2,
+      stage: 'FOLLOW_UP',
+      attendance: 'NO_SHOW',
+    }),
+    { code: 'INVALID_DATE' },
+  );
+  now = new Date('2026-09-10T14:00:00Z');
+  await ops.update(manager, scheduled.id, {
+    ...lose,
+    version: 2,
+    stage: 'FOLLOW_UP',
+    attendance: 'NO_SHOW',
+  });
+  assert.equal((await row(scheduled.id)).consultation_status, 'NO_SHOW');
+  assert.equal((await db.one('appointments', { opportunity_id: scheduled.id }))!.status, 'no_show');
+});
 test('Mongo: retorno após perdido preserva histórico e exige revisão', async () => {
   const { id } = await lead();
   await ops.update(manager, id, { ...lose, version: 1 });

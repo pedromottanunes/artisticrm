@@ -388,6 +388,7 @@ export async function buildApp(
         stage: z.enum(stages),
         procedure_date: z.union([z.string().regex(/^[1-9]\d{3}-\d{2}-\d{2}$/), z.null()]),
         next_action: z.string().trim().max(1000),
+        attendance: z.enum(['ATTENDED', 'NO_SHOW']).optional(),
       })
       .strict()
       .parse(request.body);
@@ -402,6 +403,7 @@ export async function buildApp(
         residence_city: shortText.min(2),
         instagram: shortText.optional(),
         next_action: z.string().trim().max(1000).optional(),
+        attendance: z.enum(['ATTENDED', 'NO_SHOW']).optional(),
         consultant: shortText.min(2),
         total_value_cents: z.number().int().min(0).max(2_000_000_000),
         down_payment_cents: z.number().int().min(0).max(2_000_000_000),

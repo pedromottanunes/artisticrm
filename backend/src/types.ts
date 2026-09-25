@@ -58,6 +58,7 @@ export const consultationStatuses = [
   'CANCELLED',
 ] as const;
 export type ConsultationStatus = (typeof consultationStatuses)[number];
+export type AttendanceStatus = 'ATTENDED' | 'NO_SHOW';
 export const contractStatuses = ['awaiting', 'signed', 'not_signed'] as const;
 export type ContractStatus = (typeof contractStatuses)[number];
 export interface SaleInput {
@@ -67,6 +68,7 @@ export interface SaleInput {
   residence_city: string;
   instagram?: string;
   next_action?: string;
+  attendance?: AttendanceStatus;
   consultant: string;
   total_value_cents: number;
   down_payment_cents: number;

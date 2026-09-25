@@ -11,6 +11,7 @@ import {
   type User,
   type Opportunity,
   type SaleInput,
+  type AttendanceStatus,
 } from './types.js';
 import type { CRM, LeadInput } from './crm.js';
 import type { DeleteAttendantInput, Operations } from './operations.js';
@@ -72,6 +73,48 @@ export class MongoOperations {
   ) {}
   async now(tx: MongoTx = this.db) {
     return this.clock ? this.clock() : tx.now();
+  }
+  private async prepareAttendance(
+    tx: MongoTx,
+    opportunityId: string,
+    attendance?: AttendanceStatus,
+  ) {
+    const scheduled = await tx.one('appointments', {
+      opportunity_id: opportunityId,
+      status: 'scheduled',
+    });
+    if (!attendance) return { hasScheduled: Boolean(scheduled) };
+    const appointmentStatus = attendance === 'ATTENDED' ? 'attended' : 'no_show';
+    if (scheduled) {
+      if (new Date(scheduled.starts_at) > (await this.now(tx)))
+        throw new DomainError(
+          'INVALID_DATE',
+          'O comparecimento só pode ser informado depois do horário da consulta.',
+          400,
+        );
+      await tx.update(
+        'appointments',
+        { id: scheduled.id },
+        { $set: { status: appointmentStatus }, $inc: { version: 1 } },
+      );
+      return { hasScheduled: true };
+    }
+    const recorded = (
+      await tx.many(
+        'appointments',
+        {
+          opportunity_id: opportunityId,
+          status: { $in: ['attended', 'no_show'] },
+        },
+        { starts_at: -1 },
+      )
+    )[0];
+    if (recorded && recorded.status !== appointmentStatus)
+      throw new DomainError(
+        'APPOINTMENT_CLOSED',
+        'O comparecimento desta consulta já foi confirmado e permanece no histórico.',
+      );
+    return { hasScheduled: false };
   }
   async actor(tx: MongoTx, actor: User, allowPasswordChange = false) {
     const current = await tx.one('users', { id: actor.id });
@@ -651,23 +694,26 @@ export class MongoOperations {
         throw new DomainError('NOT_FOUND', 'Lead não encontrado.', 404);
       if (row.version !== input.version)
         throw new DomainError('VERSION_CONFLICT', 'O cadastro mudou.');
-      if (input.stage === 'CLOSED_WITH_DATE' && !isValidDateOnly(input.procedure_date))
+      const { hasScheduled } = await this.prepareAttendance(tx, id, input.attendance);
+      const stage =
+        (hasScheduled || input.attendance) &&
+        (input.stage === 'NEW_LEAD' || input.stage === 'CONSULTATION_NOT_SCHEDULED')
+          ? 'FOLLOW_UP'
+          : input.stage;
+      if (stage === 'CLOSED_WITH_DATE' && !isValidDateOnly(input.procedure_date))
         throw new DomainError(
           'PROCEDURE_DATE_REQUIRED',
           'Informe a data do procedimento para concluir como fechado com data.',
           400,
         );
-      if (
-        input.stage === 'DECLINED' &&
-        (await tx.count('appointments', { opportunity_id: id, status: 'scheduled' }))
-      )
+      if (stage === 'DECLINED' && hasScheduled)
         throw new DomainError('OPEN_APPOINTMENTS', 'Conclua ou cancele as consultas.');
-      if (row.stage === 'DECLINED' && input.stage !== 'DECLINED')
+      if (row.stage === 'DECLINED' && stage !== 'DECLINED')
         throw new DomainError(
           'REENTRY_PENDING',
           'Um lead declinado não pode ser reaberto. Uma nova entrada deve ser criada.',
         );
-      if (isClosedStage(row.stage) && !isClosedStage(input.stage))
+      if (isClosedStage(row.stage) && !isClosedStage(stage))
         throw new DomainError(
           'REENTRY_PENDING',
           'Uma qualificação encerrada não pode voltar ao atendimento ativo.',
@@ -701,18 +747,19 @@ export class MongoOperations {
           $set: {
             interest: input.interest,
             unit: input.unit,
-            stage: input.stage,
+            stage,
             consultation_status:
-              input.stage === 'CONSULTATION_NOT_SCHEDULED'
+              input.attendance ??
+              (stage === 'CONSULTATION_NOT_SCHEDULED'
                 ? 'NOT_SCHEDULED'
-                : input.stage === 'NEW_LEAD'
+                : stage === 'NEW_LEAD'
                   ? 'UNDEFINED'
-                  : row.consultation_status,
-            procedure_date: input.stage === 'CLOSED_WITH_DATE' ? input.procedure_date : null,
+                  : row.consultation_status),
+            procedure_date: stage === 'CLOSED_WITH_DATE' ? input.procedure_date : null,
             next_action: input.next_action,
-            state: isClosedStage(input.stage) ? 'CANCELLED' : row.state,
-            ...(isClosedStage(input.stage) ? { reserved_to: null, expires_at: null } : {}),
-            open: !isClosedStage(input.stage),
+            state: isClosedStage(stage) ? 'CANCELLED' : row.state,
+            ...(isClosedStage(stage) ? { reserved_to: null, expires_at: null } : {}),
+            open: !isClosedStage(stage),
           },
           $inc: { version: 1 },
         },
@@ -722,10 +769,17 @@ export class MongoOperations {
         id,
         user.id,
         'opportunity.updated',
-        row.stage === input.stage
-          ? `Cadastro atualizado por ${user.name}.`
-          : `Qualificação alterada por ${user.name}: ${stageLabels[row.stage]} → ${stageLabels[input.stage]}.`,
-        { previous_stage: row.stage, next_stage: input.stage },
+        row.stage === stage
+          ? input.attendance && row.consultation_status !== input.attendance
+            ? `Comparecimento atualizado por ${user.name}: ${input.attendance === 'ATTENDED' ? 'sim' : 'não'}.`
+            : `Cadastro atualizado por ${user.name}.`
+          : `Qualificação alterada por ${user.name}: ${stageLabels[row.stage]} → ${stageLabels[stage]}.`,
+        {
+          previous_stage: row.stage,
+          next_stage: stage,
+          previous_attendance: row.consultation_status,
+          next_attendance: input.attendance ?? row.consultation_status,
+        },
       );
       return { id, version: row.version + 1 };
     });
@@ -1210,6 +1264,7 @@ export class MongoOperations {
             'O valor da entrada não pode superar o valor total.',
             400,
           );
+        await this.prepareAttendance(tx, id, input.attendance);
         if (await tx.one('contacts', { phone: input.phone, id: { $ne: row.contact_id } }))
           throw new DomainError(
             'PHONE_CONFLICT',
@@ -1250,6 +1305,7 @@ export class MongoOperations {
               hair_grade_classification: input.hair_grade_classification,
               has_pack: input.has_pack,
               contract_status: input.contract_status,
+              ...(input.attendance === undefined ? {} : { consultation_status: input.attendance }),
               ...(input.next_action === undefined ? {} : { next_action: input.next_action }),
             },
             $inc: { version: 1 },
@@ -1269,6 +1325,7 @@ export class MongoOperations {
             total_value_cents: input.total_value_cents,
             down_payment_cents: input.down_payment_cents,
             contract_status: input.contract_status,
+            attendance: input.attendance ?? row.consultation_status,
           },
         );
         return { id, version: row.version + 1 };
