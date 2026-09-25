@@ -15,10 +15,20 @@ import './manager-pipeline.css';
 import './manager-reports.css';
 import './inbox.css';
 import './clinical-light.css';
+import './public-legal.css';
 import { registerDeviceWorker } from './pwa';
+import { PublicLegalPage, type PublicLegalPageName } from './public-legal';
+
+const publicPages: Record<string, PublicLegalPageName> = {
+  '/politica-de-privacidade': 'privacy',
+  '/exclusao-de-dados': 'deletion',
+};
+const pathname = window.location.pathname.replace(/\/+$/, '') || '/';
+const publicPage = publicPages[pathname];
+
 void registerDeviceWorker();
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    {publicPage ? <PublicLegalPage page={publicPage} /> : <App />}
   </React.StrictMode>,
 );

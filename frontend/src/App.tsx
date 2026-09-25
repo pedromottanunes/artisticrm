@@ -953,6 +953,11 @@ function Login({ onLogin, connected }: { onLogin: () => Promise<void>; connected
               Integrações desligadas. Não utilize dados de pacientes nesta etapa.
             </p>
           </div>
+          <nav className="login-legal-links" aria-label="Privacidade e dados">
+            <a href="/politica-de-privacidade">Política de Privacidade</a>
+            <span aria-hidden="true">•</span>
+            <a href="/exclusao-de-dados">Exclusão de dados</a>
+          </nav>
         </div>
       </div>
     </div>

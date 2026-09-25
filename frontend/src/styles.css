@@ -1963,3 +1963,17 @@ fieldset.form-grid {
   font-weight: 500;
   margin-bottom: 5px;
 }
+.login-legal-links {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+  color: #7f94aa;
+  font-size: 12px;
+}
+.login-legal-links a:hover {
+  color: #d1b27b;
+  text-decoration: underline;
+}

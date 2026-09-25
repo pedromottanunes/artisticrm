@@ -29,6 +29,8 @@ try {
   assert.equal(worker.statusCode, 200);
   assert.match(worker.headers['content-type'] as string, /javascript/);
   assert.equal((await app.inject('/offline.html')).statusCode, 200);
+  assert.equal((await app.inject('/politica-de-privacidade')).statusCode, 200);
+  assert.equal((await app.inject('/exclusao-de-dados')).statusCode, 200);
   const bundle = index.body.match(/src="([^"]+\.js)"/)!;
   const asset = await app.inject({ url: bundle[1] });
   assert.equal(asset.statusCode, 200);
