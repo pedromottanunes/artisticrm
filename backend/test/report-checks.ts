@@ -65,7 +65,8 @@ export async function checkReports(
   assert.equal(result.top_sources[0].source, 'Meta Ads');
   assert.equal(result.top_sources[0].count, 2);
   assert.equal(result.funnel.find((item) => item.key === 'RECEIVED')?.count, 2);
-  assert.equal(result.funnel.find((item) => item.key === 'CONSULTATION_NOT_SCHEDULED')?.count, 2);
+  assert.equal(result.funnel.find((item) => item.key === 'NEW_LEAD')?.count, 1);
+  assert.equal(result.funnel.find((item) => item.key === 'CONSULTATION_NOT_SCHEDULED')?.count, 1);
   assert.equal(result.unanswered_by_user[0].user_id, users[1].id);
   assert.equal(result.unanswered_by_user[0].count, 1);
   assert.equal(result.pool_lost_by_user[0].user_id, users[1].id);

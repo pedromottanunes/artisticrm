@@ -315,7 +315,7 @@ test('agenda protege contra duplicação, conclusão futura e encerramento com a
   });
   const input = {
     expected_version: 1,
-    status: 'completed' as const,
+    status: 'attended' as const,
     starts_at: '2026-09-11T12:00:00Z',
     unit: 'Teste',
     reason: 'Avaliação realizada',
@@ -325,6 +325,90 @@ test('agenda protege contra duplicação, conclusão futura e encerramento com a
   });
   now = new Date('2026-09-11T13:00:00Z');
   await ops.changeAppointment(manager, a.id, input, randomUUID());
+  assert.equal((await row(id)).consultation_status, 'ATTENDED');
+});
+test('falta à consulta preserva follow-up, histórico e permite reagendamento', async () => {
+  const { id } = await lead();
+  assert.equal((await row(id)).consultation_status, 'UNDEFINED');
+  assert.equal((await row(id)).stage, 'NEW_LEAD');
+  const first = await ops.schedule(manager, id, {
+    expected_version: 1,
+    starts_at: '2026-09-10T13:00:00Z',
+    unit: 'Florianópolis',
+  });
+  assert.equal((await row(id)).consultation_status, 'SCHEDULED');
+  assert.equal((await row(id)).stage, 'FOLLOW_UP');
+  now = new Date('2026-09-10T14:00:00Z');
+  await ops.changeAppointment(
+    manager,
+    first.id,
+    {
+      expected_version: 1,
+      status: 'no_show',
+      starts_at: '2026-09-10T13:00:00Z',
+      unit: 'Florianópolis',
+      reason: 'Paciente não compareceu.',
+    },
+    randomUUID(),
+  );
+  const missed = await row(id);
+  assert.equal(missed.consultation_status, 'NO_SHOW');
+  assert.equal(missed.stage, 'FOLLOW_UP');
+  await ops.schedule(manager, id, {
+    expected_version: 3,
+    starts_at: '2026-09-11T14:00:00Z',
+    unit: 'Florianópolis',
+  });
+  assert.equal((await row(id)).consultation_status, 'SCHEDULED');
+  assert.equal(
+    Number(
+      (
+        await db.query<{ count: string }>(
+          'SELECT count(*) FROM appointments WHERE opportunity_id=$1',
+          [id],
+        )
+      ).rows[0].count,
+    ),
+    2,
+  );
+});
+test('venda salva ficha estruturada sem depender da assinatura do contrato', async () => {
+  const { id } = await lead(2);
+  await ops.recordSale(
+    manager,
+    id,
+    {
+      expected_version: 1,
+      name: 'Pedro Victor da Silva Prudencio',
+      phone: '5548999990002',
+      residence_city: 'Criciúma',
+      consultant: 'Rafa',
+      total_value_cents: 1_500_000,
+      down_payment_cents: 150_000,
+      hair_grade_classification: 'grau 3 A1',
+      has_pack: false,
+      unit: 'Florianópolis',
+      procedure_date: '2026-10-20',
+      contract_status: 'awaiting',
+    },
+    randomUUID(),
+  );
+  const sold = await row(id);
+  assert.equal(sold.stage, 'CLOSED_WITH_DATE');
+  assert.equal(sold.contract_status, 'awaiting');
+  assert.equal(sold.sale_seller_name, manager.name);
+  assert.equal(sold.total_value_cents, 1_500_000);
+  const contact = (
+    await db.query<{ name: string; phone: string; residence_city: string }>(
+      'SELECT name,phone,residence_city FROM contacts WHERE id=$1',
+      [sold.contact_id],
+    )
+  ).rows[0];
+  assert.deepEqual(contact, {
+    name: 'Pedro Victor da Silva Prudencio',
+    phone: '5548999990002',
+    residence_city: 'Criciúma',
+  });
 });
 test('edições concorrentes de agenda confirmam uma única versão', async () => {
   const { id } = await lead();

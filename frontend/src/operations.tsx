@@ -473,9 +473,14 @@ export function AppointmentEditor({
     [error, setError] = useState('');
   const command = useCommand();
   const label =
-    { scheduled: 'Agendada', completed: 'Concluída', cancelled: 'Cancelada' }[appointment.status] ??
-    appointment.status;
+    {
+      scheduled: 'Agendada',
+      attended: 'Compareceu',
+      no_show: 'Não compareceu',
+      cancelled: 'Cancelada',
+    }[appointment.status] ?? appointment.status;
   const date = new Date(appointment.starts_at);
+  const canConfirmAttendance = date.getTime() <= Date.now();
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
     .toISOString()
     .slice(0, 16);
@@ -501,6 +506,28 @@ export function AppointmentEditor({
       setBusy(false);
     }
   };
+  const attendance = async (status: 'attended' | 'no_show') => {
+    if (busy || !connected || !canConfirmAttendance) return;
+    setBusy(true);
+    setError('');
+    try {
+      await command(`/appointments/${appointment.id}`, 'PATCH', {
+        expected_version: appointment.version,
+        status,
+        starts_at: new Date(appointment.starts_at).toISOString(),
+        unit: appointment.unit,
+        reason:
+          status === 'attended'
+            ? 'Comparecimento confirmado pelo atendente.'
+            : 'Não comparecimento confirmado pelo atendente.',
+      });
+      await onSaved();
+    } catch (caught) {
+      setError((caught as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <article className="appointment-editor">
       <header>
@@ -520,6 +547,41 @@ export function AppointmentEditor({
           </button>
         )}
       </header>
+      {appointment.status === 'scheduled' && (
+        <section className="attendance-confirmation" aria-label="Confirmação de presença">
+          <div>
+            <strong>Foi à consulta?</strong>
+            <small>
+              {canConfirmAttendance
+                ? 'Confirme a presença sem alterar o histórico do agendamento.'
+                : 'A confirmação será liberada depois do horário marcado.'}
+            </small>
+          </div>
+          <div>
+            <button
+              type="button"
+              className="button attendance-yes compact"
+              disabled={!connected || busy || !canConfirmAttendance}
+              onClick={() => void attendance('attended')}
+            >
+              Sim
+            </button>
+            <button
+              type="button"
+              className="button attendance-no compact"
+              disabled={!connected || busy || !canConfirmAttendance}
+              onClick={() => void attendance('no_show')}
+            >
+              Não
+            </button>
+          </div>
+        </section>
+      )}
+      {!editing && error && (
+        <p className="form-error appointment-error" role="alert">
+          {error}
+        </p>
+      )}
       {editing && (
         <form onSubmit={submit}>
           <fieldset className="form-grid" disabled={busy || !connected}>
@@ -527,7 +589,6 @@ export function AppointmentEditor({
               Ação na consulta
               <select name="status" defaultValue="scheduled">
                 <option value="scheduled">Remarcar</option>
-                <option value="completed">Marcar como concluída</option>
                 <option value="cancelled">Cancelar consulta</option>
               </select>
             </label>
@@ -546,8 +607,8 @@ export function AppointmentEditor({
               />
             </label>
             <p className="help-text full">
-              Ao concluir ou cancelar, o horário e a unidade originais são preservados. A etapa
-              comercial não é alterada automaticamente.
+              Ao cancelar, o horário e a unidade originais são preservados. A etapa comercial não é
+              alterada automaticamente.
             </p>
             <label className="full">
               Motivo

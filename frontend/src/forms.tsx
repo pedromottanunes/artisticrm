@@ -9,8 +9,19 @@ import {
   ShieldCheck,
   Trash2,
   CircleUserRound,
+  Copy,
 } from 'lucide-react';
-import { api, isClosedStage, stages, type Detail, type Snapshot, type User } from './api';
+import {
+  api,
+  ApiError,
+  consultationStatusLabels,
+  contractStatusLabels,
+  isClosedStage,
+  stages,
+  type Detail,
+  type Snapshot,
+  type User,
+} from './api';
 import { Transfer, AppointmentEditor } from './operations';
 import { Modal, Source, Badge, dateLabel } from './components';
 
@@ -253,6 +264,11 @@ export function LeadDetail({
     >
       <div className="detail-summary">
         <Badge state={detail.state} />
+        {detail.consultation_status !== 'UNDEFINED' && (
+          <span className={`consultation-badge is-${detail.consultation_status.toLowerCase()}`}>
+            {consultationStatusLabels[detail.consultation_status]}
+          </span>
+        )}
         <Source value={detail.source} />
         {detail.is_demo && <span className="demo-tag">CONTATO FICTÍCIO</span>}
       </div>
@@ -260,7 +276,7 @@ export function LeadDetail({
         {[
           'cadastro',
           ...(detail.can_edit && !isClosedStage(detail.stage) ? ['agendar'] : []),
-          ...(detail.can_edit ? ['avaliacoes', 'historico'] : []),
+          ...(detail.can_edit ? ['avaliacoes', 'venda', 'historico'] : []),
           ...(isManager ? ['transferir'] : []),
           ...(detail.can_edit ? ['excluir'] : []),
         ].map((item) => (
@@ -280,11 +296,13 @@ export function LeadDetail({
                 ? 'Agendar consulta'
                 : item === 'avaliacoes'
                   ? 'Consultas'
-                  : item === 'transferir'
-                    ? 'Atribuir / transferir'
-                    : item === 'excluir'
-                      ? 'Excluir lead'
-                      : 'Histórico'}
+                  : item === 'venda'
+                    ? 'Venda'
+                    : item === 'transferir'
+                      ? 'Atribuir / transferir'
+                      : item === 'excluir'
+                        ? 'Excluir lead'
+                        : 'Histórico'}
           </button>
         ))}
       </div>
@@ -359,20 +377,28 @@ export function LeadDetail({
               />
             </label>
             <label>
-              {detail.channel === 'instagram' ? 'Canal de entrada' : 'WhatsApp'}
+              Canal de entrada
               <input
                 value={
                   detail.channel === 'instagram'
                     ? 'Instagram Direct'
-                    : (detail.phone ?? 'Disponível após assumir')
+                    : detail.channel === 'whatsapp'
+                      ? 'WhatsApp'
+                      : 'Cadastro manual'
                 }
                 readOnly
               />
-              <small>Alteração de identidade exige tratamento de duplicidade.</small>
             </label>
             <label>
-              E-mail
-              <input name="email" type="email" defaultValue={detail.email ?? ''} maxLength={200} />
+              Telefone com país e DDD
+              <input
+                name="phone"
+                type="tel"
+                defaultValue={detail.phone ?? ''}
+                placeholder="+55 (48) 99999-9999"
+                maxLength={24}
+              />
+              <small>Será obrigatório para registrar uma venda.</small>
             </label>
             <label>
               Instagram
@@ -385,6 +411,15 @@ export function LeadDetail({
               {detail.channel === 'instagram' && detail.instagram && (
                 <small>Perfil identificado automaticamente pelo Instagram Direct.</small>
               )}
+            </label>
+            <label>
+              Cidade de residência
+              <input
+                name="residence_city"
+                defaultValue={detail.residence_city ?? ''}
+                maxLength={160}
+                placeholder="Ex.: Criciúma"
+              />
             </label>
             <label>
               Interesse
@@ -590,6 +625,9 @@ export function LeadDetail({
           {!detail.appointments.length && <p className="help-text">Nenhuma consulta registrada.</p>}
         </div>
       )}
+      {tab === 'venda' && detail.can_edit && (
+        <SaleForm detail={detail} connected={connected} onSaved={onSaved} />
+      )}
       {tab === 'transferir' && isManager && (
         <Transfer detail={detail} users={users} connected={connected} onSaved={onSaved} />
       )}
@@ -611,6 +649,269 @@ export function LeadDetail({
       )}
     </Modal>
   );
+}
+
+function SaleForm({
+  detail,
+  connected,
+  onSaved,
+}: {
+  detail: Detail;
+  connected: boolean;
+  onSaved: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [copied, setCopied] = useState(false);
+  const command = useRef<{ key: string; payload: string } | null>(null);
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    const form = new FormData(event.currentTarget);
+    try {
+      const payload = JSON.stringify({
+        expected_version: detail.version,
+        name: form.get('name'),
+        phone: form.get('phone'),
+        residence_city: form.get('residence_city'),
+        consultant: form.get('consultant'),
+        total_value_cents: currencyToCents(String(form.get('total_value'))),
+        down_payment_cents: currencyToCents(String(form.get('down_payment'))),
+        hair_grade_classification: form.get('hair_grade_classification'),
+        has_pack: form.get('has_pack') === 'true',
+        unit: form.get('unit'),
+        procedure_date: form.get('procedure_date') || null,
+        contract_status: form.get('contract_status'),
+      });
+      if (command.current && command.current.payload !== payload)
+        throw new Error('Reenvie os mesmos dados antes de alterar uma venda sem confirmação.');
+      command.current ??= { key: crypto.randomUUID(), payload };
+      await api(`/opportunities/${detail.id}/sale`, {
+        method: 'PUT',
+        headers: { 'Idempotency-Key': command.current.key },
+        body: payload,
+      });
+      command.current = null;
+      await onSaved();
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status < 500) command.current = null;
+      setError((caught as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(saleText(detail));
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2500);
+    } catch {
+      setError(
+        'Não foi possível copiar. Autorize o acesso à área de transferência e tente novamente.',
+      );
+    }
+  };
+  return (
+    <form onSubmit={submit} key={`${detail.id}:sale:${detail.version}`}>
+      <fieldset className="modal-body form-grid sale-form" disabled={busy || !connected}>
+        <div className="sale-form-heading full">
+          <div>
+            <span>FECHAMENTO</span>
+            <h3>{detail.sale_completed_at ? 'Dados da venda' : 'Registrar venda concluída'}</h3>
+          </div>
+          {detail.sale_completed_at && <strong>Venda registrada</strong>}
+        </div>
+        <label>
+          Nome completo do paciente
+          <input name="name" defaultValue={detail.name} minLength={2} maxLength={160} required />
+        </label>
+        <label>
+          Telefone com país e DDD
+          <input
+            name="phone"
+            type="tel"
+            defaultValue={detail.phone ?? ''}
+            placeholder="+55 (48) 99999-9999"
+            maxLength={24}
+            required
+          />
+        </label>
+        <label>
+          Cidade de residência
+          <input
+            name="residence_city"
+            defaultValue={detail.residence_city ?? ''}
+            minLength={2}
+            maxLength={160}
+            required
+          />
+        </label>
+        <label>
+          Quem fez a venda
+          <input
+            value={detail.sale_seller_name || 'Será preenchido automaticamente ao salvar'}
+            readOnly
+          />
+        </label>
+        <label>
+          Consultor
+          <input
+            name="consultant"
+            defaultValue={detail.consultant}
+            minLength={2}
+            maxLength={160}
+            required
+          />
+        </label>
+        <label>
+          De onde veio
+          <input value={saleOrigin(detail)} readOnly />
+        </label>
+        <label>
+          Valor total
+          <input
+            name="total_value"
+            inputMode="decimal"
+            defaultValue={currencyInput(detail.total_value_cents)}
+            placeholder="15.000,00"
+            required
+          />
+        </label>
+        <label>
+          Valor da entrada
+          <input
+            name="down_payment"
+            inputMode="decimal"
+            defaultValue={currencyInput(detail.down_payment_cents)}
+            placeholder="1.500,00"
+            required
+          />
+        </label>
+        <label className="full">
+          Grau e classificação A
+          <input
+            name="hair_grade_classification"
+            defaultValue={detail.hair_grade_classification}
+            maxLength={160}
+            placeholder="Ex.: grau 3 A1"
+            required
+          />
+        </label>
+        <label>
+          Teve pack?
+          <select name="has_pack" defaultValue={detail.has_pack === true ? 'true' : 'false'}>
+            <option value="false">Não</option>
+            <option value="true">Sim</option>
+          </select>
+        </label>
+        <label>
+          Cidade onde opera
+          <input name="unit" defaultValue={detail.unit} minLength={2} maxLength={160} required />
+        </label>
+        <label>
+          Data da cirurgia
+          <input
+            name="procedure_date"
+            type="date"
+            defaultValue={detail.procedure_date?.slice(0, 10) ?? ''}
+          />
+        </label>
+        <label>
+          Assinou contrato?
+          <select name="contract_status" defaultValue={detail.contract_status ?? 'awaiting'}>
+            <option value="awaiting">Aguardando</option>
+            <option value="signed">Sim</option>
+            <option value="not_signed">Não</option>
+          </select>
+        </label>
+        {error && (
+          <p className="form-error full" role="alert">
+            {error}
+          </p>
+        )}
+      </fieldset>
+      <div className="modal-actions sale-actions">
+        <button
+          className="button outline"
+          type="button"
+          disabled={!detail.sale_completed_at || busy}
+          onClick={() => void copy()}
+        >
+          <Copy size={16} />
+          {copied ? 'Copiado!' : 'Copiar para WhatsApp'}
+        </button>
+        <button className="button gold" disabled={!connected || busy}>
+          <Save size={16} />
+          {busy
+            ? 'Salvando…'
+            : detail.sale_completed_at
+              ? 'Atualizar dados da venda'
+              : 'Registrar venda'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function currencyToCents(input: string) {
+  const compact = input.replace(/\s|R\$/gi, '');
+  const decimal = compact.includes(',')
+    ? compact.replace(/\./g, '').replace(',', '.')
+    : /^\d{1,3}(\.\d{3})+$/.test(compact)
+      ? compact.replace(/\./g, '')
+      : compact;
+  const value = Number(decimal);
+  if (!Number.isFinite(value) || value < 0) throw new Error('Informe valores financeiros válidos.');
+  return Math.round(value * 100);
+}
+
+function currencyInput(cents: number | null) {
+  return cents === null ? '' : (cents / 100).toFixed(2).replace('.', ',');
+}
+
+function money(cents: number | null) {
+  return cents === null
+    ? 'A definir'
+    : new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cents / 100);
+}
+
+function saleOrigin(detail: Detail) {
+  const campaign = detail.attributions[0]?.headline?.trim();
+  return campaign ? `${detail.source} — ${campaign}` : detail.source;
+}
+
+function dateOnly(value: string | null) {
+  return value ? value.slice(0, 10).split('-').reverse().join('/') : 'A definir';
+}
+
+function phoneText(value?: string) {
+  if (!value) return 'A definir';
+  const digits = value.replace(/\D/g, '');
+  if (digits.startsWith('55') && digits.length === 13)
+    return `+55 (${digits.slice(2, 4)}) ${digits.slice(4, 9)}-${digits.slice(9)}`;
+  if (digits.startsWith('55') && digits.length === 12)
+    return `+55 (${digits.slice(2, 4)}) ${digits.slice(4, 8)}-${digits.slice(8)}`;
+  return digits ? `+${digits}` : value;
+}
+
+function saleText(detail: Detail) {
+  return [
+    `Nome completo paciente: ${detail.name}`,
+    `Telefone: ${phoneText(detail.phone)}`,
+    `Cidade residência: ${detail.residence_city || 'A definir'}`,
+    `Quem fez a venda: ${detail.sale_seller_name || 'A definir'}`,
+    `Consultor: ${detail.consultant || 'A definir'}`,
+    `Valor total: ${money(detail.total_value_cents)}`,
+    `Valor entrada: ${money(detail.down_payment_cents)}`,
+    `Grau e classificação A: ${detail.hair_grade_classification || 'A definir'}`,
+    `De onde veio: ${saleOrigin(detail)}`,
+    `Se teve pack ou não: ${detail.has_pack ? 'sim' : 'não'}`,
+    `Cidade q opera: ${detail.unit || 'A definir'}`,
+    `Data da cirurgia: ${dateOnly(detail.procedure_date)}`,
+    `Assinou contrato: ${detail.contract_status ? contractStatusLabels[detail.contract_status] : 'Aguardando'}`,
+  ].join('\n');
 }
 const LinkEvidence = () => <ShieldCheck size={18} />;
 

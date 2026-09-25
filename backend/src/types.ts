@@ -19,6 +19,7 @@ export interface Opportunity {
   name: string;
   phone?: string;
   email?: string;
+  residence_city?: string;
   instagram?: string;
   profile_picture_url?: string;
   is_demo: boolean;
@@ -28,7 +29,16 @@ export interface Opportunity {
   channel: 'manual' | 'whatsapp' | 'instagram';
   source_evidence: string;
   stage: Stage;
+  consultation_status: ConsultationStatus;
   procedure_date: string | Date | null;
+  sale_completed_at: string | Date | null;
+  sale_seller_name: string;
+  consultant: string;
+  total_value_cents: number | null;
+  down_payment_cents: number | null;
+  hair_grade_classification: string;
+  has_pack: boolean | null;
+  contract_status: ContractStatus | null;
   state: string;
   reserved_to: string | null;
   owner_id: string | null;
@@ -39,7 +49,33 @@ export interface Opportunity {
   next_action: string;
   version: number;
 }
+export const consultationStatuses = [
+  'UNDEFINED',
+  'NOT_SCHEDULED',
+  'SCHEDULED',
+  'ATTENDED',
+  'NO_SHOW',
+  'CANCELLED',
+] as const;
+export type ConsultationStatus = (typeof consultationStatuses)[number];
+export const contractStatuses = ['awaiting', 'signed', 'not_signed'] as const;
+export type ContractStatus = (typeof contractStatuses)[number];
+export interface SaleInput {
+  expected_version: number;
+  name: string;
+  phone: string;
+  residence_city: string;
+  consultant: string;
+  total_value_cents: number;
+  down_payment_cents: number;
+  hair_grade_classification: string;
+  has_pack: boolean;
+  unit: string;
+  procedure_date: string | null;
+  contract_status: ContractStatus;
+}
 export const stages = [
+  'NEW_LEAD',
   'CONSULTATION_NOT_SCHEDULED',
   'FOLLOW_UP',
   'CONTRACT_PENDING',
@@ -60,6 +96,7 @@ export const saleStages = [
   'CLOSED_WITHOUT_DATE',
 ] as const satisfies readonly Stage[];
 export const stageLabels: Record<Stage, string> = {
+  NEW_LEAD: 'Novo lead',
   CONSULTATION_NOT_SCHEDULED: 'Consulta não agendada',
   FOLLOW_UP: 'Em follow-up',
   CONTRACT_PENDING: 'Contrato pendente',

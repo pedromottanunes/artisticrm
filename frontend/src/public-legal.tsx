@@ -108,7 +108,18 @@ function PrivacyPolicy() {
           </li>
           <li>
             informações de atendimento, como interesse declarado, unidade, qualificação do contato,
-            agendamentos, próximas ações, responsável e histórico operacional;
+            agendamentos, comparecimento ou não comparecimento, próximas ações, responsável e
+            histórico operacional;
+          </li>
+          <li>
+            informações comerciais fornecidas durante o atendimento, como cidade de residência,
+            consultor, valores negociados, entrada, pacote, local e data previstos para o
+            procedimento e situação da assinatura do contrato;
+          </li>
+          <li>
+            classificação capilar informada para organizar o atendimento comercial, quando
+            necessária; essa informação pode revelar dado relacionado à saúde e recebe acesso
+            restrito às pessoas autorizadas;
           </li>
           <li>
             dados de origem e atribuição, como canal, campanha, anúncio ou referência que levou ao
@@ -146,6 +157,7 @@ function PrivacyPolicy() {
           <li>
             distribuir atendimentos entre profissionais autorizados e registrar responsabilidades;
           </li>
+          <li>organizar consultas, registrar comparecimento e acompanhar negociações e vendas;</li>
           <li>registrar interesses, retornos, avaliações e agendamentos solicitados;</li>
           <li>medir a origem de contatos e o desempenho de campanhas, quando aplicável;</li>
           <li>evitar duplicidades, fraude, acesso indevido e falhas operacionais;</li>
@@ -313,9 +325,10 @@ function DataDeletion() {
         <p>
           Confirmada a identidade e a abrangência do pedido, poderão ser excluídos os dados de
           contato e identidade de canal, o cadastro do lead, as conversas e mensagens armazenadas,
-          referências de anexos, atribuições de origem, agendamentos e o histórico operacional
-          associado. O CRM poderá conservar somente um identificador técnico irreversível do evento
-          já excluído para impedir que uma repetição automática recrie o registro.
+          referências de anexos, atribuições de origem, agendamentos, presença em consultas, dados
+          comerciais da venda e o histórico operacional associado. O CRM poderá conservar somente um
+          identificador técnico irreversível do evento já excluído para impedir que uma repetição
+          automática recrie o registro.
         </p>
       </section>
 

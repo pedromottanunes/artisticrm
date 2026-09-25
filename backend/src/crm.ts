@@ -20,7 +20,7 @@ import {
   type WeightedQueueSelection,
 } from './weighted-queue.js';
 
-const selectOpportunity = `SELECT o.*, c.name, c.phone, c.email, c.is_demo,
+const selectOpportunity = `SELECT o.*, c.name, c.phone, c.email, c.residence_city, c.is_demo,
   COALESCE(NULLIF(c.instagram,''),(
     SELECT ci.username FROM contact_identities ci
     WHERE ci.contact_id=c.id AND ci.provider='instagram'
@@ -284,8 +284,8 @@ export class CRM {
         ? new Date(now.getTime() + settings.timeout_minutes * 60_000)
         : null;
       await tx.query(
-        `INSERT INTO opportunities(id,contact_id,interest,unit,source,source_evidence,channel,state,reserved_to,created_at,expires_at,last_message_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$10)`,
+        `INSERT INTO opportunities(id,contact_id,interest,unit,source,source_evidence,channel,state,reserved_to,created_at,expires_at,last_message_at,stage,consultation_status)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$10,'NEW_LEAD','UNDEFINED')`,
         [
           id,
           contact.id,
@@ -557,7 +557,9 @@ export class CRM {
     input: {
       version: number;
       name: string;
-      email: string;
+      phone?: string | null;
+      email?: string;
+      residence_city?: string;
       instagram: string;
       interest: string;
       unit: string;
@@ -607,14 +609,45 @@ export class CRM {
           'REENTRY_PENDING',
           'Uma qualificação encerrada não pode voltar ao atendimento ativo.',
         );
-      await tx.query('UPDATE contacts SET name=$2,email=$3,instagram=$4 WHERE id=$1', [
-        row.contact_id,
-        input.name,
-        input.email,
-        input.instagram,
-      ]);
+      const contact = (
+        await tx.query<{ phone: string | null; email: string; residence_city: string }>(
+          'SELECT phone,email,residence_city FROM contacts WHERE id=$1 FOR UPDATE',
+          [row.contact_id],
+        )
+      ).rows[0];
+      const phone = input.phone === undefined ? contact.phone : input.phone;
+      if (
+        phone &&
+        (
+          await tx.query('SELECT id FROM contacts WHERE phone=$1 AND id<>$2 LIMIT 1', [
+            phone,
+            row.contact_id,
+          ])
+        ).rows.length
+      )
+        throw new DomainError(
+          'PHONE_CONFLICT',
+          'Este telefone já pertence a outro contato. Abra a ficha correspondente.',
+          409,
+        );
+      await tx.query(
+        'UPDATE contacts SET name=$2,phone=$3,email=$4,instagram=$5,residence_city=$6 WHERE id=$1',
+        [
+          row.contact_id,
+          input.name,
+          phone,
+          input.email ?? contact.email,
+          input.instagram,
+          input.residence_city ?? contact.residence_city,
+        ],
+      );
       await tx.query(
         `UPDATE opportunities SET interest=$2,unit=$3,stage=$4,next_action=$5,procedure_date=$6,
+        consultation_status=CASE
+          WHEN $4='CONSULTATION_NOT_SCHEDULED' THEN 'NOT_SCHEDULED'
+          WHEN $4='NEW_LEAD' THEN 'UNDEFINED'
+          ELSE consultation_status
+        END,
         version=version+1,
         state=CASE WHEN $4 IN (${closedStageSql}) THEN 'CANCELLED' ELSE state END,
         reserved_to=CASE WHEN $4 IN (${closedStageSql}) THEN NULL ELSE reserved_to END,
@@ -644,7 +677,9 @@ export class CRM {
           next_stage: input.stage,
           changed_fields: [
             'name',
+            'phone',
             'email',
+            'residence_city',
             'instagram',
             'interest',
             'unit',
@@ -692,9 +727,10 @@ export class CRM {
         'INSERT INTO appointments(id,opportunity_id,starts_at,unit,created_by) VALUES ($1,$2,$3,$4,$5)',
         [appointmentId, id, input.starts_at, input.unit, user.id],
       );
-      await tx.query(`UPDATE opportunities SET stage='FOLLOW_UP',version=version+1 WHERE id=$1`, [
-        id,
-      ]);
+      await tx.query(
+        `UPDATE opportunities SET stage='FOLLOW_UP',consultation_status='SCHEDULED',version=version+1 WHERE id=$1`,
+        [id],
+      );
       await this.audit(
         tx,
         id,

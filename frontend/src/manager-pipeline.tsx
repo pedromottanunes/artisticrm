@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowUpRight, Clock3, LayoutGrid, List, Search } from 'lucide-react';
-import { api, ApiError, stages, type Lead, type Snapshot } from './api';
+import {
+  api,
+  ApiError,
+  consultationStatusLabels,
+  stages,
+  type ConsultationStatus,
+  type Lead,
+  type Snapshot,
+} from './api';
 import { Badge, Empty, Source, dateLabel } from './components';
 
 type PipelineRow = Pick<
@@ -10,6 +18,7 @@ type PipelineRow = Pick<
   | 'interest'
   | 'source'
   | 'stage'
+  | 'consultation_status'
   | 'state'
   | 'reserved_to'
   | 'owner_id'
@@ -55,6 +64,7 @@ export function ManagerPipeline({
   );
   const [board, setBoard] = useState<PipelineBoard | null>(null);
   const [stage, setStage] = useState('ALL');
+  const [consultation, setConsultation] = useState<'ALL' | ConsultationStatus>('ALL');
   const [attendant, setAttendant] = useState('');
   const [source, setSource] = useState('');
   const [search, setSearch] = useState('');
@@ -68,6 +78,7 @@ export function ManagerPipeline({
     scope: 'ALL',
     state: 'ALL',
     stage,
+    consultation,
     order: 'RECENT',
     attendant,
     source,
@@ -195,6 +206,13 @@ export function ManagerPipeline({
                   {rows.map((lead) => (
                     <button className="kanban-card" onClick={() => onOpen(lead.id)} key={lead.id}>
                       <Source value={lead.source} />
+                      {lead.consultation_status !== 'UNDEFINED' && (
+                        <span
+                          className={`consultation-badge is-${lead.consultation_status.toLowerCase()}`}
+                        >
+                          {consultationStatusLabels[lead.consultation_status]}
+                        </span>
+                      )}
                       <h3>{lead.name}</h3>
                       <p>{lead.interest || 'Interesse a definir'}</p>
                       <span className="kanban-action">
@@ -262,6 +280,24 @@ export function ManagerPipeline({
               </select>
             </label>
             <label>
+              <span className="sr-only">Filtrar por situação da consulta</span>
+              <select
+                aria-label="Filtrar por situação da consulta"
+                value={consultation}
+                onChange={(event) => {
+                  setConsultation(event.target.value as 'ALL' | ConsultationStatus);
+                  setPage(1);
+                }}
+              >
+                <option value="ALL">Todas as consultas</option>
+                {Object.entries(consultationStatusLabels).map(([value, label]) => (
+                  <option value={value} key={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
               <span className="sr-only">Filtrar por atendente</span>
               <select
                 aria-label="Filtrar por atendente"
@@ -306,6 +342,7 @@ export function ManagerPipeline({
                   <th>Lead</th>
                   <th>Origem</th>
                   <th>Etapa</th>
+                  <th>Consulta</th>
                   <th>Atendente</th>
                   <th>Situação</th>
                   <th>Entrada</th>
@@ -334,6 +371,17 @@ export function ManagerPipeline({
                       </td>
                       <td data-label="Etapa">
                         <span className="stage-pill">{stages[lead.stage]}</span>
+                      </td>
+                      <td data-label="Consulta">
+                        {lead.consultation_status === 'UNDEFINED' ? (
+                          <span className="muted">—</span>
+                        ) : (
+                          <span
+                            className={`consultation-badge is-${lead.consultation_status.toLowerCase()}`}
+                          >
+                            {consultationStatusLabels[lead.consultation_status]}
+                          </span>
+                        )}
                       </td>
                       <td data-label="Atendente">
                         {owner ? (

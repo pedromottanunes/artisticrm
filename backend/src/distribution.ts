@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { Document } from 'mongodb';
 import type { Database } from './db.js';
 import type { MongoStore } from './mongo-store.js';
-import { closedStages, requireManager, stages, type User } from './types.js';
+import { closedStages, consultationStatuses, requireManager, stages, type User } from './types.js';
 import { previewWeightedOrder } from './weighted-queue.js';
 
 export const distributionQuery = z
@@ -10,6 +10,7 @@ export const distributionQuery = z
     state: z.enum(['ALL', 'RESERVED', 'POOL', 'CLAIMED', 'PENDING']).default('ALL'),
     scope: z.enum(['OPEN', 'CLOSED', 'ALL']).default('OPEN'),
     stage: z.enum(['ALL', ...stages]).default('ALL'),
+    consultation: z.enum(['ALL', ...consultationStatuses]).default('ALL'),
     order: z.enum(['PRIORITY', 'RECENT']).default('PRIORITY'),
     attendant: z.union([z.string().uuid(), z.literal('')]).default(''),
     search: z.string().trim().max(100).default(''),
@@ -185,6 +186,7 @@ async function readDistributionBoard(
         } else filter.stage = query.stage;
       }
       if (query.state !== 'ALL') filter.state = query.state;
+      if (query.consultation !== 'ALL') filter.consultation_status = query.consultation;
       if (query.attendant)
         filter.$or = [
           { state: 'RESERVED', reserved_to: query.attendant },
@@ -283,6 +285,7 @@ async function readDistributionBoard(
             interest: 1,
             source: 1,
             stage: 1,
+            consultation_status: 1,
             state: 1,
             reserved_to: 1,
             owner_id: 1,
@@ -376,7 +379,8 @@ async function readDistributionBoard(
       AND ($2='' OR (o.state='RESERVED' AND o.reserved_to::text=$2) OR (o.state='CLAIMED' AND o.owner_id::text=$2) OR ($4<>'OPEN' AND o.owner_id::text=$2))
       AND ($3='' OR strpos(lower(c.name),lower($3))>0 OR strpos(c.phone,$3)>0)
       AND ($5='' OR o.source=$5)
-      AND ($6='ALL' OR o.stage=$6)`;
+      AND ($6='ALL' OR o.stage=$6)
+      AND ($7='ALL' OR o.consultation_status=$7)`;
     const args = [
       query.state,
       query.attendant,
@@ -384,6 +388,7 @@ async function readDistributionBoard(
       query.scope,
       query.source,
       query.stage,
+      query.consultation,
     ];
     const counts = (
       await tx.query<{ state: string; count: string }>(
@@ -416,13 +421,13 @@ async function readDistributionBoard(
     const page = Math.min(query.page, Math.max(1, Math.ceil(total / pageSize)));
     const rows = (
       await tx.query(
-        `SELECT o.id,c.name,c.phone,o.interest,o.source,o.stage,o.state,o.reserved_to,o.owner_id,o.created_at,o.expires_at,o.claimed_at,o.needs_review,o.version
+        `SELECT o.id,c.name,c.phone,o.interest,o.source,o.stage,o.consultation_status,o.state,o.reserved_to,o.owner_id,o.created_at,o.expires_at,o.claimed_at,o.needs_review,o.version
       FROM opportunities o JOIN contacts c ON c.id=o.contact_id WHERE ${where}
       ORDER BY ${
         query.order === 'RECENT'
           ? 'o.created_at DESC,o.id DESC'
           : "CASE o.state WHEN 'RESERVED' THEN 0 WHEN 'POOL' THEN 1 WHEN 'PENDING' THEN 2 ELSE 3 END,COALESCE(o.expires_at,o.created_at),o.id"
-      } LIMIT $7 OFFSET $8`,
+      } LIMIT $8 OFFSET $9`,
         [...args, pageSize, (page - 1) * pageSize],
       )
     ).rows;

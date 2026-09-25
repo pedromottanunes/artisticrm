@@ -399,7 +399,7 @@ test('Mongo: atualização e agendamento concorrentes respeitam versões e avali
     expected_version: 1,
     starts_at: input.starts_at,
     unit: 'Alterado',
-    status: 'completed' as const,
+    status: 'attended' as const,
     reason: 'Conclusão de teste',
   };
   await assert.rejects(ops.changeAppointment(users[0], appt.id, change, key()), {
@@ -408,6 +408,7 @@ test('Mongo: atualização e agendamento concorrentes respeitam versões e avali
   now = new Date(now.getTime() + 3_600_000);
   await ops.changeAppointment(users[0], appt.id, change, key());
   assert.equal((await db.one('appointments', { id: appt.id }))!.unit, 'Teste');
+  assert.equal((await row(id)).consultation_status, 'ATTENDED');
   await assert.rejects(
     ops.changeAppointment(users[0], appt.id, { ...change, expected_version: 2 }, key()),
     { code: 'APPOINTMENT_CLOSED' },
@@ -420,6 +421,55 @@ test('Mongo: atualização e agendamento concorrentes respeitam versões e avali
   });
   assert.equal((await row(id)).open, false);
   assert.equal((await row(id)).procedure_date, '2026-10-20');
+});
+test('Mongo: falta mantém follow-up e venda estrutura os dados comerciais', async () => {
+  const { id } = await lead(2);
+  const appointment = await ops.schedule(manager, id, {
+    expected_version: 1,
+    starts_at: '2026-09-10T13:00:00Z',
+    unit: 'Florianópolis',
+  });
+  now = new Date('2026-09-10T14:00:00Z');
+  await ops.changeAppointment(
+    manager,
+    appointment.id,
+    {
+      expected_version: 1,
+      status: 'no_show',
+      starts_at: '2026-09-10T13:00:00Z',
+      unit: 'Florianópolis',
+      reason: 'Paciente não compareceu.',
+    },
+    key(),
+  );
+  assert.equal((await row(id)).consultation_status, 'NO_SHOW');
+  assert.equal((await row(id)).stage, 'FOLLOW_UP');
+  await ops.recordSale(
+    manager,
+    id,
+    {
+      expected_version: 3,
+      name: 'Paciente Mongo',
+      phone: '5548999990002',
+      residence_city: 'Criciúma',
+      consultant: 'Rafa',
+      total_value_cents: 1_500_000,
+      down_payment_cents: 150_000,
+      hair_grade_classification: 'grau 3 A1',
+      has_pack: false,
+      unit: 'Florianópolis',
+      procedure_date: null,
+      contract_status: 'awaiting',
+    },
+    key(),
+  );
+  const sold = await row(id);
+  assert.equal(sold.stage, 'CLOSED_WITHOUT_DATE');
+  assert.equal(sold.contract_status, 'awaiting');
+  assert.equal(sold.sale_seller_name, manager.name);
+  const contact = (await db.one('contacts', { id: sold.contact_id }))!;
+  assert.equal(contact.name, 'Paciente Mongo');
+  assert.equal(contact.residence_city, 'Criciúma');
 });
 test('Mongo: retorno após perdido preserva histórico e exige revisão', async () => {
   const { id } = await lead();
@@ -581,6 +631,33 @@ test('Mongo: inicialização repara posições antigas que já continham lacunas
     [1, 2, 3, 4],
   );
   assert.equal((await db.one('distribution_settings', { id: 1 }))!.last_position, 2);
+});
+test('Mongo: migração classifica leads antigos como novos sem desfazer decisão do vendedor', async () => {
+  const legacy = await lead(92);
+  const classified = await lead(93);
+  await db.update(
+    'opportunities',
+    { id: legacy.id },
+    {
+      $set: { stage: 'CONSULTATION_NOT_SCHEDULED' },
+      $unset: { consultation_status: '' },
+    },
+  );
+  await db.update(
+    'opportunities',
+    { id: classified.id },
+    {
+      $set: {
+        stage: 'CONSULTATION_NOT_SCHEDULED',
+        consultation_status: 'NOT_SCHEDULED',
+      },
+    },
+  );
+  await initializeMongo(db);
+  assert.equal((await row(legacy.id)).stage, 'NEW_LEAD');
+  assert.equal((await row(legacy.id)).consultation_status, 'UNDEFINED');
+  assert.equal((await row(classified.id)).stage, 'CONSULTATION_NOT_SCHEDULED');
+  assert.equal((await row(classified.id)).consultation_status, 'NOT_SCHEDULED');
 });
 test('Mongo: migração de canal preserva manual e reconhece evento legado do WhatsApp', async () => {
   const manual = await ops.ingest(input(90), 'legacy-manual-event', manager.id);

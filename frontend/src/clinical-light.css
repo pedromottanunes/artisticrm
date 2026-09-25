@@ -496,6 +496,64 @@ label small,
   box-shadow: 0 26px 80px rgba(26, 49, 67, 0.22);
 }
 
+.consultation-badge {
+  border-color: #cad8df;
+  background: #f5f8fa;
+  color: #526d80;
+}
+
+.consultation-badge.is-scheduled {
+  border-color: #dfbd83;
+  background: #fff8ec;
+  color: #8b6127;
+}
+
+.consultation-badge.is-attended {
+  border-color: #9dcfc3;
+  background: #edf9f6;
+  color: #166f66;
+}
+
+.consultation-badge.is-no_show,
+.consultation-badge.is-cancelled {
+  border-color: #e2b0aa;
+  background: #fff2f1;
+  color: #974b47;
+}
+
+.sale-form-heading,
+.attendance-confirmation {
+  border-color: var(--light-border);
+}
+
+.sale-form-heading h3 {
+  color: var(--light-ink);
+}
+
+.sale-form-heading > strong,
+.attendance-yes {
+  color: #166f66;
+}
+
+.attendance-confirmation {
+  background: #f7fafb;
+}
+
+.attendance-confirmation small {
+  color: var(--light-secondary);
+}
+
+.attendance-yes {
+  border-color: #9dcfc3;
+  background: #edf9f6;
+}
+
+.attendance-no {
+  border-color: #e2b0aa;
+  background: #fff2f1;
+  color: #974b47;
+}
+
 .modal::backdrop {
   background: rgba(29, 48, 63, 0.45);
 }

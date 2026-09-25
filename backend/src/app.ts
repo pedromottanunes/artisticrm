@@ -30,6 +30,16 @@ declare module 'fastify' {
 const uuid = z.string().uuid();
 const idParams = z.object({ id: uuid });
 const shortText = z.string().trim().max(160);
+const optionalPhone = z
+  .string()
+  .transform((value) => value.replace(/[^\d+]/g, '').replace(/^\+/, ''))
+  .pipe(
+    z.union([
+      z.literal(''),
+      z.string().regex(/^[1-9]\d{9,14}$/, 'Informe o telefone com código do país e DDD.'),
+    ]),
+  )
+  .transform((value) => value || null);
 const leadSchema = z
   .object({
     name: shortText.min(2),
@@ -369,7 +379,9 @@ export async function buildApp(
       .object({
         version: z.number().int().positive(),
         name: shortText.min(2),
-        email: z.union([z.literal(''), z.string().email().max(200)]),
+        phone: optionalPhone.optional(),
+        email: z.union([z.literal(''), z.string().email().max(200)]).optional(),
+        residence_city: shortText.optional(),
         instagram: shortText,
         interest: shortText,
         unit: shortText,
@@ -380,6 +392,31 @@ export async function buildApp(
       .strict()
       .parse(request.body);
     return crm.update(request.user, idParams.parse(request.params).id, input);
+  });
+  app.put('/api/v1/opportunities/:id/sale', async (request) => {
+    const input = z
+      .object({
+        expected_version: z.number().int().positive(),
+        name: shortText.min(2),
+        phone: optionalPhone.refine((value) => value !== null, 'Informe o telefone do paciente.'),
+        residence_city: shortText.min(2),
+        consultant: shortText.min(2),
+        total_value_cents: z.number().int().min(0).max(2_000_000_000),
+        down_payment_cents: z.number().int().min(0).max(2_000_000_000),
+        hair_grade_classification: shortText.min(1),
+        has_pack: z.boolean(),
+        unit: shortText.min(2),
+        procedure_date: z.union([z.string().regex(/^[1-9]\d{3}-\d{2}-\d{2}$/), z.null()]),
+        contract_status: z.enum(['awaiting', 'signed', 'not_signed']),
+      })
+      .strict()
+      .parse(request.body);
+    return crm.recordSale(
+      request.user,
+      idParams.parse(request.params).id,
+      input,
+      commandKey(request.headers),
+    );
   });
   app.post('/api/v1/opportunities/:id/appointments', async (request) => {
     const input = z
@@ -546,7 +583,7 @@ export async function buildApp(
     const input = z
       .object({
         expected_version: z.number().int().positive(),
-        status: z.enum(['scheduled', 'completed', 'cancelled']),
+        status: z.enum(['scheduled', 'attended', 'no_show', 'cancelled']),
         starts_at: z.string().datetime({ offset: true }),
         unit: shortText.min(2),
         reason,

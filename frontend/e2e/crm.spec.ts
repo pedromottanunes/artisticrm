@@ -667,7 +667,7 @@ test('funil alterna entre quadro e lista completa com filtros', async ({ page })
     'aria-pressed',
     'true',
   );
-  await expect(page.locator('.kanban-column')).toHaveCount(6);
+  await expect(page.locator('.kanban-column')).toHaveCount(7);
 
   await view.getByRole('button', { name: 'Lista' }).click();
   await expect(view.getByRole('button', { name: 'Lista' })).toHaveAttribute('aria-pressed', 'true');
@@ -761,6 +761,27 @@ test('gestão navega, filtra e cadastra lead persistente', async ({ page }) => {
   await expect(dialog).not.toBeVisible();
   await page.getByLabel('Buscar nome ou telefone').fill('Teste Navegador');
   await expect(page.getByRole('table').getByText('Teste Navegador').first()).toBeVisible();
+  await page.getByRole('button', { name: 'Abrir ficha de Teste Navegador' }).click();
+  await expect(dialog.getByLabel('Qualificação')).toHaveValue('NEW_LEAD');
+  await expect(dialog.getByText('Ainda não definido', { exact: true })).toHaveCount(0);
+  await dialog.getByLabel('Qualificação').selectOption('CONSULTATION_NOT_SCHEDULED');
+  await dialog.getByRole('button', { name: 'Salvar alterações' }).click();
+  await expect(dialog.locator('.consultation-badge')).toHaveText('Consulta não agendada');
+  await dialog.getByRole('button', { name: 'Venda', exact: true }).click();
+  await expect(dialog.getByRole('button', { name: 'Copiar para WhatsApp' })).toBeDisabled();
+  await dialog.getByLabel('Cidade de residência').fill('Criciúma');
+  await dialog.getByLabel('Consultor').fill('Rafa');
+  await dialog.getByLabel('Valor total').fill('15.000,00');
+  await dialog.getByLabel('Valor da entrada').fill('1.500,00');
+  await dialog.getByLabel('Grau e classificação A').fill('grau 3 A1');
+  await dialog.getByLabel('Cidade onde opera').fill('Florianópolis');
+  await dialog.getByLabel('Data da cirurgia').fill('2027-10-20');
+  await dialog.getByLabel('Assinou contrato?').selectOption('awaiting');
+  await dialog.getByRole('button', { name: 'Registrar venda' }).click();
+  await expect(dialog.getByText('Venda registrada', { exact: true })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Copiar para WhatsApp' })).toBeEnabled();
+  await expect(dialog.getByLabel('Quem fez a venda')).toHaveValue('Cadu');
+  await dialog.getByRole('button', { name: 'Fechar janela' }).click();
   await expect(page.getByRole('button', { name: 'Meta Ads', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Google Ads', exact: true })).toHaveCount(0);
   expect(errors).toEqual([]);
@@ -882,7 +903,7 @@ test('ficha edita cadastro, agenda consulta e preserva histórico', async ({ pag
   await dialog.getByRole('button', { name: 'Salvar consulta' }).click();
   await expect(dialog.getByText(/· Cancelada/)).toBeVisible();
   await dialog.getByRole('button', { name: 'Histórico', exact: true }).click();
-  await expect(dialog.getByText(/Consulta cancelada/)).toBeVisible();
+  await expect(dialog.getByText(/^Consulta cancelada\. Motivo:/)).toBeVisible();
 });
 test('painel móvel sem transbordamento e menu utilizável', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });

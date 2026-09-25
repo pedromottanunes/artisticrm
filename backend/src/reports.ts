@@ -420,6 +420,7 @@ function buildReport(data: ReportData, from: string, to: string) {
   }
   const funnelDefinitions = [
     ['RECEIVED', 'Recebidos', () => true],
+    ['NEW_LEAD', 'Novos leads', (row: ReportOpportunity) => row.stage === 'NEW_LEAD'],
     [
       'CONSULTATION_NOT_SCHEDULED',
       'Consulta não agendada',

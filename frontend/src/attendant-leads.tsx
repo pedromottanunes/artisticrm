@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import { LayoutGrid, List } from 'lucide-react';
-import type { Lead } from './api';
+import { consultationStatusLabels, type ConsultationStatus, type Lead } from './api';
 import { Badge, Empty } from './components';
 
 type View = 'list' | 'cards';
@@ -27,6 +27,7 @@ export function AttendantLeads({
   action: (lead: Lead) => ReactNode;
 }) {
   const [preference, setPreference] = useState<View | null>(savedView);
+  const [consultation, setConsultation] = useState<'ALL' | ConsultationStatus>('ALL');
   const [mobile, setMobile] = useState(() => window.matchMedia('(max-width: 1024px)').matches);
   useEffect(() => {
     const viewport = window.matchMedia('(max-width: 1024px)');
@@ -43,7 +44,7 @@ export function AttendantLeads({
       /* Session preference still works. */
     }
   };
-  const rows = pool
+  const ordered = pool
     ? leads
     : [...leads].sort(
         (a, b) =>
@@ -52,6 +53,10 @@ export function AttendantLeads({
             ? Date.parse(a.expires_at!) - Date.parse(b.expires_at!)
             : 0),
       );
+  const rows =
+    consultation === 'ALL'
+      ? ordered
+      : ordered.filter((lead) => lead.consultation_status === consultation);
   const newCount = pool ? rows.length : rows.filter((lead) => lead.state === 'RESERVED').length;
 
   return (
@@ -63,13 +68,32 @@ export function AttendantLeads({
             ? `${newCount} ${newCount === 1 ? 'lead disponível' : 'leads disponíveis'}`
             : `${newCount} ${newCount === 1 ? 'novo lead' : 'novos leads'}`}
         </p>
-        <div className="view-switch" role="group" aria-label="Visualização dos leads">
-          <button aria-pressed={view === 'list'} onClick={() => selectView('list')}>
-            <List size={16} /> Lista
-          </button>
-          <button aria-pressed={view === 'cards'} onClick={() => selectView('cards')}>
-            <LayoutGrid size={16} /> Cartões
-          </button>
+        <div className="attendant-tools">
+          <label className="consultation-filter">
+            <span className="sr-only">Filtrar por situação da consulta</span>
+            <select
+              aria-label="Filtrar por situação da consulta"
+              value={consultation}
+              onChange={(event) =>
+                setConsultation(event.target.value as 'ALL' | ConsultationStatus)
+              }
+            >
+              <option value="ALL">Todas as consultas</option>
+              {Object.entries(consultationStatusLabels).map(([value, label]) => (
+                <option value={value} key={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="view-switch" role="group" aria-label="Visualização dos leads">
+            <button aria-pressed={view === 'list'} onClick={() => selectView('list')}>
+              <List size={16} /> Lista
+            </button>
+            <button aria-pressed={view === 'cards'} onClick={() => selectView('cards')}>
+              <LayoutGrid size={16} /> Cartões
+            </button>
+          </div>
         </div>
       </div>
       <div className={`lead-cards attendant-leads is-${view}`}>
@@ -95,7 +119,16 @@ export function AttendantLeads({
                 onClick={() => onOpen(lead.id)}
                 aria-label={`Abrir ficha de ${lead.name}`}
               >
-                <Badge state={lead.state} />
+                <span className="attendant-lead-badges">
+                  <Badge state={lead.state} />
+                  {lead.consultation_status !== 'UNDEFINED' && (
+                    <span
+                      className={`consultation-badge is-${lead.consultation_status.toLowerCase()}`}
+                    >
+                      {consultationStatusLabels[lead.consultation_status]}
+                    </span>
+                  )}
+                </span>
                 <strong>{lead.name}</strong>
                 {pool && lead.phone && (
                   <span className="attendant-lead-phone">{phoneLabel(lead.phone)}</span>

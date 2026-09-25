@@ -96,6 +96,9 @@ export async function checkDistribution(
   assert.equal((await board({ search: '[literal]' })).counts.RESERVED, 506);
   assert.equal((await board({ search: '.*' })).total, 0);
   assert.equal((await board({ source: 'Meta Ads' })).total, 0);
+  assert.equal((await board({ consultation: 'UNDEFINED' })).total, 506);
+  assert.equal((await board({ consultation: 'NOT_SCHEDULED' })).total, 0);
+  assert.equal((await board({ consultation: 'NO_SHOW' })).total, 0);
   await assert.rejects(
     () => distributionBoard(db, users[0], distributionQuery.parse({}), async () => getNow()),
     { code: 'FORBIDDEN' },
@@ -139,6 +142,15 @@ export async function checkDistribution(
       (
         await app.inject({
           url: '/api/v1/distribution/board?stage=INVALID',
+          headers: managerHeaders,
+        })
+      ).statusCode,
+      400,
+    );
+    assert.equal(
+      (
+        await app.inject({
+          url: '/api/v1/distribution/board?consultation=INVALID',
           headers: managerHeaders,
         })
       ).statusCode,
@@ -203,7 +215,8 @@ export async function checkDistribution(
     assert.equal(closed.rows[0].stage, 'DECLINED');
     assert.equal((await board({ scope: 'ALL' })).total, 506);
     assert.equal((await board({ scope: 'ALL', stage: 'DECLINED' })).total, 1);
-    assert.equal((await board({ scope: 'ALL', stage: 'CONSULTATION_NOT_SCHEDULED' })).total, 505);
+    assert.equal((await board({ scope: 'ALL', stage: 'NEW_LEAD' })).total, 505);
+    assert.equal((await board({ scope: 'ALL', stage: 'CONSULTATION_NOT_SCHEDULED' })).total, 0);
     const recent = await board({ scope: 'ALL', order: 'RECENT' });
     assert.notEqual(recent.rows[0].id, first.id);
     assert.equal((await board({ scope: 'CLOSED', attendant: users[2].id })).total, 1);

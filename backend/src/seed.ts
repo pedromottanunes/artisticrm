@@ -72,6 +72,10 @@ export async function seedDemo(crm: CRM, withLeads = true) {
       ];
       await crm.db.query(
         `UPDATE opportunities SET stage=$2,next_action=$3,created_at=$4,
+        consultation_status=CASE
+          WHEN $2='CONSULTATION_NOT_SCHEDULED' THEN 'NOT_SCHEDULED'
+          ELSE consultation_status
+        END,
         state=CASE WHEN $2='CONTRACT_PENDING' THEN 'CANCELLED' ELSE state END,
         reserved_to=CASE WHEN $2='CONTRACT_PENDING' THEN NULL ELSE reserved_to END,
         expires_at=CASE WHEN $2='CONTRACT_PENDING' THEN NULL ELSE expires_at END
@@ -96,6 +100,9 @@ export async function seedDemo(crm: CRM, withLeads = true) {
           'INSERT INTO appointments(id,opportunity_id,starts_at,unit,created_by) VALUES ($1,$2,$3,$4,$5)',
           [randomUUID(), created.id, starts, 'Unidade de demonstração', row.reserved_to],
         );
+        await crm.db.query("UPDATE opportunities SET consultation_status='SCHEDULED' WHERE id=$1", [
+          created.id,
+        ]);
       }
     } else if (i < 10) {
       await crm.db.query('UPDATE opportunities SET expires_at=$2 WHERE id=$1', [

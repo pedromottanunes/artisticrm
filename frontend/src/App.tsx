@@ -625,9 +625,12 @@ export function App() {
                         }).format(new Date(a.starts_at))}
                       </span>
                       <span className="stage-pill">
-                        {{ scheduled: 'Agendada', completed: 'Concluída', cancelled: 'Cancelada' }[
-                          a.status
-                        ] ?? a.status}
+                        {{
+                          scheduled: 'Agendada',
+                          attended: 'Compareceu',
+                          no_show: 'Não compareceu',
+                          cancelled: 'Cancelada',
+                        }[a.status] ?? a.status}
                       </span>
                       <ArrowUpRight size={18} />
                     </button>
@@ -660,11 +663,15 @@ export function App() {
                   Aguardando assinatura
                 </span>
               </div>
-              {leads.some((l) => l.stage === 'CONTRACT_PENDING') && (
+              {leads.some(
+                (lead) => lead.sale_completed_at && lead.contract_status === 'awaiting',
+              ) && (
                 <>
                   <div className="section-label">OPORTUNIDADES AGUARDANDO CONTRATO</div>
                   {leadTable(
-                    leads.filter((l) => l.stage === 'CONTRACT_PENDING'),
+                    leads.filter(
+                      (lead) => lead.sale_completed_at && lead.contract_status === 'awaiting',
+                    ),
                     true,
                   )}
                 </>

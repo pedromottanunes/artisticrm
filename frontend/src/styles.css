@@ -1461,6 +1461,61 @@ main {
 .form-grid .full {
   grid-column: 1/-1;
 }
+.consultation-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 5px 9px;
+  border: 1px solid #7f94a82e;
+  border-radius: 999px;
+  background: #8da4b512;
+  color: #aebdca;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+.consultation-badge.is-scheduled {
+  border-color: #d8aa633d;
+  background: #edb25a14;
+  color: #e8c38e;
+}
+.consultation-badge.is-attended {
+  border-color: #70b79f45;
+  background: #70b79f16;
+  color: #99d1bd;
+}
+.consultation-badge.is-no_show,
+.consultation-badge.is-cancelled {
+  border-color: #d28d8540;
+  background: #c97f7912;
+  color: #dfaaa4;
+}
+.sale-form-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.sale-form-heading span {
+  color: var(--gold);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+}
+.sale-form-heading h3 {
+  margin-top: 6px;
+  font-size: 20px;
+}
+.sale-form-heading > strong {
+  color: #99d1bd;
+  font-size: 13px;
+}
+.sale-actions {
+  justify-content: space-between;
+}
 .form-grid fieldset,
 fieldset.form-grid {
   border: 0;

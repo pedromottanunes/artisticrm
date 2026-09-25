@@ -10,6 +10,7 @@ import {
   stageLabels,
   type User,
   type Opportunity,
+  type SaleInput,
 } from './types.js';
 import type { CRM, LeadInput } from './crm.js';
 import type { DeleteAttendantInput, Operations } from './operations.js';
@@ -198,6 +199,7 @@ export class MongoOperations {
           name: input.name,
           ...(input.phone ? { phone: input.phone } : {}),
           email: '',
+          residence_city: '',
           instagram: '',
           is_demo: input.is_demo ?? false,
         };
@@ -280,8 +282,17 @@ export class MongoOperations {
         needs_review: returning,
         open: true,
         next_action: '',
-        stage: 'CONSULTATION_NOT_SCHEDULED',
+        stage: 'NEW_LEAD',
+        consultation_status: 'UNDEFINED',
         procedure_date: null,
+        sale_completed_at: null,
+        sale_seller_name: '',
+        consultant: '',
+        total_value_cents: null,
+        down_payment_cents: null,
+        hair_grade_classification: '',
+        has_pack: null,
+        contract_status: null,
         version: 1,
       });
       if (next)
@@ -661,10 +672,27 @@ export class MongoOperations {
           'REENTRY_PENDING',
           'Uma qualificação encerrada não pode voltar ao atendimento ativo.',
         );
+      const contact = await tx.one('contacts', { id: row.contact_id });
+      if (!contact) throw new Error('Missing contact');
+      const phone = input.phone === undefined ? contact.phone : input.phone;
+      if (phone && (await tx.one('contacts', { phone, id: { $ne: row.contact_id } })))
+        throw new DomainError(
+          'PHONE_CONFLICT',
+          'Este telefone já pertence a outro contato. Abra a ficha correspondente.',
+          409,
+        );
       await tx.update(
         'contacts',
         { id: row.contact_id },
-        { $set: { name: input.name, email: input.email, instagram: input.instagram } },
+        {
+          $set: {
+            name: input.name,
+            phone,
+            email: input.email ?? contact.email ?? '',
+            instagram: input.instagram,
+            residence_city: input.residence_city ?? contact.residence_city ?? '',
+          },
+        },
       );
       await tx.update(
         'opportunities',
@@ -674,6 +702,12 @@ export class MongoOperations {
             interest: input.interest,
             unit: input.unit,
             stage: input.stage,
+            consultation_status:
+              input.stage === 'CONSULTATION_NOT_SCHEDULED'
+                ? 'NOT_SCHEDULED'
+                : input.stage === 'NEW_LEAD'
+                  ? 'UNDEFINED'
+                  : row.consultation_status,
             procedure_date: input.stage === 'CLOSED_WITH_DATE' ? input.procedure_date : null,
             next_action: input.next_action,
             state: isClosedStage(input.stage) ? 'CANCELLED' : row.state,
@@ -722,7 +756,7 @@ export class MongoOperations {
       await tx.update(
         'opportunities',
         { id },
-        { $set: { stage: 'FOLLOW_UP' }, $inc: { version: 1 } },
+        { $set: { stage: 'FOLLOW_UP', consultation_status: 'SCHEDULED' }, $inc: { version: 1 } },
       );
       await this.audit(
         tx,
@@ -1116,7 +1150,8 @@ export class MongoOperations {
           const now = await this.now(tx);
           if (
             (input.status === 'scheduled' && new Date(input.starts_at) <= now) ||
-            (input.status === 'completed' && new Date(a.starts_at) > now)
+            ((input.status === 'attended' || input.status === 'no_show') &&
+              new Date(a.starts_at) > now)
           )
             throw new DomainError('INVALID_DATE', 'Horário inválido para esta operação.', 400);
           const starts_at = input.status === 'scheduled' ? new Date(input.starts_at) : a.starts_at;
@@ -1126,7 +1161,17 @@ export class MongoOperations {
             { id },
             { $set: { starts_at, unit, status: input.status }, $inc: { version: 1 } },
           );
-          await tx.update('opportunities', { id: row.id }, { $inc: { version: 1 } });
+          const consultation_status = {
+            scheduled: 'SCHEDULED',
+            attended: 'ATTENDED',
+            no_show: 'NO_SHOW',
+            cancelled: 'CANCELLED',
+          }[input.status];
+          await tx.update(
+            'opportunities',
+            { id: row.id },
+            { $set: { consultation_status }, $inc: { version: 1 } },
+          );
           await this.audit(
             tx,
             row.id,
@@ -1142,6 +1187,90 @@ export class MongoOperations {
           return { id, version: a.version + 1 };
         },
       );
+    });
+  }
+  async recordSale(actor: User, id: string, input: SaleInput, key: string) {
+    return this.db.atomic(async (tx) => {
+      await this.actor(tx, actor);
+      return this.command(tx, actor, key, { kind: 'sale.record', id, ...input }, async () => {
+        const row = await tx.one<Opportunity>('opportunities', { id });
+        if (!row || (actor.role !== 'manager' && row.owner_id !== actor.id))
+          throw new DomainError('NOT_FOUND', 'Lead não encontrado neste perfil.', 404);
+        if (row.version !== input.expected_version)
+          throw new DomainError('VERSION_CONFLICT', 'A ficha mudou. Reabra antes de salvar.');
+        if (input.procedure_date && !isValidDateOnly(input.procedure_date))
+          throw new DomainError(
+            'INVALID_PROCEDURE_DATE',
+            'Informe uma data de cirurgia válida.',
+            400,
+          );
+        if (input.down_payment_cents > input.total_value_cents)
+          throw new DomainError(
+            'INVALID_DOWN_PAYMENT',
+            'O valor da entrada não pode superar o valor total.',
+            400,
+          );
+        if (await tx.one('contacts', { phone: input.phone, id: { $ne: row.contact_id } }))
+          throw new DomainError(
+            'PHONE_CONFLICT',
+            'Este telefone já pertence a outro contato. Abra a ficha correspondente.',
+            409,
+          );
+        await tx.update(
+          'contacts',
+          { id: row.contact_id },
+          {
+            $set: {
+              name: input.name,
+              phone: input.phone,
+              residence_city: input.residence_city,
+            },
+          },
+        );
+        const firstSale = !row.sale_completed_at;
+        const now = await this.now(tx);
+        await tx.update(
+          'opportunities',
+          { id },
+          {
+            $set: {
+              unit: input.unit,
+              procedure_date: input.procedure_date,
+              stage: input.procedure_date ? 'CLOSED_WITH_DATE' : 'CLOSED_WITHOUT_DATE',
+              state: 'CANCELLED',
+              reserved_to: null,
+              expires_at: null,
+              open: false,
+              sale_completed_at: row.sale_completed_at ?? now,
+              sale_seller_name: row.sale_seller_name || actor.name,
+              consultant: input.consultant,
+              total_value_cents: input.total_value_cents,
+              down_payment_cents: input.down_payment_cents,
+              hair_grade_classification: input.hair_grade_classification,
+              has_pack: input.has_pack,
+              contract_status: input.contract_status,
+            },
+            $inc: { version: 1 },
+          },
+        );
+        await this.audit(
+          tx,
+          id,
+          actor.id,
+          firstSale ? 'sale.completed' : 'sale.updated',
+          firstSale
+            ? `Venda concluída por ${actor.name}.`
+            : `Dados da venda atualizados por ${actor.name}.`,
+          {
+            seller: row.sale_seller_name || actor.name,
+            consultant: input.consultant,
+            total_value_cents: input.total_value_cents,
+            down_payment_cents: input.down_payment_cents,
+            contract_status: input.contract_status,
+          },
+        );
+        return { id, version: row.version + 1 };
+      });
     });
   }
   async changePassword(user: User, currentPassword: string, newPassword: string) {

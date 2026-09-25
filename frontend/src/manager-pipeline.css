@@ -70,7 +70,7 @@
 
 .pipeline-filters {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) repeat(3, minmax(160px, 210px));
+  grid-template-columns: minmax(240px, 1fr) repeat(4, minmax(145px, 190px));
   gap: 10px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--line);
@@ -94,7 +94,7 @@
 
 .pipeline-table {
   width: 100%;
-  min-width: 980px;
+  min-width: 1120px;
   border-collapse: collapse;
 }
 

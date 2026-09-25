@@ -162,6 +162,75 @@ export async function initializeMongo(db: MongoStore) {
   await db
     .collection('opportunities')
     .updateMany({ procedure_date: { $exists: false } }, { $set: { procedure_date: null } });
+  await db
+    .collection('contacts')
+    .updateMany({ residence_city: { $exists: false } }, { $set: { residence_city: '' } });
+  await db
+    .collection('appointments')
+    .updateMany({ status: 'completed' }, { $set: { status: 'attended' } });
+  await db
+    .collection('opportunities')
+    .updateMany(
+      { stage: 'CONSULTATION_NOT_SCHEDULED', consultation_status: { $exists: false } },
+      { $set: { stage: 'NEW_LEAD', consultation_status: 'UNDEFINED' } },
+    );
+  await db
+    .collection('opportunities')
+    .updateMany(
+      { consultation_status: { $exists: false } },
+      { $set: { consultation_status: 'NOT_SCHEDULED' } },
+    );
+  const consultationRows = await db
+    .collection('appointments')
+    .aggregate([
+      { $sort: { starts_at: -1, id: -1 } },
+      { $group: { _id: '$opportunity_id', status: { $first: '$status' } } },
+    ])
+    .toArray();
+  const consultationStatus = {
+    scheduled: 'SCHEDULED',
+    attended: 'ATTENDED',
+    no_show: 'NO_SHOW',
+    cancelled: 'CANCELLED',
+  } as const;
+  for (const row of consultationRows) {
+    const status = consultationStatus[row.status as keyof typeof consultationStatus];
+    if (status)
+      await db
+        .collection('opportunities')
+        .updateOne({ id: row._id }, { $set: { consultation_status: status } });
+  }
+  await db.collection('opportunities').updateMany(
+    { sale_completed_at: { $exists: false } },
+    {
+      $set: {
+        sale_completed_at: null,
+        sale_seller_name: '',
+        consultant: '',
+        total_value_cents: null,
+        down_payment_cents: null,
+        hair_grade_classification: '',
+        has_pack: null,
+        contract_status: null,
+      },
+    },
+  );
+  await db.collection('opportunities').updateMany(
+    {
+      stage: { $in: ['CONTRACT_PENDING', 'CLOSED_WITH_DATE', 'CLOSED_WITHOUT_DATE'] },
+      sale_completed_at: null,
+    },
+    [
+      {
+        $set: {
+          sale_completed_at: '$created_at',
+          contract_status: {
+            $cond: [{ $eq: ['$stage', 'CONTRACT_PENDING'] }, 'awaiting', '$contract_status'],
+          },
+        },
+      },
+    ],
+  );
   const legacyInstagramIds = (
     await db.many<{ opportunity_id: string }>('inbound_events', {
       external_id: { $regex: '^instagram:' },

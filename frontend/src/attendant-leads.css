@@ -25,6 +25,16 @@
   width: auto;
   flex-shrink: 0;
 }
+.attendant-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.consultation-filter select {
+  min-height: 44px;
+  padding: 8px 34px 8px 11px;
+  font-size: 13px;
+}
 .attendant-toolbar .view-switch button {
   min-height: 44px;
   padding: 8px 10px;
@@ -73,6 +83,16 @@
   padding: 3px 6px;
   white-space: normal;
 }
+.attendant-lead-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+.attendant-lead-badges .consultation-badge {
+  padding: 3px 6px;
+  font-size: 10px;
+}
 .attendant-lead-actions {
   display: flex;
   margin-top: 14px;
@@ -102,6 +122,9 @@
 }
 .attendant-leads.is-list .attendant-lead-details strong {
   font-size: 20px;
+}
+.attendant-leads.is-list .attendant-lead-details {
+  gap: 4px;
 }
 .attendant-leads.is-list .attendant-lead-actions {
   margin: 0;
@@ -146,6 +169,12 @@
     gap: 0;
     padding: 2px;
   }
+  .attendant-tools {
+    width: 100%;
+  }
+  .consultation-filter {
+    flex: 1;
+  }
   .attendant-toolbar .view-switch button {
     padding: 8px;
     font-size: 12px;
@@ -153,7 +182,7 @@
   }
   .attendant-leads.is-list .attendant-lead {
     gap: 8px;
-    padding: 10px;
+    padding: 8px 10px;
   }
   .attendant-leads .lead-section-heading h2 {
     font-size: 22px;

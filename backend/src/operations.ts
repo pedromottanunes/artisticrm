@@ -8,7 +8,9 @@ import {
   closedStages,
   DomainError,
   isClosedStage,
+  isValidDateOnly,
   requireManager,
+  type SaleInput,
   type User,
   type Opportunity,
 } from './types.js';
@@ -315,7 +317,7 @@ export class Operations extends CRM {
     id: string,
     input: {
       expected_version: number;
-      status: 'scheduled' | 'completed' | 'cancelled';
+      status: 'scheduled' | 'attended' | 'no_show' | 'cancelled';
       starts_at: string;
       unit: string;
       reason: string;
@@ -357,10 +359,13 @@ export class Operations extends CRM {
           const now = await this.now(tx);
           if (input.status === 'scheduled' && new Date(input.starts_at) <= now)
             throw new DomainError('INVALID_DATE', 'Escolha um horário futuro.', 400);
-          if (input.status === 'completed' && new Date(appointment.starts_at) > now)
+          if (
+            (input.status === 'attended' || input.status === 'no_show') &&
+            new Date(appointment.starts_at) > now
+          )
             throw new DomainError(
               'INVALID_DATE',
-              'Não é possível concluir uma consulta futura.',
+              'Não é possível registrar presença em uma consulta futura.',
               400,
             );
           const startsAt = input.status === 'scheduled' ? input.starts_at : appointment.starts_at;
@@ -369,13 +374,28 @@ export class Operations extends CRM {
             'UPDATE appointments SET starts_at=$2,unit=$3,status=$4,version=version+1 WHERE id=$1',
             [id, startsAt, unit, input.status],
           );
-          await tx.query('UPDATE opportunities SET version=version+1 WHERE id=$1', [row.id]);
+          const consultationStatus = {
+            scheduled: 'SCHEDULED',
+            attended: 'ATTENDED',
+            no_show: 'NO_SHOW',
+            cancelled: 'CANCELLED',
+          }[input.status];
+          await tx.query(
+            'UPDATE opportunities SET consultation_status=$2,version=version+1 WHERE id=$1',
+            [row.id, consultationStatus],
+          );
+          const actionLabel = {
+            scheduled: 'remarcada',
+            attended: 'com comparecimento confirmado',
+            no_show: 'marcada como não compareceu',
+            cancelled: 'cancelada',
+          }[input.status];
           await this.audit(
             tx,
             row.id,
             actor.id,
             'appointment.updated',
-            `Consulta ${input.status === 'scheduled' ? 'remarcada' : input.status === 'completed' ? 'concluída' : 'cancelada'}. Motivo: ${input.reason}`,
+            `Consulta ${actionLabel}. Motivo: ${input.reason}`,
             {
               appointment_id: id,
               before: {
@@ -389,6 +409,93 @@ export class Operations extends CRM {
           return { id, version: appointment.version + 1 };
         },
       );
+    });
+  }
+  async recordSale(actor: User, id: string, input: SaleInput, key: string) {
+    return this.db.transaction(async (tx) => {
+      await lockActor(tx, actor, true);
+      return this.command(tx, actor, key, { kind: 'sale.record', id, ...input }, async () => {
+        const row = (
+          await tx.query<Opportunity>('SELECT * FROM opportunities WHERE id=$1 FOR UPDATE', [id])
+        ).rows[0];
+        if (!row || (actor.role !== 'manager' && row.owner_id !== actor.id))
+          throw new DomainError('NOT_FOUND', 'Lead não encontrado neste perfil.', 404);
+        if (row.version !== input.expected_version)
+          throw new DomainError('VERSION_CONFLICT', 'A ficha mudou. Reabra antes de salvar.');
+        if (input.procedure_date && !isValidDateOnly(input.procedure_date))
+          throw new DomainError(
+            'INVALID_PROCEDURE_DATE',
+            'Informe uma data de cirurgia válida.',
+            400,
+          );
+        if (input.down_payment_cents > input.total_value_cents)
+          throw new DomainError(
+            'INVALID_DOWN_PAYMENT',
+            'O valor da entrada não pode superar o valor total.',
+            400,
+          );
+        if (
+          (
+            await tx.query('SELECT id FROM contacts WHERE phone=$1 AND id<>$2 LIMIT 1', [
+              input.phone,
+              row.contact_id,
+            ])
+          ).rows.length
+        )
+          throw new DomainError(
+            'PHONE_CONFLICT',
+            'Este telefone já pertence a outro contato. Abra a ficha correspondente.',
+            409,
+          );
+        await tx.query('UPDATE contacts SET name=$2,phone=$3,residence_city=$4 WHERE id=$1', [
+          row.contact_id,
+          input.name,
+          input.phone,
+          input.residence_city,
+        ]);
+        const now = await this.now(tx);
+        const stage = input.procedure_date ? 'CLOSED_WITH_DATE' : 'CLOSED_WITHOUT_DATE';
+        await tx.query(
+          `UPDATE opportunities SET
+             unit=$2,procedure_date=$3,stage=$4,state='CANCELLED',reserved_to=NULL,expires_at=NULL,
+             sale_completed_at=COALESCE(sale_completed_at,$5),
+             sale_seller_name=CASE WHEN sale_completed_at IS NULL THEN $6 ELSE sale_seller_name END,
+             consultant=$7,total_value_cents=$8,down_payment_cents=$9,
+             hair_grade_classification=$10,has_pack=$11,contract_status=$12,version=version+1
+           WHERE id=$1`,
+          [
+            id,
+            input.unit,
+            input.procedure_date,
+            stage,
+            now,
+            actor.name,
+            input.consultant,
+            input.total_value_cents,
+            input.down_payment_cents,
+            input.hair_grade_classification,
+            input.has_pack,
+            input.contract_status,
+          ],
+        );
+        await this.audit(
+          tx,
+          id,
+          actor.id,
+          row.sale_completed_at ? 'sale.updated' : 'sale.completed',
+          row.sale_completed_at
+            ? `Dados da venda atualizados por ${actor.name}.`
+            : `Venda concluída por ${actor.name}.`,
+          {
+            seller: row.sale_seller_name || actor.name,
+            consultant: input.consultant,
+            total_value_cents: input.total_value_cents,
+            down_payment_cents: input.down_payment_cents,
+            contract_status: input.contract_status,
+          },
+        );
+        return { id, version: row.version + 1 };
+      });
     });
   }
   async changePassword(user: User, currentPassword: string, newPassword: string) {

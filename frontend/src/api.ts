@@ -37,6 +37,7 @@ export interface Lead {
   name: string;
   phone?: string;
   email?: string;
+  residence_city?: string;
   instagram?: string;
   profile_picture_url?: string;
   is_demo: boolean;
@@ -46,7 +47,16 @@ export interface Lead {
   channel: 'manual' | 'whatsapp' | 'instagram';
   source_evidence: string;
   stage: string;
+  consultation_status: ConsultationStatus;
   procedure_date: string | null;
+  sale_completed_at: string | null;
+  sale_seller_name: string;
+  consultant: string;
+  total_value_cents: number | null;
+  down_payment_cents: number | null;
+  hair_grade_classification: string;
+  has_pack: boolean | null;
+  contract_status: ContractStatus | null;
   state: string;
   reserved_to: string | null;
   owner_id: string | null;
@@ -111,9 +121,25 @@ export interface Appointment {
   name: string;
   starts_at: string;
   unit: string;
-  status: string;
+  status: 'scheduled' | 'attended' | 'no_show' | 'cancelled';
   owner_id: string | null;
 }
+export type ConsultationStatus =
+  'UNDEFINED' | 'NOT_SCHEDULED' | 'SCHEDULED' | 'ATTENDED' | 'NO_SHOW' | 'CANCELLED';
+export type ContractStatus = 'awaiting' | 'signed' | 'not_signed';
+export const consultationStatusLabels: Record<ConsultationStatus, string> = {
+  UNDEFINED: 'Ainda não definido',
+  NOT_SCHEDULED: 'Consulta não agendada',
+  SCHEDULED: 'Consulta agendada',
+  ATTENDED: 'Compareceu à consulta',
+  NO_SHOW: 'Não compareceu',
+  CANCELLED: 'Consulta cancelada',
+};
+export const contractStatusLabels: Record<ContractStatus, string> = {
+  awaiting: 'Aguardando',
+  signed: 'Sim',
+  not_signed: 'Não',
+};
 export interface Snapshot {
   user: User;
   users: User[];
@@ -125,6 +151,7 @@ export interface Snapshot {
   limit: number;
 }
 export const stages: Record<string, string> = {
+  NEW_LEAD: 'Novo lead',
   CONSULTATION_NOT_SCHEDULED: 'Consulta não agendada',
   FOLLOW_UP: 'Em follow-up',
   CONTRACT_PENDING: 'Contrato pendente',
