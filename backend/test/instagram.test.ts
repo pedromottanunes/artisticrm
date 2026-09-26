@@ -267,6 +267,77 @@ test('somente responsável que aceitou responde e reuso da chave não envia duas
   assert.equal((await db.query('SELECT * FROM messages')).rows.length, 2);
 });
 
+test('imagem e áudio do webhook preservam URLs e imagem pode ser baixada sem armazenamento', async () => {
+  const imageUrl = 'https://lookaside.fbsbx.com/instagram-image.jpg';
+  const audioUrl = 'https://lookaside.fbsbx.com/instagram-audio.mp4';
+  const mediaPayload = {
+    object: 'instagram',
+    entry: [
+      {
+        id: config.accountId,
+        messaging: [
+          {
+            sender: { id: 'ig-scoped-media-user' },
+            recipient: { id: config.accountId },
+            timestamp: 1_789_030_800_000,
+            message: {
+              mid: 'ig-mid-media',
+              attachments: [
+                { type: 'image', payload: { url: imageUrl } },
+                { type: 'audio', payload: { url: audioUrl } },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  };
+  const bytes = raw(mediaPayload);
+  const central = new InstagramCentral(crm, config);
+  await central.receive(bytes, signature(bytes));
+  await central.drain();
+
+  const conversation = (await db.query<{ id: string }>('SELECT id FROM conversations')).rows[0];
+  const history = await central.messages(manager, conversation.id);
+  assert.deepEqual(history.messages[0].attachments, [
+    { type: 'image', url: imageUrl },
+    { type: 'audio', url: audioUrl },
+  ]);
+
+  const imageBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+  const mediaFetch: typeof fetch = async (input) => {
+    assert.equal(String(input), imageUrl);
+    return new Response(imageBytes, {
+      status: 200,
+      headers: { 'content-type': 'image/jpeg', 'content-length': String(imageBytes.length) },
+    });
+  };
+  const { app } = await buildApp(db, {
+    instagram: config,
+    instagramFetch: mediaFetch,
+    reconcile: false,
+  });
+  try {
+    const login = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: { 'x-artisti-client': 'web' },
+      payload: { email: manager.email, password: DEMO_PASSWORD },
+    });
+    const cookie = `artisti_session=${login.cookies[0].value}`;
+    const download = await app.inject({
+      url: `/api/v1/conversations/${conversation.id}/messages/${history.messages[0].id}/attachments/0/download`,
+      headers: { cookie },
+    });
+    assert.equal(download.statusCode, 200);
+    assert.equal(download.headers['content-type'], 'image/jpeg');
+    assert.match(String(download.headers['content-disposition']), /^attachment;/);
+    assert.deepEqual(download.rawPayload, Buffer.from(imageBytes));
+  } finally {
+    await app.close();
+  }
+});
+
 test('rotas autenticadas listam e leem conversa sem expor token', async () => {
   const central = new InstagramCentral(crm, config);
   const body = raw(payload());

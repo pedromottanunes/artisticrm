@@ -843,7 +843,20 @@ test('Mongo: Direct do Instagram cria identidade sem telefone, conversa e mensag
               sender: { id: 'mongo-ig-scoped-user' },
               recipient: { id: instagramTestConfig.accountId },
               timestamp: now.getTime(),
-              message: { mid: 'mongo-ig-message-1', text: 'Mensagem Instagram Mongo' },
+              message: {
+                mid: 'mongo-ig-message-1',
+                text: 'Mensagem Instagram Mongo',
+                attachments: [
+                  {
+                    type: 'image',
+                    payload: { url: 'https://lookaside.fbsbx.com/mongo-image.jpg' },
+                  },
+                  {
+                    type: 'audio',
+                    payload: { url: 'https://lookaside.fbsbx.com/mongo-audio.mp4' },
+                  },
+                ],
+              },
             },
           ],
         },
@@ -900,7 +913,12 @@ test('Mongo: Direct do Instagram cria identidade sem telefone, conversa e mensag
     'https://scontent.example.test/mongo-ig-scoped-user.jpg',
   );
   assert.deepEqual(profileRequests, ['mongo-ig-scoped-user']);
-  assert.equal((await central.messages(users[0], conversation.id)).messages.length, 1);
+  const instagramMessages = (await central.messages(users[0], conversation.id)).messages;
+  assert.equal(instagramMessages.length, 1);
+  assert.deepEqual(instagramMessages[0]?.attachments, [
+    { type: 'image', url: 'https://lookaside.fbsbx.com/mongo-image.jpg' },
+    { type: 'audio', url: 'https://lookaside.fbsbx.com/mongo-audio.mp4' },
+  ]);
   await db.insert('messages', {
     id: randomUUID(),
     conversation_id: conversation.id,

@@ -84,6 +84,37 @@ const attachmentSchema = z.object({
     .optional(),
 });
 
+const storedAttachmentSchema = z.object({
+  type: z.string().trim().min(1).max(80),
+  url: z.string().url().max(4096).optional(),
+});
+
+const imageAttachmentTypes = new Set(['image', 'photo', 'animated_image']);
+const instagramMediaHostSuffixes = ['cdninstagram.com', 'fbcdn.net', 'fbsbx.com'];
+
+function isTrustedInstagramMediaUrl(value: string) {
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
+    return (
+      url.protocol === 'https:' &&
+      instagramMediaHostSuffixes.some(
+        (suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`),
+      )
+    );
+  } catch {
+    return false;
+  }
+}
+
+function imageExtension(contentType: string) {
+  if (contentType === 'image/png') return 'png';
+  if (contentType === 'image/gif') return 'gif';
+  if (contentType === 'image/webp') return 'webp';
+  if (contentType === 'image/avif') return 'avif';
+  return 'jpg';
+}
+
 const userProfileSchema = z
   .object({
     id: identifier,
@@ -136,7 +167,7 @@ const envelopeSchema = z.object({
 });
 
 type Referral = z.infer<typeof referralSchema>;
-type Attachment = { type: string; url?: string };
+type Attachment = z.infer<typeof storedAttachmentSchema>;
 
 interface NormalizedInstagramEvent {
   lead: LeadInput;
@@ -1037,6 +1068,77 @@ export class InstagramCentral {
       opportunity_id: context.opportunity_id,
       can_send: context.state === 'CLAIMED' && context.owner_id === user.id,
       messages,
+    };
+  }
+
+  async downloadImage(
+    user: User,
+    conversationId: string,
+    messageId: string,
+    attachmentIndex: number,
+  ) {
+    const context = await this.context(user, conversationId);
+    const db = this.crm.db;
+    const row =
+      db.kind === 'mongo'
+        ? await db.one<{ attachments?: unknown }>('messages', {
+            id: messageId,
+            conversation_id: context.id,
+          })
+        : (
+            await db.query<{ attachments: unknown }>(
+              'SELECT attachments FROM messages WHERE id=$1 AND conversation_id=$2',
+              [messageId, context.id],
+            )
+          ).rows[0];
+    if (!row) throw new DomainError('NOT_FOUND', 'Imagem não encontrada.', 404);
+
+    const rawAttachments =
+      typeof row.attachments === 'string' ? JSON.parse(row.attachments) : (row.attachments ?? []);
+    const attachments = z.array(storedAttachmentSchema).max(20).safeParse(rawAttachments);
+    const attachment = attachments.success ? attachments.data[attachmentIndex] : undefined;
+    if (
+      !attachment?.url ||
+      !imageAttachmentTypes.has(attachment.type.toLowerCase()) ||
+      !isTrustedInstagramMediaUrl(attachment.url)
+    )
+      throw new DomainError('MEDIA_UNAVAILABLE', 'Imagem indisponível.', 404);
+
+    let response: Response;
+    try {
+      response = await this.request(attachment.url, {
+        method: 'GET',
+        redirect: 'follow',
+        signal: AbortSignal.timeout(20_000),
+      });
+    } catch {
+      throw new DomainError('MEDIA_UNAVAILABLE', 'Não foi possível baixar a imagem.', 502);
+    }
+    if (
+      !response.ok ||
+      !response.body ||
+      (response.url && !isTrustedInstagramMediaUrl(response.url))
+    )
+      throw new DomainError('MEDIA_UNAVAILABLE', 'Imagem indisponível.', 502);
+
+    const contentType = (response.headers.get('content-type') ?? '')
+      .split(';')[0]
+      .trim()
+      .toLowerCase();
+    if (!contentType.startsWith('image/')) {
+      await response.body.cancel().catch(() => {});
+      throw new DomainError('MEDIA_UNAVAILABLE', 'O arquivo recebido não é uma imagem.', 502);
+    }
+    const contentLength = response.headers.get('content-length');
+    if (contentLength && Number(contentLength) > 25 * 1024 * 1024) {
+      await response.body.cancel().catch(() => {});
+      throw new DomainError('MEDIA_TOO_LARGE', 'A imagem excede o limite permitido.', 413);
+    }
+    return {
+      body: response.body,
+      contentType,
+      contentLength,
+      fileName: `imagem-instagram-${messageId.slice(0, 8)}.${imageExtension(contentType)}`,
     };
   }
 

@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { AlertTriangle, ArrowRight, Inbox, MessageCircle, RefreshCw, Send } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowRight,
+  Download,
+  ExternalLink,
+  FileQuestion,
+  Inbox,
+  MessageCircle,
+  RefreshCw,
+  Send,
+} from 'lucide-react';
 import {
   api,
   ApiError,
@@ -29,6 +39,73 @@ const time = (value: string) =>
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value));
+
+const imageAttachmentTypes = new Set(['image', 'photo', 'animated_image']);
+const audioAttachmentTypes = new Set(['audio', 'voice', 'voice_message']);
+
+function MediaAttachment({
+  attachment,
+  downloadUrl,
+}: {
+  attachment: ConversationMessage['attachments'][number];
+  downloadUrl: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  const type = attachment.type.toLowerCase();
+
+  if (!attachment.url || failed)
+    return (
+      <span className="message-media-unavailable" role="status">
+        <FileQuestion size={16} aria-hidden="true" />
+        Mídia indisponível
+      </span>
+    );
+
+  if (imageAttachmentTypes.has(type))
+    return (
+      <div className="message-image-wrap">
+        <a
+          className="message-image-link"
+          href={attachment.url}
+          target="_blank"
+          rel="noreferrer"
+          aria-label="Abrir imagem em tamanho original"
+        >
+          <img
+            className="message-image"
+            src={attachment.url}
+            alt="Imagem recebida pelo Instagram"
+            loading="lazy"
+            onError={() => setFailed(true)}
+          />
+        </a>
+        <a className="message-image-download" href={downloadUrl} download="imagem-instagram">
+          <Download size={14} aria-hidden="true" />
+          Baixar imagem
+        </a>
+      </div>
+    );
+
+  if (audioAttachmentTypes.has(type))
+    return (
+      <audio
+        className="message-audio"
+        src={attachment.url}
+        controls
+        preload="metadata"
+        onError={() => setFailed(true)}
+      >
+        Seu navegador não consegue reproduzir este áudio.
+      </audio>
+    );
+
+  return (
+    <a className="message-attachment-link" href={attachment.url} target="_blank" rel="noreferrer">
+      Abrir {type === 'ig_reel' ? 'reel no Instagram' : attachment.type}
+      <ExternalLink size={13} aria-hidden="true" />
+    </a>
+  );
+}
 
 export function InstagramInbox({
   user,
@@ -276,23 +353,20 @@ export function InstagramInbox({
                   key={message.id}
                   className={`thread-message ${message.direction === 'outbound' ? 'outbound' : 'inbound'}`}
                 >
-                  {message.text ? <p>{message.text}</p> : <p>Conteúdo {message.type}</p>}
+                  {message.text ? (
+                    <p>{message.text}</p>
+                  ) : !message.attachments?.length ? (
+                    <p>Conteúdo {message.type}</p>
+                  ) : null}
                   {!!message.attachments?.length && (
                     <div className="message-attachments">
-                      {message.attachments.map((attachment, index) =>
-                        attachment.url ? (
-                          <a
-                            key={`${attachment.type}-${index}`}
-                            href={attachment.url}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            Abrir {attachment.type}
-                          </a>
-                        ) : (
-                          <span key={`${attachment.type}-${index}`}>{attachment.type}</span>
-                        ),
-                      )}
+                      {message.attachments.map((attachment, index) => (
+                        <MediaAttachment
+                          key={`${attachment.type}-${attachment.url ?? 'without-url'}-${index}`}
+                          attachment={attachment}
+                          downloadUrl={`/api/v1/conversations/${encodeURIComponent(selectedId)}/messages/${encodeURIComponent(message.id)}/attachments/${index}/download`}
+                        />
+                      ))}
                     </div>
                   )}
                   <small>

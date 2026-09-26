@@ -3,6 +3,7 @@ import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import { randomBytes } from 'node:crypto';
+import { Readable } from 'node:stream';
 import { z, ZodError } from 'zod';
 import { registerWhatsApp, type WhatsAppConfig } from './whatsapp.js';
 import { registerInstagram, type InstagramConfig, type InstagramFetch } from './instagram.js';
@@ -29,6 +30,11 @@ declare module 'fastify' {
 }
 const uuid = z.string().uuid();
 const idParams = z.object({ id: uuid });
+const attachmentParams = z.object({
+  id: uuid,
+  messageId: uuid,
+  index: z.coerce.number().int().min(0).max(19),
+});
 const shortText = z.string().trim().max(160);
 const optionalPhone = z
   .string()
@@ -103,7 +109,7 @@ export async function buildApp(
         .header('Strict-Transport-Security', 'max-age=31536000')
         .header(
           'Content-Security-Policy',
-          "default-src 'self'; script-src 'self'; worker-src 'self'; manifest-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.cdninstagram.com https://*.fbcdn.net https://lookaside.fbsbx.com https://*.fbsbx.com; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
+          "default-src 'self'; script-src 'self'; worker-src 'self'; manifest-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.cdninstagram.com https://*.fbcdn.net https://lookaside.fbsbx.com https://*.fbsbx.com; media-src 'self' https://*.cdninstagram.com https://*.fbcdn.net https://lookaside.fbsbx.com https://*.fbsbx.com; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
         );
     if (!request.url.startsWith('/api/')) return;
     if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(request.method)) {
@@ -656,6 +662,27 @@ export async function buildApp(
   });
   app.get('/api/v1/conversations/:id/messages', async (request) =>
     instagram.messages(request.user, idParams.parse(request.params).id),
+  );
+  app.get(
+    '/api/v1/conversations/:id/messages/:messageId/attachments/:index/download',
+    async (request, reply) => {
+      const params = attachmentParams.parse(request.params);
+      const media = await instagram.downloadImage(
+        request.user,
+        params.id,
+        params.messageId,
+        params.index,
+      );
+      reply
+        .type(media.contentType)
+        .header('Content-Disposition', `attachment; filename="${media.fileName}"`);
+      if (media.contentLength) reply.header('Content-Length', media.contentLength);
+      return reply.send(
+        Readable.fromWeb(
+          media.body as unknown as import('node:stream/web').ReadableStream<Uint8Array>,
+        ),
+      );
+    },
   );
   app.post('/api/v1/conversations/:id/read', async (request) =>
     instagram.markRead(request.user, idParams.parse(request.params).id),
