@@ -12,6 +12,8 @@ import { hashPassword } from './auth.js';
 import { loginSchema, passwordSchema } from './credentials.js';
 import { compactQueuePositions } from './weighted-queue.js';
 
+const TECHNICAL_RECORD_RETENTION_SECONDS = 30 * 24 * 60 * 60;
+
 // Native document operations. No SQL emulation and no in-memory source of truth.
 export class MongoTx {
   constructor(
@@ -127,10 +129,12 @@ export async function openMongo(uri: string, databaseName = 'artisti') {
 }
 
 export async function initializeMongo(db: MongoStore) {
-  await db.collection('opportunities').updateMany(
-    { source: 'Instagram — origem não identificada' },
-    { $set: { source: 'Instagram — origem orgânica' } },
-  );
+  await db
+    .collection('opportunities')
+    .updateMany(
+      { source: 'Instagram — origem não identificada' },
+      { $set: { source: 'Instagram — origem orgânica' } },
+    );
   const stageMigration = {
     TO_QUALIFY: 'CONSULTATION_NOT_SCHEDULED',
     EVALUATION_SCHEDULED: 'FOLLOW_UP',
@@ -318,9 +322,15 @@ export async function initializeMongo(db: MongoStore) {
   await db.collection('deleted_inbound_events').createIndex({ hash: 1 }, { unique: true });
   await db.collection('claims').createIndex({ user_id: 1, key: 1 }, { unique: true });
   await db.collection('operation_receipts').createIndex({ actor_id: 1, key: 1 }, { unique: true });
+  await db
+    .collection('operation_receipts')
+    .createIndex({ created_at: 1 }, { expireAfterSeconds: TECHNICAL_RECORD_RETENTION_SECONDS });
   await db.collection('sessions').createIndex({ token_hash: 1 }, { unique: true });
   await db.collection('sessions').createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 });
   await db.collection('whatsapp_inbox').createIndex({ event_id: 1 }, { unique: true });
+  await db
+    .collection('whatsapp_inbox')
+    .createIndex({ processed_at: 1 }, { expireAfterSeconds: TECHNICAL_RECORD_RETENTION_SECONDS });
   await db.collection('channel_accounts').createIndex({ id: 1 }, { unique: true });
   await db
     .collection('channel_accounts')
@@ -350,9 +360,15 @@ export async function initializeMongo(db: MongoStore) {
     );
   await db.collection('messages').createIndex({ conversation_id: 1, created_at: 1, id: 1 });
   await db
+    .collection('messages')
+    .createIndex({ direction: 1, status: 1, sending_started_at: 1, created_at: 1 });
+  await db
     .collection('conversation_reads')
     .createIndex({ conversation_id: 1, user_id: 1 }, { unique: true });
   await db.collection('instagram_webhook_inbox').createIndex({ event_id: 1 }, { unique: true });
+  await db
+    .collection('instagram_webhook_inbox')
+    .createIndex({ processed_at: 1 }, { expireAfterSeconds: TECHNICAL_RECORD_RETENTION_SECONDS });
   await db
     .collection('instagram_webhook_inbox')
     .createIndex({ instagram_account_id: 1, processed_at: 1, available_at: 1 });

@@ -1233,9 +1233,12 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
 }) => {
   let targetId = '';
   let targetName = '';
+  let targetLastMessageAt = '2026-09-23T15:03:00.000Z';
+  let workspaceRequests = 0;
   const profilePicture =
     'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="58" height="58"/%3E';
   await page.route('**/api/v1/workspace', async (route) => {
+    workspaceRequests += 1;
     const response = await route.fetch();
     if (response.status() !== 200) return route.fulfill({ response });
     const body = await response.json();
@@ -1289,66 +1292,85 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
             state: 'CLAIMED',
             owner_id: 'target-user',
             reserved_to: null,
-            last_message_at: '2026-09-23T15:00:00.000Z',
+            last_message_at: targetLastMessageAt,
             can_send: true,
           },
         ],
       },
     }),
   );
-  await page.route('**/api/v1/conversations/*/messages', (route) => {
+  let threadRequests = 0;
+  let readRequests = 0;
+  await page.route('**/api/v1/conversations/*/messages*', (route) => {
+    const after = new URL(route.request().url()).searchParams.has('after');
     const id = route.request().url().includes('conversation-target')
       ? 'conversation-target'
       : 'conversation-wrong';
+    if (id === 'conversation-target') threadRequests += 1;
     return route.fulfill({
       json: {
         conversation_id: id,
         opportunity_id: id === 'conversation-target' ? targetId : 'opportunity-wrong',
         can_send: id === 'conversation-target',
+        last_message_at:
+          id === 'conversation-target' ? targetLastMessageAt : '2026-09-23T15:01:00.000Z',
+        has_more: false,
         messages:
           id === 'conversation-target'
-            ? [
-                {
-                  id: '10000000-0000-4000-8000-000000000001',
-                  direction: 'inbound',
-                  type: 'image',
-                  text: '',
-                  attachments: [{ type: 'image', url: 'https://lookaside.fbsbx.com/photo.jpg' }],
-                  status: 'received',
-                  created_at: '2026-09-23T15:00:00.000Z',
-                },
-                {
-                  id: '10000000-0000-4000-8000-000000000002',
-                  direction: 'inbound',
-                  type: 'ig_reel',
-                  text: '',
-                  attachments: [
-                    { type: 'ig_reel', url: 'https://www.instagram.com/reel/TESTE123/' },
-                  ],
-                  status: 'received',
-                  created_at: '2026-09-23T15:01:00.000Z',
-                },
-                {
-                  id: '10000000-0000-4000-8000-000000000003',
-                  direction: 'inbound',
-                  type: 'ig_reel',
-                  text: '',
-                  attachments: [
-                    { type: 'ig_reel', url: 'https://lookaside.fbsbx.com/reel-preview' },
-                  ],
-                  status: 'received',
-                  created_at: '2026-09-23T15:02:00.000Z',
-                },
-                {
-                  id: '10000000-0000-4000-8000-000000000004',
-                  direction: 'inbound',
-                  type: 'text',
-                  text: 'Veja este post: https://www.instagram.com/p/TEXTO123/.',
-                  attachments: [],
-                  status: 'received',
-                  created_at: '2026-09-23T15:03:00.000Z',
-                },
-              ]
+            ? after
+              ? [
+                  {
+                    id: '10000000-0000-4000-8000-000000000005',
+                    direction: 'inbound',
+                    type: 'text',
+                    text: 'Nova mensagem incremental',
+                    attachments: [],
+                    status: 'received',
+                    created_at: targetLastMessageAt,
+                  },
+                ]
+              : [
+                  {
+                    id: '10000000-0000-4000-8000-000000000001',
+                    direction: 'inbound',
+                    type: 'image',
+                    text: '',
+                    attachments: [{ type: 'image', url: 'https://lookaside.fbsbx.com/photo.jpg' }],
+                    status: 'received',
+                    created_at: '2026-09-23T15:00:00.000Z',
+                  },
+                  {
+                    id: '10000000-0000-4000-8000-000000000002',
+                    direction: 'inbound',
+                    type: 'ig_reel',
+                    text: '',
+                    attachments: [
+                      { type: 'ig_reel', url: 'https://www.instagram.com/reel/TESTE123/' },
+                    ],
+                    status: 'received',
+                    created_at: '2026-09-23T15:01:00.000Z',
+                  },
+                  {
+                    id: '10000000-0000-4000-8000-000000000003',
+                    direction: 'inbound',
+                    type: 'ig_reel',
+                    text: '',
+                    attachments: [
+                      { type: 'ig_reel', url: 'https://lookaside.fbsbx.com/reel-preview' },
+                    ],
+                    status: 'received',
+                    created_at: '2026-09-23T15:02:00.000Z',
+                  },
+                  {
+                    id: '10000000-0000-4000-8000-000000000004',
+                    direction: 'inbound',
+                    type: 'text',
+                    text: 'Veja este post: https://www.instagram.com/p/TEXTO123/.',
+                    attachments: [],
+                    status: 'received',
+                    created_at: '2026-09-23T15:03:00.000Z',
+                  },
+                ]
             : [],
       },
     });
@@ -1359,9 +1381,10 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
       body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240"><rect width="320" height="240" fill="#dcefeb"/></svg>',
     }),
   );
-  await page.route('**/api/v1/conversations/*/read', (route) =>
-    route.fulfill({ json: { read: true } }),
-  );
+  await page.route('**/api/v1/conversations/*/read', (route) => {
+    if (route.request().url().includes('conversation-target')) readRequests += 1;
+    return route.fulfill({ json: { read: true } });
+  });
 
   await login(page, 'vanessa');
   expect(targetId).not.toBe('');
@@ -1376,6 +1399,7 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
   await expect(dialog.locator('.lead-profile-avatar img')).toHaveCount(1);
   await dialog.getByRole('button', { name: 'Abrir conversa', exact: true }).click();
   await expect(page).toHaveURL(/#inbox$/);
+  const workspaceRequestsAtInbox = workspaceRequests;
   await expect(page.locator('.thread-header')).toContainText('CONVERSA DESTINO');
   await expect(page.locator('.thread-header')).not.toContainText('CONVERSA ERRADA');
   await expect(page.locator('.inbox-conversations .instagram-avatar img')).toHaveCount(1);
@@ -1392,6 +1416,14 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
   await expect(
     page.getByRole('link', { name: 'https://www.instagram.com/p/TEXTO123/' }),
   ).toHaveAttribute('href', 'https://www.instagram.com/p/TEXTO123/');
+  await page.waitForTimeout(5_500);
+  expect(workspaceRequests).toBe(workspaceRequestsAtInbox);
+  expect(threadRequests).toBe(1);
+  expect(readRequests).toBe(1);
+  targetLastMessageAt = '2026-09-23T15:04:00.000Z';
+  await expect(page.getByText('Nova mensagem incremental')).toBeVisible({ timeout: 7_000 });
+  expect(threadRequests).toBe(2);
+  expect(readRequests).toBe(2);
   await page.getByRole('button', { name: 'Abrir imagem em tamanho original' }).first().click();
   await expect(page.getByRole('dialog', { name: 'Imagem ampliada' })).toBeVisible();
   await page.getByRole('button', { name: 'Fechar imagem ampliada' }).click();

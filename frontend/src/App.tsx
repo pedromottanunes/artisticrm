@@ -152,10 +152,25 @@ export function App() {
   }, []);
   useEffect(() => {
     if (!data) return;
-    if (data.user.role === 'manager' && page === 'central') return;
+    // These pages have their own focused requests or only change after an explicit action.
+    // Avoid transferring the complete workspace while the attendant is using the chat.
+    if (
+      page === 'inbox' ||
+      page === 'reports' ||
+      page === 'meta' ||
+      page === 'google' ||
+      page === 'contracts' ||
+      page === 'settings' ||
+      (data.user.role === 'manager' && page === 'central')
+    )
+      return;
+    const pollingIntervalMs =
+      page === 'mine' || page === 'pool' || (data.user.role === 'attendant' && page === 'central')
+        ? 5000
+        : 15_000;
     const interval = setInterval(() => {
       if (!document.hidden) void refresh();
-    }, 5000);
+    }, pollingIntervalMs);
     const focus = () => void refresh();
     window.addEventListener('focus', focus);
     window.addEventListener('online', focus);

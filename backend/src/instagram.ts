@@ -197,6 +197,7 @@ interface ConversationContext {
   id: string;
   opportunity_id: string;
   contact_id: string;
+  last_message_at: Date | string;
   state: string;
   owner_id: string | null;
   reserved_to: string | null;
@@ -868,40 +869,78 @@ export class InstagramCentral {
     const db = this.crm.db;
     let context: ConversationContext | null;
     if (db.kind === 'mongo') {
-      const account = await db.one('channel_accounts', {
-        provider: 'instagram',
-        external_account_id: config.accountId,
-      });
-      const conversation = account
-        ? await db.one('conversations', { id: conversationId, channel_account_id: account.id })
-        : null;
-      const opportunity = conversation
-        ? await db.one<Opportunity>('opportunities', { id: conversation.opportunity_id })
-        : null;
-      const identity = opportunity
-        ? await db.one('contact_identities', {
-            contact_id: opportunity.contact_id,
-            provider: 'instagram',
-            channel_account_id: config.accountId,
-          })
-        : null;
       context =
-        conversation && opportunity && identity
-          ? {
-              id: conversation.id as string,
-              opportunity_id: opportunity.id,
-              contact_id: opportunity.contact_id,
-              state: opportunity.state,
-              owner_id: opportunity.owner_id,
-              reserved_to: opportunity.reserved_to,
-              external_user_id: identity.external_user_id as string,
-            }
-          : null;
+        (await db
+          .collection('conversations')
+          .aggregate<ConversationContext>([
+            { $match: { id: conversationId } },
+            {
+              $lookup: {
+                from: 'channel_accounts',
+                localField: 'channel_account_id',
+                foreignField: 'id',
+                as: 'account',
+              },
+            },
+            { $unwind: '$account' },
+            {
+              $match: {
+                'account.provider': 'instagram',
+                'account.external_account_id': config.accountId,
+              },
+            },
+            {
+              $lookup: {
+                from: 'opportunities',
+                localField: 'opportunity_id',
+                foreignField: 'id',
+                as: 'opportunity',
+              },
+            },
+            { $unwind: '$opportunity' },
+            {
+              $lookup: {
+                from: 'contact_identities',
+                let: { contactId: '$contact_id' },
+                pipeline: [
+                  {
+                    $match: {
+                      $expr: {
+                        $and: [
+                          { $eq: ['$contact_id', '$$contactId'] },
+                          { $eq: ['$provider', 'instagram'] },
+                          { $eq: ['$channel_account_id', config.accountId] },
+                        ],
+                      },
+                    },
+                  },
+                  { $limit: 1 },
+                ],
+                as: 'identity',
+              },
+            },
+            { $unwind: '$identity' },
+            {
+              $project: {
+                _id: 0,
+                id: 1,
+                opportunity_id: 1,
+                contact_id: 1,
+                last_message_at: 1,
+                state: '$opportunity.state',
+                owner_id: '$opportunity.owner_id',
+                reserved_to: '$opportunity.reserved_to',
+                external_user_id: '$identity.external_user_id',
+              },
+            },
+          ])
+          .next()) ?? null;
     } else
       context =
         (
           await db.query<ConversationContext>(
-            `SELECT cv.id,cv.opportunity_id,cv.contact_id,o.state,o.owner_id,o.reserved_to,
+            `SELECT cv.id,cv.opportunity_id,cv.contact_id,cv.last_message_at,
+                    o.state,o.owner_id,o.reserved_to,
                     ci.external_user_id
              FROM conversations cv
              JOIN opportunities o ON o.id=cv.opportunity_id
@@ -966,31 +1005,60 @@ export class InstagramCentral {
           },
           { $sort: { last_message_at: -1 } },
           { $limit: 100 },
+          {
+            $lookup: {
+              from: 'contacts',
+              localField: 'contact_id',
+              foreignField: 'id',
+              as: 'contact',
+            },
+          },
+          { $set: { contact: { $first: '$contact' } } },
+          {
+            $lookup: {
+              from: 'contact_identities',
+              let: { contactId: '$contact_id' },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $and: [
+                        { $eq: ['$contact_id', '$$contactId'] },
+                        { $eq: ['$provider', 'instagram'] },
+                        { $eq: ['$channel_account_id', this.config.accountId] },
+                      ],
+                    },
+                  },
+                },
+                { $limit: 1 },
+              ],
+              as: 'identity',
+            },
+          },
+          { $set: { identity: { $first: '$identity' } } },
+          {
+            $project: {
+              _id: 0,
+              id: 1,
+              opportunity_id: '$opportunity.id',
+              contact_name: { $ifNull: ['$contact.name', 'Contato Instagram'] },
+              instagram_username: { $ifNull: ['$identity.username', ''] },
+              profile_picture_url: { $ifNull: ['$identity.profile_picture_url', ''] },
+              state: '$opportunity.state',
+              owner_id: '$opportunity.owner_id',
+              reserved_to: '$opportunity.reserved_to',
+              last_message_at: 1,
+            },
+          },
         ])
         .toArray();
-      const result: Record<string, unknown>[] = [];
-      for (const conversation of conversations) {
-        const opportunity = conversation.opportunity as unknown as Opportunity;
-        const contact = await db.one('contacts', { id: opportunity.contact_id });
-        const identity = await db.one('contact_identities', {
-          contact_id: opportunity.contact_id,
-          provider: 'instagram',
-          channel_account_id: this.config.accountId,
-        });
-        result.push({
-          id: conversation.id,
-          opportunity_id: opportunity.id,
-          contact_name: contact?.name ?? 'Contato Instagram',
-          instagram_username: identity?.username ?? '',
-          profile_picture_url: identity?.profile_picture_url ?? '',
-          state: opportunity.state,
-          owner_id: opportunity.owner_id,
-          reserved_to: opportunity.reserved_to,
-          last_message_at: conversation.last_message_at,
-          can_send: opportunity.state === 'CLAIMED' && opportunity.owner_id === user.id,
-        });
-      }
-      return { configured: true, conversations: result };
+      return {
+        configured: true,
+        conversations: conversations.map((conversation) => ({
+          ...conversation,
+          can_send: conversation.state === 'CLAIMED' && conversation.owner_id === user.id,
+        })),
+      };
     }
     const visibility =
       user.role === 'manager'
@@ -1050,34 +1118,75 @@ export class InstagramCentral {
     };
   }
 
-  async messages(user: User, conversationId: string) {
+  async messages(user: User, conversationId: string, afterMessageId?: string) {
     const context = await this.context(user, conversationId);
     const db = this.crm.db;
-    const messages =
-      db.kind === 'mongo'
-        ? (
-            await db.many(
-              'messages',
-              { conversation_id: context.id },
-              { created_at: -1, id: -1 },
-              200,
-            )
-          ).reverse()
-        : (
-            await db.query(
-              `SELECT * FROM (
-                 SELECT id,external_message_id,direction,sender_user_id,type,text,attachments,status,
-                        error_code,sent_at,delivered_at,read_at,created_at
-                 FROM messages WHERE conversation_id=$1
-                 ORDER BY created_at DESC,id DESC LIMIT 200
-               ) recent ORDER BY created_at,id`,
-              [context.id],
-            )
-          ).rows;
+    let messages: Record<string, unknown>[];
+    if (db.kind === 'mongo') {
+      if (afterMessageId) {
+        const cursor = await db.one<{ created_at: Date; id: string }>('messages', {
+          id: afterMessageId,
+          conversation_id: context.id,
+        });
+        if (!cursor) throw new DomainError('INVALID_CURSOR', 'Atualize a conversa novamente.', 400);
+        messages = await db.many(
+          'messages',
+          {
+            conversation_id: context.id,
+            $or: [
+              { created_at: { $gt: cursor.created_at } },
+              { created_at: cursor.created_at, id: { $gt: cursor.id } },
+            ],
+          },
+          { created_at: 1, id: 1 },
+          201,
+        );
+      } else
+        messages = (
+          await db.many(
+            'messages',
+            { conversation_id: context.id },
+            { created_at: -1, id: -1 },
+            201,
+          )
+        ).reverse();
+    } else if (afterMessageId) {
+      const cursor = (
+        await db.query<{ created_at: Date | string; id: string }>(
+          'SELECT created_at,id FROM messages WHERE id=$1 AND conversation_id=$2',
+          [afterMessageId, context.id],
+        )
+      ).rows[0];
+      if (!cursor) throw new DomainError('INVALID_CURSOR', 'Atualize a conversa novamente.', 400);
+      messages = (
+        await db.query(
+          `SELECT id,external_message_id,direction,sender_user_id,type,text,attachments,status,
+                  error_code,sent_at,delivered_at,read_at,created_at
+           FROM messages WHERE conversation_id=$1 AND (created_at,id)>($2,$3)
+           ORDER BY created_at,id LIMIT 201`,
+          [context.id, cursor.created_at, cursor.id],
+        )
+      ).rows;
+    } else
+      messages = (
+        await db.query(
+          `SELECT * FROM (
+             SELECT id,external_message_id,direction,sender_user_id,type,text,attachments,status,
+                    error_code,sent_at,delivered_at,read_at,created_at
+             FROM messages WHERE conversation_id=$1
+             ORDER BY created_at DESC,id DESC LIMIT 201
+           ) recent ORDER BY created_at,id`,
+          [context.id],
+        )
+      ).rows;
+    const hasMore = messages.length > 200;
+    if (hasMore) messages = afterMessageId ? messages.slice(0, 200) : messages.slice(-200);
     return {
       conversation_id: context.id,
       opportunity_id: context.opportunity_id,
       can_send: context.state === 'CLAIMED' && context.owner_id === user.id,
+      last_message_at: context.last_message_at,
+      has_more: hasMore,
       messages,
     };
   }
@@ -1516,6 +1625,7 @@ export async function registerInstagram(
   runWorker = true,
   request: InstagramFetch = fetch,
 ) {
+  const staleSendRecoveryIntervalMs = 60_000;
   const central = new InstagramCentral(crm, config, request);
   await app.register(async (scope) => {
     scope.removeContentTypeParser('application/json');
@@ -1546,15 +1656,20 @@ export async function registerInstagram(
     );
   });
   let active: Promise<void> | undefined;
+  let lastStaleSendRecoveryAt = 0;
   const tick = () => {
-    if (!active)
+    if (!active) {
+      const now = Date.now();
+      const shouldRecoverStaleSends = now - lastStaleSendRecoveryAt >= staleSendRecoveryIntervalMs;
+      if (shouldRecoverStaleSends) lastStaleSendRecoveryAt = now;
       active = Promise.resolve()
-        .then(() => central.recoverStaleSends())
+        .then(() => (shouldRecoverStaleSends ? central.recoverStaleSends() : undefined))
         .then(() => central.drain())
         .catch(() => app.log.error('Instagram inbox processing failed'))
         .finally(() => {
           active = undefined;
         });
+    }
   };
   const timer = config && runWorker ? setInterval(tick, 1000) : undefined;
   timer?.unref();

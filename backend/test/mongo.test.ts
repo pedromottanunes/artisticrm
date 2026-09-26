@@ -98,6 +98,36 @@ const input = (n = 1) => ({
   source: 'Cadastro manual',
 });
 const lead = (n = 1) => ops.ingest(input(n), `event-${n}`, manager.id);
+test('Mongo: retenção técnica e índices dos caminhos frequentes ficam configurados', async () => {
+  const receiptIndexes = await db.collection('operation_receipts').listIndexes().toArray();
+  const instagramInboxIndexes = await db
+    .collection('instagram_webhook_inbox')
+    .listIndexes()
+    .toArray();
+  const whatsappInboxIndexes = await db.collection('whatsapp_inbox').listIndexes().toArray();
+  const messageIndexes = await db.collection('messages').listIndexes().toArray();
+  assert.equal(
+    receiptIndexes.find((index) => index.key.created_at === 1)?.expireAfterSeconds,
+    30 * 24 * 60 * 60,
+  );
+  assert.equal(
+    instagramInboxIndexes.find((index) => index.key.processed_at === 1)?.expireAfterSeconds,
+    30 * 24 * 60 * 60,
+  );
+  assert.equal(
+    whatsappInboxIndexes.find((index) => index.key.processed_at === 1)?.expireAfterSeconds,
+    30 * 24 * 60 * 60,
+  );
+  assert.ok(
+    messageIndexes.some(
+      (index) =>
+        index.key.direction === 1 &&
+        index.key.status === 1 &&
+        index.key.sending_started_at === 1 &&
+        index.key.created_at === 1,
+    ),
+  );
+});
 test('exclusão Mongo: autorização, confirmação, versão e API idempotente', () =>
   checkDeletePermissions(ops, manager, users, password, () => now));
 test('exclusão Mongo: remove dados relacionados e preserva outros leads', () =>
@@ -913,12 +943,39 @@ test('Mongo: Direct do Instagram cria identidade sem telefone, conversa e mensag
     'https://scontent.example.test/mongo-ig-scoped-user.jpg',
   );
   assert.deepEqual(profileRequests, ['mongo-ig-scoped-user']);
-  const instagramMessages = (await central.messages(users[0], conversation.id)).messages;
+  const initialThread = await central.messages(users[0], conversation.id);
+  const instagramMessages = initialThread.messages;
   assert.equal(instagramMessages.length, 1);
   assert.deepEqual(instagramMessages[0]?.attachments, [
     { type: 'image', url: 'https://lookaside.fbsbx.com/mongo-image.jpg' },
     { type: 'audio', url: 'https://lookaside.fbsbx.com/mongo-audio.mp4' },
   ]);
+  const nextMessageAt = new Date(now.getTime() + 1000);
+  await db.insert('messages', {
+    id: randomUUID(),
+    conversation_id: conversation.id,
+    direction: 'inbound',
+    type: 'text',
+    text: 'Mensagem incremental Mongo',
+    attachments: [],
+    status: 'received',
+    created_at: nextMessageAt,
+  });
+  await db.update(
+    'conversations',
+    { id: conversation.id },
+    { $set: { last_message_at: nextMessageAt } },
+  );
+  const incrementalThread = await central.messages(
+    users[0],
+    conversation.id,
+    String(instagramMessages[0]?.id),
+  );
+  assert.deepEqual(
+    incrementalThread.messages.map((message) => message.text),
+    ['Mensagem incremental Mongo'],
+  );
+  assert.equal(incrementalThread.has_more, false);
   const mediaCentral = new InstagramCentral(ops, instagramTestConfig, async (input) => {
     assert.equal(String(input), 'https://lookaside.fbsbx.com/mongo-image.jpg');
     return new Response(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), {

@@ -660,9 +660,13 @@ export async function buildApp(
       query.view ?? (request.user.role === 'manager' ? 'all' : 'mine'),
     );
   });
-  app.get('/api/v1/conversations/:id/messages', async (request) =>
-    instagram.messages(request.user, idParams.parse(request.params).id),
-  );
+  app.get('/api/v1/conversations/:id/messages', async (request) => {
+    const query = z
+      .object({ after: z.string().trim().min(1).max(200).optional() })
+      .strict()
+      .parse(request.query);
+    return instagram.messages(request.user, idParams.parse(request.params).id, query.after);
+  });
   app.get(
     '/api/v1/conversations/:id/messages/:messageId/attachments/:index/media',
     async (request, reply) => {

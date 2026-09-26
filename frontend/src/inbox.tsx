@@ -31,6 +31,8 @@ interface ThreadResponse {
   conversation_id: string;
   opportunity_id: string;
   can_send: boolean;
+  last_message_at: string;
+  has_more: boolean;
   messages: ConversationMessage[];
 }
 
@@ -396,6 +398,8 @@ export function InstagramInbox({
   const [draft, setDraft] = useState('');
   const sendCommand = useRef<{ text: string; key: string } | null>(null);
   const selectedIdRef = useRef('');
+  const threadRef = useRef<ThreadResponse | null>(null);
+  const loadedThreadVersion = useRef(new Map<string, string>());
   const listSequence = useRef(0);
   const threadSequence = useRef(0);
 
@@ -411,15 +415,50 @@ export function InstagramInbox({
   );
 
   const loadThread = useCallback(
-    async (id: string, quiet = false) => {
+    async (id: string, quiet = false, incremental = false) => {
       if (!id) return;
       const sequence = ++threadSequence.current;
       try {
-        const result = await api<ThreadResponse>(`/conversations/${id}/messages`);
+        const current = threadRef.current;
+        let append = Boolean(
+          incremental && current?.conversation_id === id && current.messages.length,
+        );
+        let after = append ? current?.messages.at(-1)?.id : undefined;
+        let result: ThreadResponse;
+        const received: ConversationMessage[] = [];
+        let pages = 0;
+        try {
+          do {
+            const suffix = after ? `?after=${encodeURIComponent(after)}` : '';
+            result = await api<ThreadResponse>(`/conversations/${id}/messages${suffix}`);
+            received.push(...result.messages);
+            after = result.messages.at(-1)?.id ?? after;
+            pages += 1;
+          } while (append && result.has_more && result.messages.length && pages < 10);
+        } catch (error) {
+          if (!(append && error instanceof ApiError && error.status === 400)) throw error;
+          append = false;
+          received.length = 0;
+          result = await api<ThreadResponse>(`/conversations/${id}/messages`);
+          received.push(...result.messages);
+        }
         if (sequence !== threadSequence.current) return;
-        setThread(result);
+        const base = append && current?.conversation_id === id ? current.messages : [];
+        const merged = new Map(base.map((message) => [message.id, message]));
+        for (const message of received) merged.set(message.id, message);
+        const next = {
+          ...result!,
+          messages: [...merged.values()].slice(-200),
+        };
+        threadRef.current = next;
+        setThread(next);
+        loadedThreadVersion.current.set(
+          id,
+          append && result!.has_more ? '' : String(result!.last_message_at),
+        );
         onConnectionChange(true);
-        void api(`/conversations/${id}/read`, { method: 'POST', body: '{}' }).catch(() => {});
+        if (!append || received.some((message) => message.direction === 'inbound'))
+          void api(`/conversations/${id}/read`, { method: 'POST', body: '{}' }).catch(() => {});
       } catch (error) {
         if (sequence !== threadSequence.current) return;
         if (!quiet) handleError(error);
@@ -429,7 +468,7 @@ export function InstagramInbox({
   );
 
   const refresh = useCallback(
-    async (quiet = false) => {
+    async (quiet = false, forceThread = false) => {
       const sequence = ++listSequence.current;
       try {
         const view = user.role === 'manager' ? 'all' : 'mine';
@@ -445,11 +484,32 @@ export function InstagramInbox({
           : result.conversations.some((item) => item.id === selectedIdRef.current)
             ? selectedIdRef.current
             : (result.conversations[0]?.id ?? '');
+        const previous = selectedIdRef.current;
         selectedIdRef.current = next;
         setSelectedId(next);
         if (targeted) onTargetConsumed();
-        if (next) void loadThread(next, quiet);
-        else setThread(null);
+        if (next) {
+          const summary = result.conversations.find((item) => item.id === next)!;
+          const current = threadRef.current;
+          const sameThread = current?.conversation_id === next;
+          if (sameThread && current.can_send !== summary.can_send) {
+            const updated = { ...current, can_send: summary.can_send };
+            threadRef.current = updated;
+            setThread(updated);
+          }
+          const version = String(summary.last_message_at);
+          if (
+            forceThread ||
+            previous !== next ||
+            !sameThread ||
+            loadedThreadVersion.current.get(next) !== version
+          )
+            void loadThread(next, quiet, sameThread);
+        } else {
+          threadSequence.current += 1;
+          threadRef.current = null;
+          setThread(null);
+        }
         onConnectionChange(true);
       } catch (error) {
         if (sequence !== listSequence.current || quiet) return;
@@ -472,6 +532,7 @@ export function InstagramInbox({
   const select = (id: string) => {
     selectedIdRef.current = id;
     setSelectedId(id);
+    threadRef.current = null;
     setThread(null);
     void loadThread(id);
   };
@@ -497,7 +558,7 @@ export function InstagramInbox({
         onNotice(
           'O envio ainda não foi confirmado pela Meta. Confira a conversa antes de tentar novamente.',
         );
-      await loadThread(selectedId);
+      await loadThread(selectedId, false, true);
       await refresh(true);
     } catch (error) {
       if (error instanceof ApiError && error.status < 500) sendCommand.current = null;
@@ -537,7 +598,7 @@ export function InstagramInbox({
           <button
             className="icon-button"
             aria-label="Atualizar conversas"
-            onClick={() => void refresh()}
+            onClick={() => void refresh(false, true)}
           >
             <RefreshCw size={17} />
           </button>

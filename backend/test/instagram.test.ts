@@ -545,8 +545,31 @@ test('historico limitado retorna as duzentas mensagens mais recentes em ordem cr
 
   const result = await central.messages(attendants[0], conversation.id);
   assert.equal(result.messages.length, 200);
+  assert.equal(result.has_more, true);
   assert.equal((result.messages[0] as { text: string }).text, 'Mensagem 5');
   assert.equal((result.messages[199] as { text: string }).text, 'Mensagem 204');
+
+  const cursor = result.messages[199] as { id: string };
+  const nextCreatedAt = new Date(Date.now() + 206 * 1000);
+  await db.query(
+    `INSERT INTO messages(id,conversation_id,direction,type,text,status,created_at)
+     VALUES ($1,$2,'inbound','text','Mensagem nova','received',$3)`,
+    [randomUUID(), conversation.id, nextCreatedAt],
+  );
+  await db.query('UPDATE conversations SET last_message_at=$2 WHERE id=$1', [
+    conversation.id,
+    nextCreatedAt,
+  ]);
+  const incremental = await central.messages(attendants[0], conversation.id, cursor.id);
+  assert.equal(incremental.has_more, false);
+  assert.deepEqual(
+    incremental.messages.map((message) => message.text),
+    ['Mensagem nova'],
+  );
+  assert.equal(new Date(incremental.last_message_at).getTime(), nextCreatedAt.getTime());
+  await assert.rejects(central.messages(attendants[0], conversation.id, randomUUID()), {
+    code: 'INVALID_CURSOR',
+  });
 });
 
 test('envio interrompido deixa de permanecer indefinidamente em sending', async () => {
