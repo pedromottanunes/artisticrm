@@ -1305,10 +1305,60 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
         conversation_id: id,
         opportunity_id: id === 'conversation-target' ? targetId : 'opportunity-wrong',
         can_send: id === 'conversation-target',
-        messages: [],
+        messages:
+          id === 'conversation-target'
+            ? [
+                {
+                  id: '10000000-0000-4000-8000-000000000001',
+                  direction: 'inbound',
+                  type: 'image',
+                  text: '',
+                  attachments: [{ type: 'image', url: 'https://lookaside.fbsbx.com/photo.jpg' }],
+                  status: 'received',
+                  created_at: '2026-09-23T15:00:00.000Z',
+                },
+                {
+                  id: '10000000-0000-4000-8000-000000000002',
+                  direction: 'inbound',
+                  type: 'ig_reel',
+                  text: '',
+                  attachments: [
+                    { type: 'ig_reel', url: 'https://www.instagram.com/reel/TESTE123/' },
+                  ],
+                  status: 'received',
+                  created_at: '2026-09-23T15:01:00.000Z',
+                },
+                {
+                  id: '10000000-0000-4000-8000-000000000003',
+                  direction: 'inbound',
+                  type: 'ig_reel',
+                  text: '',
+                  attachments: [
+                    { type: 'ig_reel', url: 'https://lookaside.fbsbx.com/reel-preview' },
+                  ],
+                  status: 'received',
+                  created_at: '2026-09-23T15:02:00.000Z',
+                },
+                {
+                  id: '10000000-0000-4000-8000-000000000004',
+                  direction: 'inbound',
+                  type: 'text',
+                  text: 'Veja este post: https://www.instagram.com/p/TEXTO123/.',
+                  attachments: [],
+                  status: 'received',
+                  created_at: '2026-09-23T15:03:00.000Z',
+                },
+              ]
+            : [],
       },
     });
   });
+  await page.route('**/attachments/0/media', (route) =>
+    route.fulfill({
+      contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240"><rect width="320" height="240" fill="#dcefeb"/></svg>',
+    }),
+  );
   await page.route('**/api/v1/conversations/*/read', (route) =>
     route.fulfill({ json: { read: true } }),
   );
@@ -1329,4 +1379,20 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
   await expect(page.locator('.thread-header')).toContainText('CONVERSA DESTINO');
   await expect(page.locator('.thread-header')).not.toContainText('CONVERSA ERRADA');
   await expect(page.locator('.inbox-conversations .instagram-avatar img')).toHaveCount(1);
+  await page.getByText('Carregando prévia…').scrollIntoViewIfNeeded();
+  await expect(page.locator('.message-image')).toHaveCount(2);
+  await expect(page.getByTitle('Prévia de reel')).toHaveAttribute(
+    'src',
+    'https://www.instagram.com/reel/TESTE123/embed/',
+  );
+  await expect(page.getByTitle('Prévia de link do Instagram')).toHaveAttribute(
+    'src',
+    'https://www.instagram.com/p/TEXTO123/embed/',
+  );
+  await expect(
+    page.getByRole('link', { name: 'https://www.instagram.com/p/TEXTO123/' }),
+  ).toHaveAttribute('href', 'https://www.instagram.com/p/TEXTO123/');
+  await page.getByRole('button', { name: 'Abrir imagem em tamanho original' }).first().click();
+  await expect(page.getByRole('dialog', { name: 'Imagem ampliada' })).toBeVisible();
+  await page.getByRole('button', { name: 'Fechar imagem ampliada' }).click();
 });

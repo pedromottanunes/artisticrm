@@ -270,6 +270,7 @@ test('somente responsável que aceitou responde e reuso da chave não envia duas
 test('imagem e áudio do webhook preservam URLs e imagem pode ser baixada sem armazenamento', async () => {
   const imageUrl = 'https://lookaside.fbsbx.com/instagram-image.jpg';
   const audioUrl = 'https://lookaside.fbsbx.com/instagram-audio.mp4';
+  const sharedMediaUrl = 'https://lookaside.fbsbx.com/instagram-shared-media';
   const mediaPayload = {
     object: 'instagram',
     entry: [
@@ -285,6 +286,7 @@ test('imagem e áudio do webhook preservam URLs e imagem pode ser baixada sem ar
               attachments: [
                 { type: 'image', payload: { url: imageUrl } },
                 { type: 'audio', payload: { url: audioUrl } },
+                { type: 'ig_reel', payload: { url: sharedMediaUrl } },
               ],
             },
           },
@@ -302,14 +304,34 @@ test('imagem e áudio do webhook preservam URLs e imagem pode ser baixada sem ar
   assert.deepEqual(history.messages[0].attachments, [
     { type: 'image', url: imageUrl },
     { type: 'audio', url: audioUrl },
+    { type: 'ig_reel', url: sharedMediaUrl },
   ]);
 
   const imageBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
-  const mediaFetch: typeof fetch = async (input) => {
-    assert.equal(String(input), imageUrl);
-    return new Response(imageBytes, {
+  const audioBytes = new Uint8Array([0x49, 0x44, 0x33]);
+  const sharedMediaBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+  const mediaFetch: typeof fetch = async (input, init) => {
+    if (String(input) === imageUrl)
+      return new Response(imageBytes, {
+        status: 200,
+        headers: { 'content-type': 'image/jpeg', 'content-length': String(imageBytes.length) },
+      });
+    if (String(input) === audioUrl) {
+      assert.equal(new Headers(init?.headers).get('Range'), 'bytes=0-2');
+      return new Response(audioBytes, {
+        status: 206,
+        headers: {
+          'content-type': 'audio/mpeg',
+          'content-length': String(audioBytes.length),
+          'content-range': 'bytes 0-2/3',
+          'accept-ranges': 'bytes',
+        },
+      });
+    }
+    assert.equal(String(input), sharedMediaUrl);
+    return new Response(sharedMediaBytes, {
       status: 200,
-      headers: { 'content-type': 'image/jpeg', 'content-length': String(imageBytes.length) },
+      headers: { 'content-type': 'image/png' },
     });
   };
   const { app } = await buildApp(db, {
@@ -333,6 +355,27 @@ test('imagem e áudio do webhook preservam URLs e imagem pode ser baixada sem ar
     assert.equal(download.headers['content-type'], 'image/jpeg');
     assert.match(String(download.headers['content-disposition']), /^attachment;/);
     assert.deepEqual(download.rawPayload, Buffer.from(imageBytes));
+    const imagePreview = await app.inject({
+      url: `/api/v1/conversations/${conversation.id}/messages/${history.messages[0].id}/attachments/0/media`,
+      headers: { cookie },
+    });
+    assert.equal(imagePreview.statusCode, 200);
+    assert.deepEqual(imagePreview.rawPayload, Buffer.from(imageBytes));
+    const audioPreview = await app.inject({
+      url: `/api/v1/conversations/${conversation.id}/messages/${history.messages[0].id}/attachments/1/media`,
+      headers: { cookie, range: 'bytes=0-2' },
+    });
+    assert.equal(audioPreview.statusCode, 206);
+    assert.equal(audioPreview.headers['content-range'], 'bytes 0-2/3');
+    assert.equal(audioPreview.headers['accept-ranges'], 'bytes');
+    assert.deepEqual(audioPreview.rawPayload, Buffer.from(audioBytes));
+    const sharedMediaPreview = await app.inject({
+      url: `/api/v1/conversations/${conversation.id}/messages/${history.messages[0].id}/attachments/2/media`,
+      headers: { cookie },
+    });
+    assert.equal(sharedMediaPreview.statusCode, 200);
+    assert.equal(sharedMediaPreview.headers['content-type'], 'image/png');
+    assert.deepEqual(sharedMediaPreview.rawPayload, Buffer.from(sharedMediaBytes));
   } finally {
     await app.close();
   }

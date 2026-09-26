@@ -919,6 +919,20 @@ test('Mongo: Direct do Instagram cria identidade sem telefone, conversa e mensag
     { type: 'image', url: 'https://lookaside.fbsbx.com/mongo-image.jpg' },
     { type: 'audio', url: 'https://lookaside.fbsbx.com/mongo-audio.mp4' },
   ]);
+  const mediaCentral = new InstagramCentral(ops, instagramTestConfig, async (input) => {
+    assert.equal(String(input), 'https://lookaside.fbsbx.com/mongo-image.jpg');
+    return new Response(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), {
+      headers: { 'content-type': 'image/jpeg' },
+    });
+  });
+  const proxiedImage = await mediaCentral.streamAttachment(
+    users[0],
+    conversation.id,
+    String(instagramMessages[0]?.id),
+    0,
+  );
+  assert.equal(proxiedImage.contentType, 'image/jpeg');
+  await proxiedImage.body.cancel();
   await db.insert('messages', {
     id: randomUUID(),
     conversation_id: conversation.id,

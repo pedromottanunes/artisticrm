@@ -109,7 +109,7 @@ export async function buildApp(
         .header('Strict-Transport-Security', 'max-age=31536000')
         .header(
           'Content-Security-Policy',
-          "default-src 'self'; script-src 'self'; worker-src 'self'; manifest-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.cdninstagram.com https://*.fbcdn.net https://lookaside.fbsbx.com https://*.fbsbx.com; media-src 'self' https://*.cdninstagram.com https://*.fbcdn.net https://lookaside.fbsbx.com https://*.fbsbx.com; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
+          "default-src 'self'; script-src 'self'; worker-src 'self'; manifest-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.cdninstagram.com https://*.fbcdn.net https://lookaside.fbsbx.com https://*.fbsbx.com; media-src 'self' https://*.cdninstagram.com https://*.fbcdn.net https://lookaside.fbsbx.com https://*.fbsbx.com; frame-src 'self' https://www.instagram.com; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
         );
     if (!request.url.startsWith('/api/')) return;
     if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(request.method)) {
@@ -662,6 +662,29 @@ export async function buildApp(
   });
   app.get('/api/v1/conversations/:id/messages', async (request) =>
     instagram.messages(request.user, idParams.parse(request.params).id),
+  );
+  app.get(
+    '/api/v1/conversations/:id/messages/:messageId/attachments/:index/media',
+    async (request, reply) => {
+      const params = attachmentParams.parse(request.params);
+      const range = typeof request.headers.range === 'string' ? request.headers.range : undefined;
+      const media = await instagram.streamAttachment(
+        request.user,
+        params.id,
+        params.messageId,
+        params.index,
+        range,
+      );
+      reply.code(media.status).type(media.contentType);
+      if (media.contentLength) reply.header('Content-Length', media.contentLength);
+      if (media.contentRange) reply.header('Content-Range', media.contentRange);
+      if (media.acceptRanges) reply.header('Accept-Ranges', media.acceptRanges);
+      return reply.send(
+        Readable.fromWeb(
+          media.body as unknown as import('node:stream/web').ReadableStream<Uint8Array>,
+        ),
+      );
+    },
   );
   app.get(
     '/api/v1/conversations/:id/messages/:messageId/attachments/:index/download',

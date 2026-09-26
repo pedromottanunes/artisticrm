@@ -90,7 +90,9 @@ const storedAttachmentSchema = z.object({
 });
 
 const imageAttachmentTypes = new Set(['image', 'photo', 'animated_image']);
-const instagramMediaHostSuffixes = ['cdninstagram.com', 'fbcdn.net', 'fbsbx.com'];
+const audioAttachmentTypes = new Set(['audio', 'voice', 'voice_message']);
+const videoAttachmentTypes = new Set(['video']);
+const instagramMediaHostSuffixes = ['cdninstagram.com', 'fbcdn.net', 'fbsbx.com', 'instagram.com'];
 
 function isTrustedInstagramMediaUrl(value: string) {
   try {
@@ -113,6 +115,15 @@ function imageExtension(contentType: string) {
   if (contentType === 'image/webp') return 'webp';
   if (contentType === 'image/avif') return 'avif';
   return 'jpg';
+}
+
+function mediaContentType(type: string, received: string) {
+  if (received && received !== 'application/octet-stream') return received;
+  const normalized = type.toLowerCase();
+  if (imageAttachmentTypes.has(normalized)) return 'image/jpeg';
+  if (audioAttachmentTypes.has(normalized)) return 'audio/mpeg';
+  if (videoAttachmentTypes.has(normalized)) return 'video/mp4';
+  return received;
 }
 
 const userProfileSchema = z
@@ -1077,6 +1088,28 @@ export class InstagramCentral {
     messageId: string,
     attachmentIndex: number,
   ) {
+    const media = await this.streamAttachment(user, conversationId, messageId, attachmentIndex);
+    if (!media.contentType.startsWith('image/')) {
+      await media.body.cancel().catch(() => {});
+      throw new DomainError('MEDIA_UNAVAILABLE', 'O arquivo recebido não é uma imagem.', 502);
+    }
+    if (media.contentLength && Number(media.contentLength) > 25 * 1024 * 1024) {
+      await media.body.cancel().catch(() => {});
+      throw new DomainError('MEDIA_TOO_LARGE', 'A imagem excede o limite permitido.', 413);
+    }
+    return {
+      ...media,
+      fileName: `imagem-instagram-${messageId.slice(0, 8)}.${imageExtension(media.contentType)}`,
+    };
+  }
+
+  async streamAttachment(
+    user: User,
+    conversationId: string,
+    messageId: string,
+    attachmentIndex: number,
+    range?: string,
+  ) {
     const context = await this.context(user, conversationId);
     const db = this.crm.db;
     const row =
@@ -1091,54 +1124,61 @@ export class InstagramCentral {
               [messageId, context.id],
             )
           ).rows[0];
-    if (!row) throw new DomainError('NOT_FOUND', 'Imagem não encontrada.', 404);
+    if (!row) throw new DomainError('NOT_FOUND', 'Mídia não encontrada.', 404);
 
-    const rawAttachments =
-      typeof row.attachments === 'string' ? JSON.parse(row.attachments) : (row.attachments ?? []);
+    let rawAttachments: unknown = row.attachments ?? [];
+    if (typeof rawAttachments === 'string')
+      try {
+        rawAttachments = JSON.parse(rawAttachments);
+      } catch {
+        throw new DomainError('MEDIA_UNAVAILABLE', 'Mídia indisponível.', 404);
+      }
     const attachments = z.array(storedAttachmentSchema).max(20).safeParse(rawAttachments);
     const attachment = attachments.success ? attachments.data[attachmentIndex] : undefined;
-    if (
-      !attachment?.url ||
-      !imageAttachmentTypes.has(attachment.type.toLowerCase()) ||
-      !isTrustedInstagramMediaUrl(attachment.url)
-    )
-      throw new DomainError('MEDIA_UNAVAILABLE', 'Imagem indisponível.', 404);
+    if (!attachment?.url || !isTrustedInstagramMediaUrl(attachment.url))
+      throw new DomainError('MEDIA_UNAVAILABLE', 'Mídia indisponível.', 404);
 
     let response: Response;
+    const responseController = new AbortController();
+    const responseTimeout = setTimeout(() => responseController.abort(), 20_000);
     try {
       response = await this.request(attachment.url, {
         method: 'GET',
+        ...(range ? { headers: { Range: range } } : {}),
         redirect: 'follow',
-        signal: AbortSignal.timeout(20_000),
+        signal: responseController.signal,
       });
     } catch {
-      throw new DomainError('MEDIA_UNAVAILABLE', 'Não foi possível baixar a imagem.', 502);
+      throw new DomainError('MEDIA_UNAVAILABLE', 'Não foi possível carregar a mídia.', 502);
+    } finally {
+      // O limite protege somente a espera pelos cabeçalhos da Meta. Manter o sinal
+      // ativo interromperia áudios e vídeos válidos durante a reprodução.
+      clearTimeout(responseTimeout);
     }
     if (
       !response.ok ||
       !response.body ||
       (response.url && !isTrustedInstagramMediaUrl(response.url))
     )
-      throw new DomainError('MEDIA_UNAVAILABLE', 'Imagem indisponível.', 502);
+      throw new DomainError('MEDIA_UNAVAILABLE', 'Mídia indisponível.', 502);
 
-    const contentType = (response.headers.get('content-type') ?? '')
+    const receivedContentType = (response.headers.get('content-type') ?? '')
       .split(';')[0]
       .trim()
       .toLowerCase();
-    if (!contentType.startsWith('image/')) {
+    const contentType = mediaContentType(attachment.type, receivedContentType);
+    if (!/^(image|audio|video)\//.test(contentType)) {
       await response.body.cancel().catch(() => {});
-      throw new DomainError('MEDIA_UNAVAILABLE', 'O arquivo recebido não é uma imagem.', 502);
+      throw new DomainError('MEDIA_UNAVAILABLE', 'A URL não contém uma mídia exibível.', 502);
     }
     const contentLength = response.headers.get('content-length');
-    if (contentLength && Number(contentLength) > 25 * 1024 * 1024) {
-      await response.body.cancel().catch(() => {});
-      throw new DomainError('MEDIA_TOO_LARGE', 'A imagem excede o limite permitido.', 413);
-    }
     return {
       body: response.body,
       contentType,
       contentLength,
-      fileName: `imagem-instagram-${messageId.slice(0, 8)}.${imageExtension(contentType)}`,
+      status: response.status,
+      contentRange: response.headers.get('content-range'),
+      acceptRanges: response.headers.get('accept-ranges'),
     };
   }
 
