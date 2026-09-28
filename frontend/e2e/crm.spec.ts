@@ -1301,6 +1301,7 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
   );
   let threadRequests = 0;
   let readRequests = 0;
+  let mediaProxyRequests = 0;
   await page.route('**/api/v1/conversations/*/messages*', (route) => {
     const after = new URL(route.request().url()).searchParams.has('after');
     const id = route.request().url().includes('conversation-target')
@@ -1375,12 +1376,19 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
       },
     });
   });
-  await page.route('**/attachments/0/media', (route) =>
+  await page.route('https://lookaside.fbsbx.com/**', (route) =>
     route.fulfill({
       contentType: 'image/svg+xml',
       body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240"><rect width="320" height="240" fill="#dcefeb"/></svg>',
     }),
   );
+  await page.route('**/attachments/0/media', (route) => {
+    mediaProxyRequests += 1;
+    return route.fulfill({
+      contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240"><rect width="320" height="240" fill="#dcefeb"/></svg>',
+    });
+  });
   await page.route('**/api/v1/conversations/*/read', (route) => {
     if (route.request().url().includes('conversation-target')) readRequests += 1;
     return route.fulfill({ json: { read: true } });
@@ -1405,6 +1413,9 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
   await expect(page.locator('.inbox-conversations .instagram-avatar img')).toHaveCount(1);
   await page.getByText('Carregando prévia…').scrollIntoViewIfNeeded();
   await expect(page.locator('.message-image')).toHaveCount(2);
+  const directImage = page.locator('.message-image').first();
+  await expect(directImage).toHaveAttribute('src', 'https://lookaside.fbsbx.com/photo.jpg');
+  expect(mediaProxyRequests).toBe(1);
   await expect(page.getByTitle('Prévia de reel')).toHaveAttribute(
     'src',
     'https://www.instagram.com/reel/TESTE123/embed/',
@@ -1424,6 +1435,9 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
   await expect(page.getByText('Nova mensagem incremental')).toBeVisible({ timeout: 7_000 });
   expect(threadRequests).toBe(2);
   expect(readRequests).toBe(2);
+  await directImage.dispatchEvent('error');
+  await expect(directImage).toHaveAttribute('src', /\/attachments\/0\/media$/);
+  expect(mediaProxyRequests).toBe(2);
   await page.getByRole('button', { name: 'Abrir imagem em tamanho original' }).first().click();
   await expect(page.getByRole('dialog', { name: 'Imagem ampliada' })).toBeVisible();
   await page.getByRole('button', { name: 'Fechar imagem ampliada' }).click();

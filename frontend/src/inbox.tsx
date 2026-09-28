@@ -50,6 +50,24 @@ const audioAttachmentTypes = new Set(['audio', 'voice', 'voice_message']);
 const videoAttachmentTypes = new Set(['video']);
 const sharedAttachmentTypes = new Set(['ig_post', 'ig_reel', 'post', 'reel', 'share']);
 const sharedVideoTypes = new Set(['ig_reel', 'reel']);
+const directMetaMediaHosts = ['cdninstagram.com', 'fbcdn.net', 'fbsbx.com'];
+
+function directMetaMediaUrl(value?: string) {
+  if (!value) return;
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
+    if (
+      url.protocol === 'https:' &&
+      directMetaMediaHosts.some(
+        (trustedHost) => hostname === trustedHost || hostname.endsWith(`.${trustedHost}`),
+      )
+    )
+      return url.href;
+  } catch {
+    return;
+  }
+}
 
 function instagramEmbedUrl(value: string) {
   try {
@@ -176,6 +194,9 @@ function MediaAttachment({
   const [expanded, setExpanded] = useState(false);
   const type = attachment.type.toLowerCase();
   const embedUrl = attachment.url ? instagramEmbedUrl(attachment.url) : undefined;
+  const directUrl = embedUrl ? undefined : directMetaMediaUrl(attachment.url);
+  const [useProxy, setUseProxy] = useState(!directUrl);
+  const mediaUrl = useProxy || !directUrl ? previewUrl : directUrl;
   const sharedMedia = sharedAttachmentTypes.has(type) && !embedUrl;
   const sharedProbeRef = useRef<HTMLSpanElement>(null);
   const [shouldProbeSharedMedia, setShouldProbeSharedMedia] = useState(false);
@@ -228,11 +249,20 @@ function MediaAttachment({
   const retryMedia = () => {
     setFailed(false);
     setExpanded(false);
+    setUseProxy(!directUrl);
     if (sharedMedia) {
       setSharedKind('pending');
       setShouldProbeSharedMedia(true);
       setProbeAttempt((current) => current + 1);
     }
+  };
+
+  const mediaFailed = () => {
+    if (!useProxy && directUrl) {
+      setUseProxy(true);
+      return;
+    }
+    setFailed(true);
   };
 
   useEffect(() => {
@@ -293,10 +323,11 @@ function MediaAttachment({
         >
           <img
             className="message-image"
-            src={previewUrl}
+            src={mediaUrl}
             alt="Imagem recebida pelo Instagram"
             loading="lazy"
-            onError={() => setFailed(true)}
+            referrerPolicy="no-referrer"
+            onError={mediaFailed}
           />
           <span className="message-image-expand" aria-hidden="true">
             <Maximize2 size={15} />
@@ -324,7 +355,12 @@ function MediaAttachment({
             >
               <X size={22} />
             </button>
-            <img src={previewUrl} alt="Imagem recebida pelo Instagram ampliada" />
+            <img
+              src={mediaUrl}
+              alt="Imagem recebida pelo Instagram ampliada"
+              referrerPolicy="no-referrer"
+              onError={mediaFailed}
+            />
             <a className="message-lightbox-download" href={downloadUrl} download="imagem-instagram">
               <Download size={16} aria-hidden="true" />
               Baixar imagem
@@ -338,10 +374,10 @@ function MediaAttachment({
     return (
       <audio
         className="message-audio"
-        src={previewUrl}
+        src={mediaUrl}
         controls
         preload="none"
-        onError={() => setFailed(true)}
+        onError={mediaFailed}
       >
         Seu navegador não consegue reproduzir este áudio.
       </audio>
@@ -350,7 +386,7 @@ function MediaAttachment({
   if (videoAttachmentTypes.has(type) || (sharedAttachmentTypes.has(type) && sharedKind === 'video'))
     return (
       <div className="message-video-wrap">
-        <LazyVideo sourceUrl={previewUrl} onError={() => setFailed(true)} />
+        <LazyVideo sourceUrl={mediaUrl} onError={mediaFailed} />
         <a
           className="message-attachment-link"
           href={attachment.url}
