@@ -1427,4 +1427,38 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
   await page.getByRole('button', { name: 'Abrir imagem em tamanho original' }).first().click();
   await expect(page.getByRole('dialog', { name: 'Imagem ampliada' })).toBeVisible();
   await page.getByRole('button', { name: 'Fechar imagem ampliada' }).click();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('.inbox-thread')).toBeVisible();
+  await expect(page.locator('.inbox-list')).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Voltar para conversas' })).toBeVisible();
+  expect(
+    await page.locator('.instagram-inbox').evaluate((element) => element.scrollWidth <= innerWidth),
+  ).toBe(true);
+  await page.screenshot({
+    path: 'test-results/instagram-chat-mobile-thread.png',
+    animations: 'disabled',
+  });
+
+  await page.getByRole('button', { name: 'Voltar para conversas' }).click();
+  await expect(page.locator('.inbox-list')).toBeVisible();
+  await expect(page.locator('.inbox-thread')).toBeHidden();
+  await page.screenshot({
+    path: 'test-results/instagram-chat-mobile-list.png',
+    animations: 'disabled',
+  });
+  const threadRequestsWhileListIsOpen = threadRequests;
+  await page.waitForTimeout(5_500);
+  expect(threadRequests).toBe(threadRequestsWhileListIsOpen);
+  await page.getByRole('button', { name: /CONVERSA DESTINO/ }).click();
+  await expect(page.locator('.inbox-thread')).toBeVisible();
+  await expect(page.locator('.inbox-list')).toBeHidden();
+  expect(threadRequests).toBe(threadRequestsWhileListIsOpen + 1);
+
+  await page.setViewportSize({ width: 390, height: 500 });
+  const composer = await page.locator('.thread-composer').boundingBox();
+  const mobileNavigation = await page.locator('.mobile-bottom-nav').boundingBox();
+  expect(composer).not.toBeNull();
+  expect(mobileNavigation).not.toBeNull();
+  expect(composer!.y + composer!.height).toBeLessThanOrEqual(mobileNavigation!.y + 1);
 });

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   AlertTriangle,
+  ArrowLeft,
   ArrowRight,
   Download,
   ExternalLink,
@@ -392,6 +393,7 @@ export function InstagramInbox({
   const [configured, setConfigured] = useState(true);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [selectedId, setSelectedId] = useState('');
+  const [mobileThreadOpen, setMobileThreadOpen] = useState(false);
   const [thread, setThread] = useState<ThreadResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -402,6 +404,10 @@ export function InstagramInbox({
   const loadedThreadVersion = useRef(new Map<string, string>());
   const listSequence = useRef(0);
   const threadSequence = useRef(0);
+  const inboxRef = useRef<HTMLElement>(null);
+  const messageListRef = useRef<HTMLDivElement>(null);
+  const stickToLatestMessage = useRef(true);
+  const mobileThreadOpenRef = useRef(false);
 
   const handleError = useCallback(
     (error: unknown) => {
@@ -450,6 +456,11 @@ export function InstagramInbox({
           ...result!,
           messages: [...merged.values()].slice(-200),
         };
+        const messageList = messageListRef.current;
+        stickToLatestMessage.current =
+          !append ||
+          !messageList ||
+          messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight < 120;
         threadRef.current = next;
         setThread(next);
         loadedThreadVersion.current.set(
@@ -479,15 +490,23 @@ export function InstagramInbox({
         const targeted = targetOpportunityId
           ? result.conversations.find((item) => item.opportunity_id === targetOpportunityId)
           : undefined;
+        const keepConversationSelected =
+          !window.matchMedia('(max-width: 760px)').matches || mobileThreadOpenRef.current;
         const next = targeted
           ? targeted.id
-          : result.conversations.some((item) => item.id === selectedIdRef.current)
-            ? selectedIdRef.current
-            : (result.conversations[0]?.id ?? '');
+          : keepConversationSelected
+            ? result.conversations.some((item) => item.id === selectedIdRef.current)
+              ? selectedIdRef.current
+              : (result.conversations[0]?.id ?? '')
+            : '';
         const previous = selectedIdRef.current;
         selectedIdRef.current = next;
         setSelectedId(next);
-        if (targeted) onTargetConsumed();
+        if (targeted) {
+          mobileThreadOpenRef.current = true;
+          setMobileThreadOpen(true);
+          onTargetConsumed();
+        }
         if (next) {
           const summary = result.conversations.find((item) => item.id === next)!;
           const current = threadRef.current;
@@ -509,6 +528,8 @@ export function InstagramInbox({
           threadSequence.current += 1;
           threadRef.current = null;
           setThread(null);
+          mobileThreadOpenRef.current = false;
+          setMobileThreadOpen(false);
         }
         onConnectionChange(true);
       } catch (error) {
@@ -529,12 +550,74 @@ export function InstagramInbox({
     return () => window.clearInterval(timer);
   }, [refresh]);
 
+  const latestMessageId = thread?.messages.at(-1)?.id;
+  useEffect(() => {
+    if (!thread || !stickToLatestMessage.current) return;
+    const frame = window.requestAnimationFrame(() => {
+      const messageList = messageListRef.current;
+      if (messageList) messageList.scrollTop = messageList.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [latestMessageId, thread?.conversation_id]);
+
+  useEffect(() => {
+    if (loading) return;
+    const inbox = inboxRef.current;
+    const viewport = window.visualViewport;
+    const mobile = window.matchMedia('(max-width: 760px)');
+    if (!inbox) return;
+    const resize = () => {
+      if (!mobile.matches) {
+        inbox.style.removeProperty('--inbox-mobile-height');
+        return;
+      }
+      const viewportHeight = viewport?.height ?? window.innerHeight;
+      const top = Math.max(0, inbox.getBoundingClientRect().top);
+      const navigationTop = document
+        .querySelector<HTMLElement>('.mobile-bottom-nav')
+        ?.getBoundingClientRect().top;
+      const bottom =
+        navigationTop && navigationTop > top && navigationTop < viewportHeight
+          ? navigationTop
+          : viewportHeight;
+      inbox.style.setProperty('--inbox-mobile-height', `${Math.max(180, bottom - top)}px`);
+    };
+    const frame = window.requestAnimationFrame(() => {
+      if (mobile.matches) inbox.scrollIntoView({ block: 'start' });
+      resize();
+    });
+    viewport?.addEventListener('resize', resize);
+    viewport?.addEventListener('scroll', resize);
+    window.addEventListener('resize', resize);
+    mobile.addEventListener('change', resize);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      viewport?.removeEventListener('resize', resize);
+      viewport?.removeEventListener('scroll', resize);
+      window.removeEventListener('resize', resize);
+      mobile.removeEventListener('change', resize);
+      inbox.style.removeProperty('--inbox-mobile-height');
+    };
+  }, [loading, mobileThreadOpen]);
+
   const select = (id: string) => {
+    mobileThreadOpenRef.current = true;
+    setMobileThreadOpen(true);
     selectedIdRef.current = id;
     setSelectedId(id);
     threadRef.current = null;
     setThread(null);
     void loadThread(id);
+  };
+
+  const returnToConversationList = () => {
+    mobileThreadOpenRef.current = false;
+    setMobileThreadOpen(false);
+    selectedIdRef.current = '';
+    setSelectedId('');
+    threadSequence.current += 1;
+    threadRef.current = null;
+    setThread(null);
   };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -588,7 +671,11 @@ export function InstagramInbox({
     );
 
   return (
-    <section className="instagram-inbox" aria-label="Caixa de entrada do Instagram">
+    <section
+      ref={inboxRef}
+      className={`instagram-inbox${mobileThreadOpen ? ' mobile-thread-open' : ''}`}
+      aria-label="Caixa de entrada do Instagram"
+    >
       <aside className="inbox-list panel">
         <header>
           <div>
@@ -655,21 +742,32 @@ export function InstagramInbox({
         ) : (
           <>
             <header className="thread-header">
-              <div>
-                <span>ATENDIMENTO PELO CRM</span>
-                <h2>
-                  {conversations.find((item) => item.id === selectedId)?.contact_name ??
-                    'Contato Instagram'}
-                </h2>
+              <div className="thread-heading">
+                <button
+                  type="button"
+                  className="icon-button thread-back"
+                  aria-label="Voltar para conversas"
+                  onClick={returnToConversationList}
+                >
+                  <ArrowLeft size={20} />
+                </button>
+                <div>
+                  <span>ATENDIMENTO PELO CRM</span>
+                  <h2>
+                    {conversations.find((item) => item.id === selectedId)?.contact_name ??
+                      'Contato Instagram'}
+                  </h2>
+                </div>
               </div>
               <button
-                className="button outline compact"
+                className="button outline compact thread-lead-button"
+                aria-label="Abrir ficha do lead"
                 onClick={() => onOpenLead(thread.opportunity_id)}
               >
-                Abrir ficha <ArrowRight size={15} />
+                <span>Abrir ficha</span> <ArrowRight size={15} />
               </button>
             </header>
-            <div className="thread-messages" aria-live="polite">
+            <div ref={messageListRef} className="thread-messages" aria-live="polite">
               {thread.messages.map((message) => (
                 <article
                   key={message.id}
