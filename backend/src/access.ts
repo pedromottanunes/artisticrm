@@ -8,7 +8,7 @@ export async function lockActor(tx: Sql, user: User, exclusive = false) {
       user.id,
     ])
   ).rows[0];
-  if (!current?.active || current.auth_version !== user.auth_version)
+  if (!current?.active || current.auth_version !== user.auth_version || current.role !== user.role)
     throw new DomainError('UNAUTHENTICATED', 'Acesso revogado. Entre novamente.', 401);
   if (current.must_change_password)
     throw new DomainError('PASSWORD_CHANGE_REQUIRED', 'Altere sua senha para continuar.', 403);

@@ -61,9 +61,10 @@ export function publicUser(user: Document): User {
 export class MongoOperations {
   async deleteLead(actor: User, id: string, input: DeleteLeadInput, key: string) {
     return this.db.atomic(async (tx) => {
-      await this.actor(tx, actor);
-      return this.command(tx, actor, key, { kind: 'lead.delete', id, ...input }, () =>
-        deleteLeadData(tx, actor, id, input),
+      const currentActor = await this.actor(tx, actor);
+      requireManager(currentActor);
+      return this.command(tx, currentActor, key, { kind: 'lead.delete', id, ...input }, () =>
+        deleteLeadData(tx, currentActor, id, input),
       );
     });
   }
@@ -117,7 +118,7 @@ export class MongoOperations {
     return { hasScheduled: false };
   }
   async actor(tx: MongoTx, actor: User, allowPasswordChange = false) {
-    const current = await tx.one('users', { id: actor.id });
+    const current = await tx.one<User & { password_hash: string }>('users', { id: actor.id });
     if (
       !current?.active ||
       current.auth_version !== actor.auth_version ||

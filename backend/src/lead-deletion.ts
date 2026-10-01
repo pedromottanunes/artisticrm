@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Sql } from './db.js';
 import { MongoTx } from './mongo-store.js';
-import { DomainError, type User, type Opportunity } from './types.js';
+import { DomainError, requireManager, type User, type Opportunity } from './types.js';
 
 export type DeleteLeadInput = { expected_version: number; confirmation: string };
 export const eventHash = (id: string) => createHash('sha256').update(id).digest('hex');
@@ -23,6 +23,7 @@ export async function deleteLeadData(
   id: string,
   input: DeleteLeadInput,
 ) {
+  requireManager(actor);
   if (input.confirmation !== 'EXCLUIR')
     throw new DomainError(
       'CONFIRMATION_REQUIRED',
@@ -35,12 +36,6 @@ export async function deleteLeadData(
     : (await tx.query<Opportunity>('SELECT * FROM opportunities WHERE id=$1 FOR UPDATE', [id]))
         .rows[0];
   if (!row) throw new DomainError('NOT_FOUND', 'Lead não encontrado.', 404);
-  if (actor.role !== 'manager' && row.owner_id !== actor.id)
-    throw new DomainError(
-      'FORBIDDEN',
-      'Você só pode excluir leads que assumiu e continuam sob sua responsabilidade.',
-      403,
-    );
   if (row.version !== input.expected_version)
     throw new DomainError(
       'VERSION_CONFLICT',

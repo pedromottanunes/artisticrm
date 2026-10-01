@@ -34,9 +34,10 @@ export class Operations extends CRM {
   async deleteLead(actor: User, id: string, input: DeleteLeadInput, key: string) {
     return this.db.transaction(async (tx) => {
       await tx.query('SELECT id FROM distribution_settings WHERE id=1 FOR UPDATE');
-      await lockActor(tx, actor, true);
-      return this.command(tx, actor, key, { kind: 'lead.delete', id, ...input }, () =>
-        deleteLeadData(tx, actor, id, input),
+      const currentActor = await lockActor(tx, actor, true);
+      requireManager(currentActor);
+      return this.command(tx, currentActor, key, { kind: 'lead.delete', id, ...input }, () =>
+        deleteLeadData(tx, currentActor, id, input),
       );
     });
   }

@@ -35,6 +35,7 @@ export async function checkDeletePermissions(
   const remove = (actor: User, version = 1, confirm = 'EXCLUIR') =>
     ops.deleteLead(actor, id, { expected_version: version, confirmation: confirm }, randomUUID());
   await assert.rejects(remove(owner), { code: 'FORBIDDEN' });
+  await assert.rejects(remove({ ...owner, role: 'manager' }), { code: 'UNAUTHENTICATED' });
   await assert.rejects(remove(manager, 1, 'excluir'), { code: 'CONFIRMATION_REQUIRED' });
   await assert.rejects(remove(manager, 99), { code: 'VERSION_CONFLICT' });
   await assert.rejects(remove({ ...manager, auth_version: manager.auth_version + 1 }), {
@@ -51,7 +52,7 @@ export async function checkDeletePermissions(
       payload: { email: owner.email, password },
     });
     assert.equal(login.statusCode, 200);
-    const headers = {
+    const attendantHeaders = {
       cookie: `artisti_session=${login.cookies[0].value}`,
       'x-artisti-client': 'web',
       'idempotency-key': randomUUID(),
@@ -73,15 +74,46 @@ export async function checkDeletePermissions(
         await app.inject({
           method: 'DELETE',
           url,
-          headers: { ...headers, 'x-artisti-client': '' },
+          headers: { ...attendantHeaders, 'x-artisti-client': '' },
           payload: confirmation(2),
         })
       ).statusCode,
       403,
     );
     assert.equal(
-      (await app.inject({ method: 'DELETE', url, headers, payload: { expected_version: 2 } }))
-        .statusCode,
+      (
+        await app.inject({
+          method: 'DELETE',
+          url,
+          headers: attendantHeaders,
+          payload: confirmation(2),
+        })
+      ).statusCode,
+      403,
+    );
+    assert.equal((await ops.detail(manager, id)).version, 2);
+
+    const managerLogin = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: { 'x-artisti-client': 'web' },
+      payload: { email: manager.email, password },
+    });
+    assert.equal(managerLogin.statusCode, 200);
+    const managerHeaders = {
+      cookie: `artisti_session=${managerLogin.cookies[0].value}`,
+      'x-artisti-client': 'web',
+      'idempotency-key': randomUUID(),
+    };
+    assert.equal(
+      (
+        await app.inject({
+          method: 'DELETE',
+          url,
+          headers: managerHeaders,
+          payload: { expected_version: 2 },
+        })
+      ).statusCode,
       400,
     );
     assert.equal(
@@ -89,21 +121,33 @@ export async function checkDeletePermissions(
         await app.inject({
           method: 'DELETE',
           url,
-          headers: { ...headers, 'idempotency-key': '' },
+          headers: { ...managerHeaders, 'idempotency-key': '' },
           payload: confirmation(2),
         })
       ).statusCode,
       400,
     );
-    const result = await app.inject({ method: 'DELETE', url, headers, payload: confirmation(2) });
+    const result = await app.inject({
+      method: 'DELETE',
+      url,
+      headers: managerHeaders,
+      payload: confirmation(2),
+    });
     assert.equal(result.statusCode, 200, result.body);
     assert.deepEqual(result.json(), { deleted: true });
     assert.equal(
-      (await app.inject({ method: 'DELETE', url, headers, payload: confirmation(2) })).statusCode,
+      (
+        await app.inject({
+          method: 'DELETE',
+          url,
+          headers: managerHeaders,
+          payload: confirmation(2),
+        })
+      ).statusCode,
       200,
     );
-    assert.equal((await app.inject({ url, headers })).statusCode, 404);
-    await assert.rejects(remove(other, 2), { code: 'NOT_FOUND' });
+    assert.equal((await app.inject({ url, headers: managerHeaders })).statusCode, 404);
+    await assert.rejects(remove(other, 2), { code: 'FORBIDDEN' });
   } finally {
     await app.close();
   }
@@ -217,7 +261,10 @@ export async function checkDeleteShared(ops: Ops, manager: User, users: User[]) 
   });
   const returning = await ops.ingest(input(), randomUUID(), manager.id);
   const preserved = await ops.detail(manager, returning.id);
-  await ops.deleteLead(owner, id, confirmation(3), randomUUID());
+  await assert.rejects(ops.deleteLead(owner, id, confirmation(3), randomUUID()), {
+    code: 'FORBIDDEN',
+  });
+  await ops.deleteLead(manager, id, confirmation(3), randomUUID());
   assert.deepEqual(await ops.detail(manager, returning.id), preserved);
   assert.equal((await rows(ops, 'contacts')).length, 1);
   await assert.rejects(ops.deleteLead(owner, returning.id, confirmation(1), randomUUID()), {

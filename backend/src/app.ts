@@ -351,6 +351,7 @@ export async function buildApp(
     return crm.claim(request.user, id, body.mode, body.expected_version, key);
   });
   app.delete('/api/v1/opportunities/:id', async (request) => {
+    requireManager(request.user);
     const { id } = idParams.parse(request.params);
     const body = z
       .object({

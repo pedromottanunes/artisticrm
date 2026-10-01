@@ -193,7 +193,8 @@ export function LeadDetail({
   }, [detail.consultation_status, detail.id, detail.stage]);
   const remove = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (deleting.current || saving || !connected || confirmation !== 'EXCLUIR') return;
+    if (!isManager || deleting.current || saving || !connected || confirmation !== 'EXCLUIR')
+      return;
     deleting.current = true;
     setSaving(true);
     setError('');
@@ -379,7 +380,9 @@ export function LeadDetail({
               ]
             : []),
           ...(isManager ? [{ id: 'transferir', label: 'Atribuir / transferir', step: null }] : []),
-          ...(detail.can_edit ? [{ id: 'excluir', label: 'Excluir lead', step: null }] : []),
+          ...(isManager && detail.can_edit
+            ? [{ id: 'excluir', label: 'Excluir lead', step: null }]
+            : []),
         ].map((item) => (
           <button
             className={`${tab === item.id ? 'active' : ''}${item.id === 'excluir' ? ' destructive' : ''}`}
@@ -397,7 +400,7 @@ export function LeadDetail({
           </button>
         ))}
       </div>
-      {tab === 'excluir' && detail.can_edit && (
+      {tab === 'excluir' && isManager && detail.can_edit && (
         <form onSubmit={remove}>
           <div className="modal-body form-grid">
             <div className="delete-warning full" id="delete-warning">

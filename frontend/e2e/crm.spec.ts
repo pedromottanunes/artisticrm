@@ -840,6 +840,7 @@ test('atendimento móvel acessa bolsão e confirma aceite sem abrir contato fict
   await firstLead.getByRole('button', { name: `Abrir ficha de ${name}`, exact: true }).click();
   const mobileDialog = page.getByRole('dialog');
   await expect(mobileDialog).toBeVisible();
+  await expect(mobileDialog.getByRole('button', { name: 'Excluir lead' })).toHaveCount(0);
   expect(await mobileDialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
     true,
   );
