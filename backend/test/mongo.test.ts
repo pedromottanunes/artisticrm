@@ -20,6 +20,7 @@ import type { User } from '../src/types.js';
 import { checkDistribution } from './distribution-checks.js';
 import { checkPush } from './push-checks.js';
 import { checkReports } from './report-checks.js';
+import { checkShortcuts } from './shortcut-checks.js';
 import {
   checkDeletePermissions,
   checkDeleteCleanup,
@@ -765,6 +766,8 @@ test('Mongo: transação abortada não deixa escrita parcial e índices impedem 
   await initializeMongo(db);
   assert.equal(await db.count('opportunities'), 1);
 });
+test('Mongo: atalhos são privados, validados, versionados e idempotentes', () =>
+  checkShortcuts(db, manager, users, password, () => now));
 test('Mongo: HTTP login, cookie seguro, dados persistidos, origem e logout', async () => {
   const { app } = await buildApp(db, {
     clock: () => now,

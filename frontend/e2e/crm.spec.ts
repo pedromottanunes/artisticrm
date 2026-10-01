@@ -90,6 +90,31 @@ test('push no aparelho: permissão somente por toque, teste e desativação', as
   expect(await events()).toEqual(['permission', 'subscribe', 'unsubscribe']);
 });
 
+test('atendente cadastra, edita e exclui um atalho no celular', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page, 'vanessa');
+  const navigation = page.getByRole('navigation', { name: 'Atalhos de atendimento' });
+  await navigation.getByRole('button', { name: 'Atalhos', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Cadastre aqui seus atalhos' })).toBeVisible();
+  await page.getByRole('button', { name: 'Criar atalho' }).click();
+  await page.getByLabel('Nome do atalho').fill('Saudação do teste');
+  await page.getByLabel('Mensagem').fill('Olá! Como posso ajudar?');
+  await page.getByRole('button', { name: 'Salvar atalho' }).click();
+  const card = page.locator('.shortcut-card').filter({ hasText: 'Saudação do teste' });
+  await expect(card).toContainText('Olá! Como posso ajudar?');
+  await card.getByRole('button', { name: 'Editar Saudação do teste' }).click();
+  await page.getByLabel('Nome do atalho').fill('Boas-vindas do teste');
+  await page.getByLabel('Mensagem').fill('Olá! Tudo bem?');
+  await page.getByRole('button', { name: 'Salvar atalho' }).click();
+  const updated = page.locator('.shortcut-card').filter({ hasText: 'Boas-vindas do teste' });
+  await expect(updated).toContainText('Olá! Tudo bem?');
+  await page.screenshot({ path: 'test-results/shortcuts-mobile.png', animations: 'disabled' });
+  await updated.getByRole('button', { name: 'Excluir Boas-vindas do teste' }).click();
+  await updated.getByRole('button', { name: 'Confirmar' }).click();
+  await expect(updated).toHaveCount(0);
+  expect(await page.evaluate(() => document.body.scrollWidth <= innerWidth)).toBe(true);
+});
+
 test('gestão móvel: todas as telas pela barra inferior, cartões e formulário com teclado', async ({
   page,
 }) => {
@@ -1303,7 +1328,29 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
   let threadRequests = 0;
   let readRequests = 0;
   let mediaProxyRequests = 0;
+  let shortcutMessage = '';
+  await page.route('**/api/v1/shortcuts', (route) =>
+    route.fulfill({
+      json: {
+        shortcuts: [
+          {
+            id: '20000000-0000-4000-8000-000000000001',
+            user_id: 'target-user',
+            name: 'Saudação rápida',
+            body: 'Olá pelo atalho!',
+            version: 1,
+            created_at: '2026-09-23T15:00:00.000Z',
+            updated_at: '2026-09-23T15:00:00.000Z',
+          },
+        ],
+      },
+    }),
+  );
   await page.route('**/api/v1/conversations/*/messages*', (route) => {
+    if (route.request().method() === 'POST') {
+      shortcutMessage = route.request().postDataJSON().text;
+      return route.fulfill({ json: { status: 'sent' } });
+    }
     const after = new URL(route.request().url()).searchParams.has('after');
     const id = route.request().url().includes('conversation-target')
       ? 'conversation-target'
@@ -1476,4 +1523,13 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
   expect(composer).not.toBeNull();
   expect(mobileNavigation).not.toBeNull();
   expect(composer!.y + composer!.height).toBeLessThanOrEqual(mobileNavigation!.y + 1);
+  await page.getByLabel('Mensagem para o Instagram').fill('Rascunho preservado');
+  await page.getByRole('button', { name: 'Abrir atalhos de mensagem' }).click();
+  await expect(
+    page.getByRole('region', { name: 'Atalhos de mensagem', exact: true }),
+  ).toBeVisible();
+  await page.screenshot({ path: 'test-results/chat-shortcuts-mobile.png', animations: 'disabled' });
+  await page.getByRole('button', { name: /Saudação rápida/ }).click();
+  await expect.poll(() => shortcutMessage).toBe('Olá pelo atalho!');
+  await expect(page.getByLabel('Mensagem para o Instagram')).toHaveValue('Rascunho preservado');
 });

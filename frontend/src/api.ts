@@ -31,6 +31,15 @@ export interface User {
   version: number;
   must_change_password: boolean;
 }
+export interface MessageShortcut {
+  id: string;
+  user_id: string;
+  name: string;
+  body: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
 export interface Lead {
   needs_review: boolean;
   id: string;

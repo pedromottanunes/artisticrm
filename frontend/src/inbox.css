@@ -362,12 +362,134 @@
 }
 
 .thread-composer {
+  position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: end;
   gap: 12px;
   padding: 16px 18px;
   border-top: 1px solid var(--border, #e8e4dc);
+}
+
+.shortcut-picker {
+  align-self: end;
+}
+
+.shortcut-picker-trigger {
+  display: inline-flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid var(--border, #dbe3e7);
+  border-radius: 9px;
+  color: var(--teal, #008f88);
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.shortcut-picker-trigger:hover,
+.shortcut-picker-trigger[aria-expanded='true'] {
+  border-color: #86c7c2;
+  background: #eff9f7;
+}
+
+.shortcut-picker-menu {
+  position: absolute;
+  z-index: 8;
+  bottom: calc(100% + 9px);
+  left: 12px;
+  width: min(340px, calc(100vw - 32px));
+  max-width: calc(100% - 24px);
+  max-height: min(380px, var(--shortcut-menu-height, 45dvh));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border, #dbe3e7);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 14px 34px rgb(26 49 67 / 16%);
+}
+
+.shortcut-picker-heading {
+  flex-shrink: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border, #e8e4dc);
+}
+
+.shortcut-picker-heading strong {
+  font-size: 0.84rem;
+}
+
+.shortcut-picker-heading small {
+  color: var(--muted, #74899e);
+  font-size: 0.68rem;
+}
+
+.shortcut-picker-list {
+  min-height: 0;
+  display: grid;
+  max-height: min(330px, 45vh);
+  overflow-y: auto;
+}
+
+.shortcut-picker-list button {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  display: grid;
+  gap: 4px;
+  padding: 11px 14px;
+  border: 0;
+  border-bottom: 1px solid #edf0f0;
+  color: var(--ink, #17324d);
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.shortcut-picker-list button:last-child {
+  border-bottom: 0;
+}
+
+.shortcut-picker-list button:hover,
+.shortcut-picker-list button:focus-visible {
+  background: #f2f9f8;
+}
+
+.shortcut-picker-list button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.shortcut-picker-list strong {
+  font-size: 0.78rem;
+}
+
+.shortcut-picker-list span {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--muted, #667c90);
+  font-size: 0.73rem;
+  line-height: 1.4;
+}
+
+.shortcut-picker-empty {
+  margin: 0;
+  padding: 18px 14px;
+  color: var(--muted, #74899e);
+  font-size: 0.76rem;
+  text-align: center;
 }
 
 .thread-composer textarea {
@@ -462,7 +584,7 @@
   }
 
   .thread-composer {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 8px;
     padding: 10px;
   }
@@ -474,5 +596,22 @@
 
   .thread-composer .button {
     min-height: 44px;
+  }
+
+  .shortcut-picker-trigger {
+    width: 44px;
+    min-height: 44px;
+    padding: 0;
+  }
+
+  .shortcut-picker-trigger span {
+    display: none;
+  }
+
+  .shortcut-picker-menu {
+    right: 10px;
+    left: 10px;
+    width: auto;
+    max-width: none;
   }
 }

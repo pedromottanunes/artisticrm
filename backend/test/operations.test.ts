@@ -12,6 +12,7 @@ import {
 import { seedDemo, DEMO_PASSWORD } from '../src/seed.js';
 import { buildApp } from '../src/app.js';
 import type { User, Opportunity } from '../src/types.js';
+import { checkShortcuts } from './shortcut-checks.js';
 
 let db: Database, ops: Operations, manager: User, users: User[];
 let now = new Date('2026-09-10T12:00:00Z');
@@ -32,7 +33,7 @@ before(async () => {
 });
 beforeEach(async () => {
   await db.query(
-    'TRUNCATE conversation_reads,messages,instagram_webhook_inbox,conversations,contact_identities,channel_accounts,deleted_inbound_events,push_records,whatsapp_inbox,operation_receipts,claims,appointments,lead_attributions,inbound_events,audit_events,opportunities,contacts,sessions',
+    'TRUNCATE message_shortcuts,conversation_reads,messages,instagram_webhook_inbox,conversations,contact_identities,channel_accounts,deleted_inbound_events,push_records,whatsapp_inbox,operation_receipts,claims,appointments,lead_attributions,inbound_events,audit_events,opportunities,contacts,sessions',
   );
   await db.query("DELETE FROM users WHERE email NOT LIKE '%@demo.artisti.local'");
   const { hashPassword } = await import('../src/auth.js');
@@ -88,6 +89,8 @@ test('exclusão SQL: contato compartilhado e atendimento encerrado', () =>
   checkDeleteShared(ops, manager, users));
 test('exclusão SQL: reentrega WhatsApp não recria lead excluído', () =>
   checkDeleteWebhook(ops, manager));
+test('atalhos SQL: são privados, validados, versionados e idempotentes', () =>
+  checkShortcuts(db, manager, users, DEMO_PASSWORD, () => now));
 
 test('transferência é auditada, idempotente e não muda cursor nem marca aceite', async () => {
   const { id } = await lead();

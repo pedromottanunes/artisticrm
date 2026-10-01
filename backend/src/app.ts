@@ -21,6 +21,7 @@ import { reportsOverview, reportsQuery } from './reports.js';
 import { tokenHash, verifyPassword } from './auth.js';
 import { loginSchema, passwordSchema } from './credentials.js';
 import { registerPush, type PushConfig, type PushSender } from './push.js';
+import { registerShortcuts } from './shortcuts.js';
 import { DomainError, requireManager, stages, type User } from './types.js';
 
 declare module 'fastify' {
@@ -624,6 +625,7 @@ export async function buildApp(
     options.reconcile !== false,
     options.pushSender,
   );
+  registerShortcuts(app, db, () => crm.now());
   app.get('/api/v1/whatsapp/status', async (request) => {
     requireManager(request.user);
     return central.status();

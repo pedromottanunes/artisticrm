@@ -74,6 +74,7 @@ export async function migrate(db: Database) {
       '018_instagram_lead_details.sql',
       '019_consultation_outcomes_and_sales.sql',
       '020_new_lead_status.sql',
+      '022_message_shortcuts.sql',
     ]) {
       const version = file.split('_')[0];
       const done = await tx.query('SELECT version FROM schema_migrations WHERE version=$1', [

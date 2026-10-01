@@ -1144,6 +1144,7 @@ export class MongoOperations {
         await tx.remove('claims', { user_id: id });
         await tx.remove('operation_receipts', { actor_id: id });
         await tx.remove('push_records', { kind: 'subscription', 'data.userId': id });
+        await tx.remove('message_shortcuts', { user_id: id });
         await tx.remove('users', { id });
         const settings = (await tx.one('distribution_settings', { id: 1 }))!;
         const remaining = await tx.many<QueueUser>(

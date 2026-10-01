@@ -14,6 +14,7 @@ import './manager-central.css';
 import './manager-pipeline.css';
 import './manager-reports.css';
 import './inbox.css';
+import './shortcuts.css';
 import './clinical-light.css';
 import './public-legal.css';
 import { registerDeviceWorker } from './pwa';

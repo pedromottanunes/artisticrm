@@ -1,0 +1,214 @@
+.shortcuts-page {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 0;
+  overflow: hidden;
+}
+
+.shortcuts-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding: 24px 26px;
+  border-bottom: 1px solid var(--border, #e8e4dc);
+}
+
+.shortcuts-heading span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--muted, #74899e);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.shortcuts-heading h2 {
+  margin: 0;
+  font-size: 1.22rem;
+}
+
+.shortcut-form {
+  display: grid;
+  gap: 16px;
+  margin: 20px 24px 6px;
+  padding: 20px;
+  border: 1px solid #d9e5e3;
+  border-radius: 13px;
+  background: #f8fbfa;
+}
+
+.shortcut-form-heading,
+.shortcut-form-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.shortcut-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--ink, #17324d);
+  font-size: 0.83rem;
+  font-weight: 600;
+}
+
+.shortcut-form input,
+.shortcut-form textarea {
+  width: 100%;
+}
+
+.shortcut-form textarea {
+  resize: vertical;
+}
+
+.shortcut-form-footer small {
+  color: var(--muted, #74899e);
+}
+
+.shortcut-error {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  margin: 16px 24px 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: #9d3232;
+  background: #fff1f1;
+  font-size: 0.82rem;
+}
+
+.shortcuts-list {
+  display: grid;
+  gap: 10px;
+  padding: 20px 24px 26px;
+}
+
+.shortcut-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--border, #e8e4dc);
+  border-radius: 11px;
+  background: #fff;
+}
+
+.shortcut-card-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--teal, #008f88);
+  background: #eaf7f5;
+}
+
+.shortcut-card-content strong {
+  overflow-wrap: anywhere;
+  display: block;
+  margin: 1px 0 5px;
+  font-size: 0.9rem;
+}
+
+.shortcut-card-content p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  color: var(--muted, #667c90);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.shortcut-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.shortcut-card-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--muted, #667c90);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+}
+
+.shortcut-card-actions button:hover {
+  color: var(--ink, #17324d);
+  background: #f4f7f7;
+}
+
+.shortcut-card-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.shortcut-card-actions .shortcut-confirm-delete {
+  color: #a23d3d;
+  background: #fff0f0;
+}
+
+.shortcuts-empty {
+  display: grid;
+  min-height: 220px;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  padding: 30px;
+  color: var(--muted, #74899e);
+  text-align: center;
+  font-size: 0.84rem;
+}
+
+.shortcuts-empty strong {
+  color: var(--ink, #17324d);
+}
+
+@media (max-width: 640px) {
+  .shortcuts-page {
+    border-radius: 0;
+  }
+
+  .shortcuts-heading {
+    align-items: flex-start;
+    padding: 18px 16px;
+  }
+
+  .shortcuts-heading h2 {
+    font-size: 1.02rem;
+  }
+
+  .shortcuts-heading .button {
+    flex: 0 0 auto;
+  }
+
+  .shortcut-form,
+  .shortcuts-list {
+    margin-inline: 0;
+    padding-inline: 14px;
+  }
+
+  .shortcut-card {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 11px;
+  }
+
+  .shortcut-card-actions {
+    grid-column: 2;
+    justify-content: flex-end;
+  }
+
+  .shortcut-card-actions button span {
+    display: none;
+  }
+}

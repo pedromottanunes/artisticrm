@@ -22,6 +22,7 @@ import {
   X,
   Smartphone,
   BarChart3,
+  Zap,
 } from 'lucide-react';
 import { api, ApiError, stages, type Snapshot, type Lead, type Detail } from './api';
 import { CentralStatusPanel } from './central';
@@ -35,6 +36,7 @@ import { AttendantLeads } from './attendant-leads';
 import { Team, PasswordChange } from './operations';
 import { MobileNavigation } from './mobile-navigation';
 import { DevicePanel, disconnectPush, PushBinding } from './pwa';
+import { ShortcutsPage } from './shortcuts';
 
 type Page =
   | 'central'
@@ -50,7 +52,8 @@ type Page =
   | 'contracts'
   | 'settings'
   | 'mine'
-  | 'pool';
+  | 'pool'
+  | 'shortcuts';
 const navItems: { id: Page; label: string; icon: typeof Users; group: string }[] = [
   { id: 'central', label: 'Central de atendimentos', icon: LayoutDashboard, group: 'workspace' },
   { id: 'inbox', label: 'Conversas', icon: MessageCircle, group: 'workspace' },
@@ -65,6 +68,7 @@ const salesNav = [
   { id: 'inbox' as Page, label: 'Conversas', icon: MessageCircle },
   { id: 'pool' as Page, label: 'Bolsão', icon: Inbox },
   { id: 'agenda' as Page, label: 'Agenda', icon: CalendarDays },
+  { id: 'shortcuts' as Page, label: 'Atalhos', icon: Zap },
   { id: 'settings' as Page, label: 'Meu perfil', icon: Settings },
 ];
 
@@ -336,9 +340,9 @@ export function App() {
     );
   const isManager = data.user.role === 'manager';
   const activePage =
-    !isManager && !['mine', 'pool', 'inbox', 'agenda', 'settings'].includes(page)
+    !isManager && !['mine', 'pool', 'inbox', 'agenda', 'shortcuts', 'settings'].includes(page)
       ? 'mine'
-      : isManager && ['mine', 'pool'].includes(page)
+      : isManager && ['mine', 'pool', 'shortcuts'].includes(page)
         ? 'central'
         : page;
   const leads = data.opportunities;
@@ -586,6 +590,7 @@ export function App() {
 
           {activePage === 'inbox' && (
             <InstagramInbox
+              key={data.user.id}
               user={data.user}
               connected={connected}
               targetOpportunityId={inboxTargetId}
@@ -653,6 +658,15 @@ export function App() {
                 </div>
               )}
             </section>
+          )}
+
+          {activePage === 'shortcuts' && (
+            <ShortcutsPage
+              key={data.user.id}
+              connected={connected}
+              onConnectionChange={setConnected}
+              onSessionExpired={refresh}
+            />
           )}
 
           {(activePage === 'mine' || activePage === 'pool') && (

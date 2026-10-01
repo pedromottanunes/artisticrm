@@ -12,11 +12,13 @@ import {
   RefreshCw,
   Send,
   X,
+  Zap,
 } from 'lucide-react';
 import {
   api,
   ApiError,
   stateLabels,
+  type MessageShortcut,
   type ConversationMessage,
   type ConversationSummary,
   type User,
@@ -372,13 +374,7 @@ function MediaAttachment({
 
   if (audioAttachmentTypes.has(type))
     return (
-      <audio
-        className="message-audio"
-        src={mediaUrl}
-        controls
-        preload="none"
-        onError={mediaFailed}
-      >
+      <audio className="message-audio" src={mediaUrl} controls preload="none" onError={mediaFailed}>
         Seu navegador não consegue reproduzir este áudio.
       </audio>
     );
@@ -433,8 +429,15 @@ export function InstagramInbox({
   const [thread, setThread] = useState<ThreadResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [draft, setDraft] = useState('');
-  const sendCommand = useRef<{ text: string; key: string } | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const draft = drafts[selectedId] ?? '';
+  const [shortcutPickerOpen, setShortcutPickerOpen] = useState(false);
+  const [shortcutsLoading, setShortcutsLoading] = useState(false);
+  const [shortcuts, setShortcuts] = useState<MessageShortcut[]>([]);
+  const pendingSends = useRef(new Map<string, string>());
+  const sendingRef = useRef(false);
+  const mounted = useRef(true);
+  const shortcutRequest = useRef<AbortController | null>(null);
   const selectedIdRef = useRef('');
   const threadRef = useRef<ThreadResponse | null>(null);
   const loadedThreadVersion = useRef(new Map<string, string>());
@@ -444,6 +447,8 @@ export function InstagramInbox({
   const messageListRef = useRef<HTMLDivElement>(null);
   const stickToLatestMessage = useRef(true);
   const mobileThreadOpenRef = useRef(false);
+  const shortcutPickerRef = useRef<HTMLDivElement>(null);
+  const shortcutTriggerRef = useRef<HTMLButtonElement>(null);
 
   const handleError = useCallback(
     (error: unknown) => {
@@ -456,9 +461,91 @@ export function InstagramInbox({
     [onConnectionChange, onNotice, onSessionExpired],
   );
 
+  const openShortcutPicker = async () => {
+    if (shortcutPickerOpen) {
+      setShortcutPickerOpen(false);
+      return;
+    }
+    if (!connected || sendingRef.current) return;
+    setShortcutPickerOpen(true);
+    shortcutRequest.current?.abort();
+    const controller = new AbortController();
+    shortcutRequest.current = controller;
+    setShortcutsLoading(true);
+    try {
+      const result = await api<{ shortcuts: MessageShortcut[] }>('/shortcuts', {
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+      setShortcuts(result.shortcuts);
+      onConnectionChange(true);
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      handleError(error);
+      setShortcutPickerOpen(false);
+    } finally {
+      if (!controller.signal.aborted) setShortcutsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    setShortcutPickerOpen(false);
+  }, [selectedId, thread?.can_send]);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      shortcutRequest.current?.abort();
+      selectedIdRef.current = '';
+      threadSequence.current += 1;
+      listSequence.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!shortcutPickerOpen) return;
+    const close = (event: PointerEvent) => {
+      if (!shortcutPickerRef.current?.contains(event.target as Node)) setShortcutPickerOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShortcutPickerOpen(false);
+        shortcutTriggerRef.current?.focus();
+      }
+    };
+    const composer = shortcutPickerRef.current?.closest<HTMLElement>('.thread-composer');
+    const resize = () => {
+      if (!composer) return;
+      const viewportTop = window.visualViewport?.offsetTop ?? 0;
+      const headerBottom =
+        composer.closest('.inbox-thread')?.querySelector('.thread-header')?.getBoundingClientRect()
+          .bottom ?? 0;
+      const available = Math.max(
+        60,
+        composer.getBoundingClientRect().top - Math.max(viewportTop, headerBottom) - 12,
+      );
+      composer.style.setProperty('--shortcut-menu-height', `${available}px`);
+    };
+    resize();
+    window.visualViewport?.addEventListener('resize', resize);
+    window.visualViewport?.addEventListener('scroll', resize);
+    window.addEventListener('resize', resize);
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', escape);
+    return () => {
+      document.removeEventListener('pointerdown', close);
+      document.removeEventListener('keydown', escape);
+      window.visualViewport?.removeEventListener('resize', resize);
+      window.visualViewport?.removeEventListener('scroll', resize);
+      window.removeEventListener('resize', resize);
+      shortcutRequest.current?.abort();
+    };
+  }, [shortcutPickerOpen]);
+
   const loadThread = useCallback(
     async (id: string, quiet = false, incremental = false) => {
-      if (!id) return;
+      if (!mounted.current || !id || selectedIdRef.current !== id) return;
       const sequence = ++threadSequence.current;
       try {
         const current = threadRef.current;
@@ -484,7 +571,7 @@ export function InstagramInbox({
           result = await api<ThreadResponse>(`/conversations/${id}/messages`);
           received.push(...result.messages);
         }
-        if (sequence !== threadSequence.current) return;
+        if (sequence !== threadSequence.current || selectedIdRef.current !== id) return;
         const base = append && current?.conversation_id === id ? current.messages : [];
         const merged = new Map(base.map((message) => [message.id, message]));
         for (const message of received) merged.set(message.id, message);
@@ -507,7 +594,7 @@ export function InstagramInbox({
         if (!append || received.some((message) => message.direction === 'inbound'))
           void api(`/conversations/${id}/read`, { method: 'POST', body: '{}' }).catch(() => {});
       } catch (error) {
-        if (sequence !== threadSequence.current) return;
+        if (sequence !== threadSequence.current || selectedIdRef.current !== id) return;
         if (!quiet) handleError(error);
       }
     },
@@ -516,6 +603,7 @@ export function InstagramInbox({
 
   const refresh = useCallback(
     async (quiet = false, forceThread = false) => {
+      if (!mounted.current) return;
       const sequence = ++listSequence.current;
       try {
         const view = user.role === 'manager' ? 'all' : 'mine';
@@ -538,6 +626,11 @@ export function InstagramInbox({
         const previous = selectedIdRef.current;
         selectedIdRef.current = next;
         setSelectedId(next);
+        if (previous !== next) {
+          threadSequence.current += 1;
+          threadRef.current = null;
+          setThread(null);
+        }
         if (targeted) {
           mobileThreadOpenRef.current = true;
           setMobileThreadOpen(true);
@@ -637,6 +730,7 @@ export function InstagramInbox({
   }, [loading, mobileThreadOpen]);
 
   const select = (id: string) => {
+    setShortcutPickerOpen(false);
     mobileThreadOpenRef.current = true;
     setMobileThreadOpen(true);
     selectedIdRef.current = id;
@@ -647,6 +741,7 @@ export function InstagramInbox({
   };
 
   const returnToConversationList = () => {
+    setShortcutPickerOpen(false);
     mobileThreadOpenRef.current = false;
     setMobileThreadOpen(false);
     selectedIdRef.current = '';
@@ -656,35 +751,66 @@ export function InstagramInbox({
     setThread(null);
   };
 
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const text = draft.trim();
-    if (!text || !selectedId || !thread?.can_send || sending || !connected) return;
-    const command =
-      sendCommand.current?.text === text ? sendCommand.current : { text, key: crypto.randomUUID() };
-    sendCommand.current = command;
+  const sendText = async (value: string, clearDraft: boolean) => {
+    const text = value.trim();
+    const conversationId = selectedId;
+    if (
+      !text ||
+      !conversationId ||
+      selectedIdRef.current !== conversationId ||
+      threadRef.current?.conversation_id !== conversationId ||
+      !threadRef.current.can_send ||
+      sendingRef.current ||
+      !connected
+    )
+      return;
+    // Keep the retry key for this exact recipient and text until its outcome is known.
+    const commandId = JSON.stringify([conversationId, text]);
+    const key = pendingSends.current.get(commandId) ?? crypto.randomUUID();
+    pendingSends.current.set(commandId, key);
+    sendingRef.current = true;
+    setShortcutPickerOpen(false);
     setSending(true);
     try {
-      const result = await api<{ status: string }>(`/conversations/${selectedId}/messages`, {
+      const result = await api<{ status: string }>(`/conversations/${conversationId}/messages`, {
         method: 'POST',
-        headers: { 'Idempotency-Key': command.key },
+        headers: { 'Idempotency-Key': key },
         body: JSON.stringify({ text }),
       });
-      if (result.status === 'sent') {
-        sendCommand.current = null;
-        setDraft('');
+      if (!mounted.current) return;
+      if (['sent', 'delivered', 'read'].includes(result.status)) {
+        pendingSends.current.delete(commandId);
+        if (clearDraft)
+          setDrafts((current) =>
+            current[conversationId]?.trim() === text
+              ? { ...current, [conversationId]: '' }
+              : current,
+          );
+      } else if (result.status === 'failed') {
+        pendingSends.current.delete(commandId);
+        onNotice('O Instagram recusou a mensagem. Você pode tentar novamente.');
       } else
         onNotice(
           'O envio ainda não foi confirmado pela Meta. Confira a conversa antes de tentar novamente.',
         );
-      await loadThread(selectedId, false, true);
+      if (selectedIdRef.current === conversationId) await loadThread(conversationId, false, true);
       await refresh(true);
     } catch (error) {
-      if (error instanceof ApiError && error.status < 500) sendCommand.current = null;
-      handleError(error);
+      if (
+        error instanceof ApiError &&
+        (error.status < 500 || error.code === 'INSTAGRAM_SEND_FAILED')
+      )
+        pendingSends.current.delete(commandId);
+      if (mounted.current) handleError(error);
     } finally {
-      setSending(false);
+      sendingRef.current = false;
+      if (mounted.current) setSending(false);
     }
+  };
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void sendText(draft, true);
   };
 
   if (loading)
@@ -836,12 +962,63 @@ export function InstagramInbox({
             </div>
             {thread.can_send ? (
               <form className="thread-composer" onSubmit={submit}>
+                {user.role === 'attendant' && (
+                  <div className="shortcut-picker" ref={shortcutPickerRef}>
+                    <button
+                      ref={shortcutTriggerRef}
+                      type="button"
+                      className="shortcut-picker-trigger"
+                      aria-label="Abrir atalhos de mensagem"
+                      aria-expanded={shortcutPickerOpen}
+                      aria-controls="chat-shortcuts"
+                      disabled={sending || !connected}
+                      onClick={() => void openShortcutPicker()}
+                    >
+                      <Zap size={18} />
+                      <span>Atalhos</span>
+                    </button>
+                    {shortcutPickerOpen && (
+                      <div
+                        id="chat-shortcuts"
+                        className="shortcut-picker-menu"
+                        role="region"
+                        aria-label="Atalhos de mensagem"
+                      >
+                        <div className="shortcut-picker-heading">
+                          <strong>Atalhos</strong>
+                          <small>Toque para enviar</small>
+                        </div>
+                        {shortcutsLoading ? (
+                          <p className="shortcut-picker-empty">Carregando…</p>
+                        ) : shortcuts.length ? (
+                          <div className="shortcut-picker-list">
+                            {shortcuts.map((shortcut) => (
+                              <button
+                                type="button"
+                                key={shortcut.id}
+                                disabled={sending || !connected}
+                                onClick={() => void sendText(shortcut.body, false)}
+                              >
+                                <strong>{shortcut.name}</strong>
+                                <span>{shortcut.body}</span>
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="shortcut-picker-empty">
+                            Cadastre seus atalhos no menu Atalhos.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <textarea
                   value={draft}
+                  disabled={sending || !connected}
                   onChange={(event) => {
-                    setDraft(event.target.value);
-                    if (sendCommand.current?.text !== event.target.value.trim())
-                      sendCommand.current = null;
+                    const value = event.target.value;
+                    setDrafts((current) => ({ ...current, [selectedId]: value }));
                   }}
                   maxLength={1000}
                   rows={2}

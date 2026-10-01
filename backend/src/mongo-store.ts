@@ -278,7 +278,14 @@ export async function initializeMongo(db: MongoStore) {
   await db
     .collection('users')
     .updateMany({ queue_credit: { $exists: false } }, { $set: { queue_credit: 0 } });
-  for (const name of ['users', 'contacts', 'opportunities', 'appointments', 'audit_events'])
+  for (const name of [
+    'users',
+    'contacts',
+    'opportunities',
+    'appointments',
+    'audit_events',
+    'message_shortcuts',
+  ])
     await db.collection(name).createIndex({ id: 1 }, { unique: true });
   await db.collection('users').createIndex({ email: 1 }, { unique: true });
   await db
@@ -389,6 +396,7 @@ export async function initializeMongo(db: MongoStore) {
   await db.collection('push_records').createIndex({ id: 1 }, { unique: true });
   await db.collection('push_records').createIndex({ kind: 1, available_at: 1 });
   await db.collection('push_records').createIndex({ expires_at: 1 });
+  await db.collection('message_shortcuts').createIndex({ user_id: 1, created_at: -1, id: 1 });
   await db
     .collection('whatsapp_inbox')
     .createIndex({ phone_number_id: 1, processed_at: 1, available_at: 1 });
