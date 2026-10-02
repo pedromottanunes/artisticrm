@@ -471,9 +471,6 @@ export function ManagerCentral({
                     <th>Situação</th>
                     <th>Atendente</th>
                     <th>Tempo</th>
-                    <th>
-                      <span className="sr-only">Ações</span>
-                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -482,10 +479,16 @@ export function ManagerCentral({
                       (user) => user.id === responsibleFor(lead),
                     );
                     const closed = isClosedStage(lead.stage);
+                    const inService = lead.state === 'CLAIMED' && !closed;
                     return (
-                      <tr key={lead.id}>
+                      <tr key={lead.id} className={inService ? 'is-in-service' : undefined}>
                         <td data-label="Lead">
-                          <button className="central-contact" onClick={() => onOpen(lead.id)}>
+                          <button
+                            type="button"
+                            className="central-contact"
+                            aria-label={`Abrir ficha de ${lead.name}`}
+                            onClick={() => onOpen(lead.id)}
+                          >
                             <span>
                               <strong>{lead.name}</strong>
                               <small>{lead.source}</small>
@@ -495,6 +498,18 @@ export function ManagerCentral({
                         <td data-label="Situação">
                           {closed ? (
                             <span className="stage-pill">{stages[lead.stage]}</span>
+                          ) : inService ? (
+                            <>
+                              <span className="central-status-text">
+                                <Badge state={lead.state} />
+                              </span>
+                              <span
+                                className="central-status-dot"
+                                role="img"
+                                aria-label="Em atendimento"
+                                title="Em atendimento"
+                              />
+                            </>
                           ) : (
                             <Badge state={lead.state} />
                           )}
@@ -517,15 +532,6 @@ export function ManagerCentral({
                           ) : (
                             <span>Recebido {dateTime(lead.created_at)}</span>
                           )}
-                        </td>
-                        <td data-label="Ações">
-                          <button
-                            className="button outline compact"
-                            onClick={() => onOpen(lead.id)}
-                            aria-label={`Abrir ficha de ${lead.name}`}
-                          >
-                            Abrir <ArrowUpRight size={15} />
-                          </button>
                         </td>
                       </tr>
                     );

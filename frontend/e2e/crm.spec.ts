@@ -398,7 +398,11 @@ test('central administrativa: resumo, equipe e lista permanecem responsivos', as
           const status = row.querySelector<HTMLElement>('td:nth-child(2)')!.getBoundingClientRect();
           const scopes = document.querySelector<HTMLElement>('.central-scopes')!;
           return {
-            leadOverlapsStatus: lead.bottom > status.top + 1,
+            leadOverlapsStatus:
+              lead.left < status.right - 1 &&
+              lead.right > status.left + 1 &&
+              lead.top < status.bottom - 1 &&
+              lead.bottom > status.top + 1,
             scopesOverflow: scopes.scrollWidth > scopes.clientWidth + 1,
           };
         });
@@ -444,6 +448,44 @@ test('central administrativa: resumo, equipe e lista permanecem responsivos', as
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.getByRole('dialog').getByRole('button', { name: 'Fechar janela' }).click();
   await page.getByRole('button', { name: `Abrir ficha de ${firstName}`, exact: true }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+});
+
+test('gestão móvel: status compacto e ficha pelo nome na central', async ({ page }) => {
+  await login(page);
+  await page.goto('/#distribution');
+  const row = page.locator('.central-table .is-in-service').first();
+  await expect(row).toBeVisible();
+  const name = await row.locator('.central-contact strong').innerText();
+  const contact = row.getByRole('button', { name: `Abrir ficha de ${name}`, exact: true });
+  for (const width of [320, 360, 390, 760, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    await contact.scrollIntoViewIfNeeded();
+    await expect(row.getByRole('button')).toHaveCount(1);
+    await expect(row.locator('td')).toHaveCount(4);
+    const dot = row.getByRole('img', { name: 'Em atendimento', exact: true });
+    if (width <= 760) {
+      await expect(dot).toBeVisible();
+      await expect(row.locator('.badge.claimed')).toBeHidden();
+      const buttonBox = (await contact.boundingBox())!;
+      const dotBox = (await dot.boundingBox())!;
+      expect(buttonBox.height).toBeGreaterThanOrEqual(44);
+      expect(buttonBox.x + buttonBox.width).toBeLessThanOrEqual(dotBox.x);
+      expect(dotBox.width).toBe(10);
+      expect(dotBox.height).toBe(10);
+      expect(dotBox.x + dotBox.width).toBeLessThanOrEqual(width);
+    } else {
+      await expect(dot).toBeHidden();
+      await expect(row.locator('.badge.claimed')).toBeVisible();
+    }
+    await contact.locator('strong').click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('heading', { name, exact: true })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Fechar janela' }).click();
+  }
+  await contact.focus();
+  await page.keyboard.press('Enter');
   await expect(page.getByRole('dialog')).toBeVisible();
 });
 
