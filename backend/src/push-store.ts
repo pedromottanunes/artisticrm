@@ -106,6 +106,7 @@ export async function enqueuePushEvent(
   opportunityId: string | null,
   kind: string,
   now: Date,
+  details: Record<string, unknown> = {},
 ) {
   if (
     !opportunityId ||
@@ -140,6 +141,10 @@ export async function enqueuePushEvent(
       createdAt: now.toISOString(),
       state: lead.state,
       target: lead.state === 'RESERVED' ? lead.reserved_to : lead.owner_id,
+      previousTarget:
+        kind === 'opportunity.transferred'
+          ? (details.previous_owner ?? details.previous_reserved_to ?? null)
+          : null,
     },
   });
 }

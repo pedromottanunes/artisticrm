@@ -9,6 +9,7 @@ function harness() {
   const shown: any[] = [];
   const notices: any[] = [];
   const navigated: string[] = [];
+  let skipWaitingCalls = 0;
   const windows = [false, true].map((focused, i) => ({
     url: 'https://crm.example.test/',
     visibilityState: 'visible',
@@ -27,10 +28,18 @@ function harness() {
       registration: {
         showNotification: async (title: string, options: any) => shown.push({ title, ...options }),
       },
+      skipWaiting: async () => {
+        skipWaitingCalls += 1;
+      },
       clients: {
         matchAll: async () => windows,
         openWindow: async (url: string) => navigated.push(url),
       },
+    },
+    caches: {
+      open: async () => ({ addAll: async () => {} }),
+      keys: async () => [],
+      delete: async () => true,
     },
   });
   const dispatch = async (name: string, value: Record<string, unknown>) => {
@@ -43,8 +52,20 @@ function harness() {
     });
     await promise;
   };
-  return { dispatch, shown, notices, navigated, windows };
+  return {
+    dispatch,
+    shown,
+    notices,
+    navigated,
+    windows,
+    skipWaitingCalls: () => skipWaitingCalls,
+  };
 }
+test('push worker: a nova versao assume o controle sem esperar o PWA ser fechado', async () => {
+  const worker = harness();
+  await worker.dispatch('install', {});
+  assert.equal(worker.skipWaitingCalls(), 1);
+});
 test('push worker: system alert, single visible sound recipient and exact chat deep link', async () => {
   const worker = harness();
   const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';

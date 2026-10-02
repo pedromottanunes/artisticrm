@@ -204,7 +204,7 @@ export class PushService {
         body: 'Um lead foi excluído pela gestão. Sua lista foi atualizada.',
         page: user.role === 'manager' ? 'central' : 'mine',
         userId: user.id,
-        tag: `artisti-${event.id}`,
+        tag: `artisti-${createHash('sha256').update(event.id).digest('hex').slice(0, 32)}`,
       };
     }
     const lead = await pushOpportunity(tx, event.data.opportunityId);
@@ -213,6 +213,7 @@ export class PushService {
     const received = kind === 'message.received';
     const movement = [
       'opportunity.claimed',
+      'opportunity.transferred',
       'opportunity.updated',
       'appointment.created',
       'appointment.updated',
@@ -222,18 +223,30 @@ export class PushService {
     ].includes(kind);
     if (!received && !movement && isClosedStage(lead.stage)) return null;
     const target = lead.state === 'RESERVED' ? lead.reserved_to : lead.owner_id;
-    // Messages follow the current owner, including after a reservation is claimed.
-    // Distribution notices describe a particular state and must not arrive stale.
-    if (
-      !received &&
-      (lead.state !== event.data.state ||
-        target !== event.data.target ||
-        (lead.state === 'RESERVED' && (!lead.expires_at || new Date(lead.expires_at) <= now)))
-    )
-      return null;
     const manager = user.role === 'manager';
-    if (!manager && lead.state !== 'POOL' && target !== user.id) return null;
-    if (!['POOL', 'RESERVED', 'CLAIMED', 'PENDING'].includes(lead.state)) return null;
+    if (received) {
+      // A message follows the current responsible attendant, even if ownership
+      // changed between webhook persistence and push expansion.
+      if (!manager && lead.state !== 'POOL' && target !== user.id) return null;
+      if (!['POOL', 'RESERVED', 'CLAIMED', 'PENDING', 'CANCELLED'].includes(lead.state))
+        return null;
+    } else if (movement) {
+      // Preserve each completed business action. A later action must not erase
+      // an earlier notification that was already committed to the audit trail.
+      if (!manager && event.data.target !== user.id && event.data.previousTarget !== user.id)
+        return null;
+    } else {
+      // Distribution notices describe current work. Discard them if their
+      // reservation, state or responsible attendant is no longer current.
+      if (
+        lead.state !== event.data.state ||
+        target !== event.data.target ||
+        (lead.state === 'RESERVED' && (!lead.expires_at || new Date(lead.expires_at) <= now))
+      )
+        return null;
+      if (!manager && lead.state !== 'POOL' && target !== user.id) return null;
+      if (!['POOL', 'RESERVED', 'CLAIMED', 'PENDING'].includes(lead.state)) return null;
+    }
     const descriptions: Record<string, string> = {
       'message.received': 'Nova mensagem de um lead. Abra o CRM para conferir.',
       'opportunity.claimed': 'Um lead foi assumido. Abra o CRM para conferir.',
@@ -243,12 +256,19 @@ export class PushService {
       'sale.completed': 'Uma venda foi registrada. Abra o CRM para conferir.',
       'sale.updated': 'Uma venda foi atualizada. Abra o CRM para conferir.',
       'lead.repeated': 'Um lead entrou em contato novamente. Abra o CRM para conferir.',
+      'opportunity.transferred': 'Um lead foi transferido. Abra o CRM para conferir.',
     };
     const canOpenChat = received && (manager || lead.owner_id === user.id);
+    const body =
+      kind === 'opportunity.transferred' && !manager
+        ? event.data.previousTarget === user.id
+          ? 'Um lead foi transferido da sua carteira. Sua lista foi atualizada.'
+          : 'Um lead foi atribuído a você. Abra o CRM para conferir.'
+        : descriptions[kind];
     return {
       title: 'Artisti CRM',
       body:
-        descriptions[kind] ??
+        body ??
         (lead.state === 'POOL'
           ? 'Há uma oportunidade disponível no bolsão. Abra o CRM para conferir.'
           : manager

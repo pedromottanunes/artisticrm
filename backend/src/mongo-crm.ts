@@ -148,7 +148,14 @@ export class MongoOperations {
       details,
       created_at: at,
     });
-    await enqueuePushEvent(tx, eventId, id, kind, at);
+    await enqueuePushEvent(
+      tx,
+      eventId,
+      id,
+      kind,
+      at,
+      details && typeof details === 'object' ? (details as Record<string, unknown>) : {},
+    );
   }
   async command<T>(
     tx: MongoTx,

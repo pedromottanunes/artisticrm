@@ -10,7 +10,12 @@ const PUBLIC_FILES = [
   '/icons/apple-touch-icon.png',
 ];
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(PUBLIC_FILES)));
+  event.waitUntil(
+    caches
+      .open(CACHE)
+      .then((cache) => cache.addAll(PUBLIC_FILES))
+      .then(() => self.skipWaiting()),
+  );
 });
 self.addEventListener('activate', (event) => {
   event.waitUntil(

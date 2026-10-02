@@ -243,12 +243,13 @@ export async function checkPush(
       await db.update(
         'opportunities',
         { id: second.id },
-        { $set: { stage: 'CLOSED_WITHOUT_DATE' } },
+        { $set: { stage: 'CLOSED_WITHOUT_DATE', state: 'CANCELLED' } },
       );
     else
-      await db.query("UPDATE opportunities SET stage='CLOSED_WITHOUT_DATE' WHERE id=$1", [
-        second.id,
-      ]);
+      await db.query(
+        "UPDATE opportunities SET stage='CLOSED_WITHOUT_DATE', state='CANCELLED' WHERE id=$1",
+        [second.id],
+      );
     for (const kind of [
       'sale.completed',
       'sale.updated',
@@ -264,6 +265,45 @@ export async function checkPush(
       await push.tick();
       assert.equal(delivered.length - count, 2, `${kind} reaches manager and owner after closure`);
     }
+    // A transfer survives a subsequent transfer and reaches manager, former owner and event target.
+    const formerOwner = reserved.reserved_to;
+    if (db.kind === 'mongo')
+      await db.update(
+        'opportunities',
+        { id: second.id },
+        { $set: { state: 'CLAIMED', stage: 'FOLLOW_UP' } },
+      );
+    else
+      await db.query("UPDATE opportunities SET state='CLAIMED', stage='FOLLOW_UP' WHERE id=$1", [
+        second.id,
+      ]);
+    const beforeTransfer = await crm.detail(manager, second.id);
+    const transferResponse = await app.inject({
+      method: 'POST',
+      url: `/api/v1/opportunities/${second.id}/transfer`,
+      headers: {
+        ...baseHeaders,
+        cookie: cookies.get(manager.id)!,
+        'idempotency-key': randomUUID(),
+      },
+      payload: {
+        expected_version: beforeTransfer.version,
+        target_id: users[2].id,
+        reason: 'Cobertura de notificacoes',
+      },
+    });
+    assert.equal(transferResponse.statusCode, 200, transferResponse.body);
+    if (db.kind === 'mongo')
+      await db.update('opportunities', { id: second.id }, { $set: { owner_id: users[3].id } });
+    else
+      await db.query('UPDATE opportunities SET owner_id=$2 WHERE id=$1', [second.id, users[3].id]);
+    const movementBefore = delivered.length;
+    await push.tick();
+    assert.deepEqual(
+      new Set(delivered.slice(movementBefore).map((item) => item.message.userId)),
+      new Set([manager.id, formerOwner, users[2].id]),
+      'a newer transfer does not erase the earlier committed notification',
+    );
     // A queued message follows the owner at delivery time, not a former owner.
     await inPushTransaction(db, (tx) =>
       enqueuePushEvent(tx, randomUUID(), second.id, 'message.received', clock()),
@@ -277,6 +317,16 @@ export async function checkPush(
     assert.deepEqual(
       new Set(delivered.slice(transferredBefore).map((item) => item.message.userId)),
       new Set([manager.id, users[2].id]),
+    );
+    // An administrative edit to a pooled lead alerts management, not every attendant.
+    const poolMovementBefore = delivered.length;
+    await inPushTransaction(db, (tx) =>
+      enqueuePushEvent(tx, randomUUID(), created.id, 'opportunity.updated', clock()),
+    );
+    await push.tick();
+    assert.deepEqual(
+      new Set(delivered.slice(poolMovementBefore).map((item) => item.message.userId)),
+      new Set([manager.id]),
     );
     const deletedBefore = delivered.length;
     await inPushTransaction(db, (tx) =>

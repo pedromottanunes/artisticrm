@@ -174,7 +174,14 @@ export class CRM {
       at,
       JSON.stringify(details),
     ]);
-    await enqueuePushEvent(tx, eventId, id, kind, at);
+    await enqueuePushEvent(
+      tx,
+      eventId,
+      id,
+      kind,
+      at,
+      details && typeof details === 'object' ? (details as Record<string, unknown>) : {},
+    );
   }
   private async next(
     tx: Sql,
