@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, type FormEvent } from 'react';
+import { useEffect, useState, useRef, useId, type FormEvent } from 'react';
 import {
   ArrowRight,
   Check,
@@ -221,11 +221,14 @@ export function LeadDetail({
     setError('');
     const fields = Object.fromEntries(new FormData(e.currentTarget));
     try {
+      const phone = normalizeLeadPhone(String(fields.phone ?? ''));
+      if (phone === null)
+        throw new Error('Informe um telefone com DDD. Para outro país, use + e o código do país.');
       await api(`/opportunities/${detail.id}`, {
         method: 'PATCH',
         body: JSON.stringify({
           name: fields.name,
-          phone: fields.phone,
+          phone,
           residence_city: fields.residence_city,
           instagram: detail.instagram ?? '',
           interest: fields.interest,
@@ -252,10 +255,13 @@ export function LeadDetail({
     setError('');
     const form = new FormData(formElement);
     try {
+      const phone = normalizeLeadPhone(String(form.get('phone') ?? ''));
+      if (!phone)
+        throw new Error('Informe um telefone com DDD. Para outro país, use + e o código do país.');
       const payload = JSON.stringify({
         expected_version: detail.version,
         name: form.get('name'),
-        phone: form.get('phone'),
+        phone,
         residence_city: form.get('residence_city'),
         instagram: detail.instagram ?? '',
         next_action: form.get('next_action'),
@@ -478,18 +484,11 @@ export function LeadDetail({
                     maxLength={160}
                   />
                 </label>
-                <label>
-                  Telefone
-                  <input
-                    name="phone"
-                    type="tel"
-                    defaultValue={detail.phone ?? ''}
-                    placeholder="+55 (48) 99999-9999"
-                    maxLength={24}
-                    required
-                  />
-                  <small>Obrigatório para registrar uma venda.</small>
-                </label>
+                <LeadPhoneField
+                  initialPhone={detail.phone ?? ''}
+                  canOpen={!isManager && detail.state === 'CLAIMED' && detail.can_edit && !saving}
+                  isDemo={detail.is_demo}
+                />
                 <label>
                   Cidade de residência
                   <input
@@ -897,6 +896,87 @@ function saleOrigin(detail: Detail) {
 
 function dateOnly(value: string | null) {
   return value ? value.slice(0, 10).split('-').reverse().join('/') : 'A definir';
+}
+
+// Unprefixed national numbers use Brazil. An explicit + always takes precedence.
+// Persist the normalized value too, so the existing WhatsApp action uses the same number.
+function normalizeLeadPhone(value: string): string | null {
+  const compact = value.replace(/[\s().-]/g, '');
+  if (!compact) return '';
+  if (!/^\+?[1-9]\d{9,14}$/.test(compact)) return null;
+  const digits = compact.replace(/^\+/, '');
+  return !compact.startsWith('+') && (digits.length === 10 || digits.length === 11)
+    ? `55${digits}`
+    : digits;
+}
+
+function LeadPhoneField({
+  initialPhone,
+  canOpen,
+  isDemo,
+}: {
+  initialPhone: string;
+  canOpen: boolean;
+  isDemo: boolean;
+}) {
+  const id = useId();
+  // The API stores international digits without +. Restore it to avoid interpreting
+  // a saved short international number as a newly entered Brazilian number.
+  const [phone, setPhone] = useState(
+    /^[1-9]\d{9,14}$/.test(initialPhone) ? `+${initialPhone}` : initialPhone,
+  );
+  const digits = normalizeLeadPhone(phone);
+  const href = canOpen && !isDemo && digits ? `https://wa.me/${digits}` : undefined;
+  const title = isDemo
+    ? 'Contato fictício: WhatsApp indisponível.'
+    : !canOpen
+      ? 'Disponível para o atendente responsável pelo lead.'
+      : !digits
+        ? 'Informe o telefone com DDD. Para outro país, use + e o código do país.'
+        : 'Abrir conversa no WhatsApp';
+  return (
+    <div className="lead-phone-field">
+      <label htmlFor={id}>Telefone</label>
+      <div className="lead-phone-control">
+        <input
+          id={id}
+          name="phone"
+          type="tel"
+          value={phone}
+          onChange={(event) => setPhone(event.target.value)}
+          placeholder="+55 (48) 99999-9999"
+          maxLength={24}
+          aria-describedby={`${id}-hint`}
+          required
+        />
+        {href ? (
+          <a
+            className="lead-phone-whatsapp"
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Abrir WhatsApp deste telefone"
+            title={title}
+          >
+            <MessageCircle size={20} aria-hidden="true" />
+          </a>
+        ) : (
+          <button
+            type="button"
+            className="lead-phone-whatsapp"
+            disabled
+            aria-label="Abrir WhatsApp deste telefone"
+            title={title}
+          >
+            <MessageCircle size={20} aria-hidden="true" />
+          </button>
+        )}
+      </div>
+      <small id={`${id}-hint`}>
+        Brasil: DDD + número. Outro país: use +código. Obrigatório para venda.
+      </small>
+    </div>
+  );
 }
 
 function phoneText(value?: string) {

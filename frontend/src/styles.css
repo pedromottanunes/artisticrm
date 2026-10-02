@@ -1545,6 +1545,49 @@ main {
   font-size: 11px;
   line-height: 1.35;
 }
+.lead-phone-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.lead-phone-field small {
+  font-size: 11px;
+  line-height: 1.35;
+}
+.lead-phone-control {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+.lead-phone-control input {
+  flex: 1;
+  min-width: 0;
+  width: 0;
+}
+.lead-phone-whatsapp {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 1px solid #b5ddd0;
+  border-radius: 8px;
+  background: #edf8f3;
+  color: #157347;
+  text-decoration: none;
+}
+.lead-phone-whatsapp:hover {
+  background: #dcf2e7;
+}
+.lead-phone-whatsapp:focus-visible {
+  outline: 2px solid #157347;
+  outline-offset: 2px;
+}
+.lead-phone-whatsapp:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 .consultation-badge {
   display: inline-flex;
   align-items: center;
