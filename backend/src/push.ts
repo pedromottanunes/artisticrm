@@ -197,29 +197,70 @@ export class PushService {
       : null;
   }
   private async message(tx: PushTx, event: PushRecord, user: User, now: Date) {
+    if (event.data.kind === 'lead.deleted') {
+      if (user.role !== 'manager' && event.data.target !== user.id) return null;
+      return {
+        title: 'Artisti CRM',
+        body: 'Um lead foi excluído pela gestão. Sua lista foi atualizada.',
+        page: user.role === 'manager' ? 'central' : 'mine',
+        userId: user.id,
+        tag: `artisti-${event.id}`,
+      };
+    }
     const lead = await pushOpportunity(tx, event.data.opportunityId);
-    if (!lead || isClosedStage(lead.stage) || lead.state !== event.data.state) return null;
+    if (!lead) return null;
+    const kind = String(event.data.kind);
+    const received = kind === 'message.received';
+    const movement = [
+      'opportunity.claimed',
+      'opportunity.updated',
+      'appointment.created',
+      'appointment.updated',
+      'sale.completed',
+      'sale.updated',
+      'lead.repeated',
+    ].includes(kind);
+    if (!received && !movement && isClosedStage(lead.stage)) return null;
     const target = lead.state === 'RESERVED' ? lead.reserved_to : lead.owner_id;
+    // Messages follow the current owner, including after a reservation is claimed.
+    // Distribution notices describe a particular state and must not arrive stale.
     if (
-      target !== event.data.target ||
-      (lead.state === 'RESERVED' && (!lead.expires_at || new Date(lead.expires_at) <= now))
+      !received &&
+      (lead.state !== event.data.state ||
+        target !== event.data.target ||
+        (lead.state === 'RESERVED' && (!lead.expires_at || new Date(lead.expires_at) <= now)))
     )
       return null;
     const manager = user.role === 'manager';
     if (!manager && lead.state !== 'POOL' && target !== user.id) return null;
     if (!['POOL', 'RESERVED', 'CLAIMED', 'PENDING'].includes(lead.state)) return null;
+    const descriptions: Record<string, string> = {
+      'message.received': 'Nova mensagem de um lead. Abra o CRM para conferir.',
+      'opportunity.claimed': 'Um lead foi assumido. Abra o CRM para conferir.',
+      'opportunity.updated': 'O cadastro ou a qualificação de um lead foi atualizado.',
+      'appointment.created': 'Uma consulta foi agendada. Abra o CRM para conferir.',
+      'appointment.updated': 'Uma consulta ou o comparecimento foi atualizado.',
+      'sale.completed': 'Uma venda foi registrada. Abra o CRM para conferir.',
+      'sale.updated': 'Uma venda foi atualizada. Abra o CRM para conferir.',
+      'lead.repeated': 'Um lead entrou em contato novamente. Abra o CRM para conferir.',
+    };
+    const canOpenChat = received && (manager || lead.owner_id === user.id);
     return {
       title: 'Artisti CRM',
       body:
-        lead.state === 'POOL'
+        descriptions[kind] ??
+        (lead.state === 'POOL'
           ? 'Há uma oportunidade disponível no bolsão. Abra o CRM para conferir.'
           : manager
             ? 'Há uma nova movimentação na distribuição. Abra o CRM para conferir.'
             : lead.state === 'CLAIMED'
               ? 'Uma oportunidade foi atribuída a você. Abra o CRM para conferir.'
-              : 'Você recebeu uma oportunidade. Abra o CRM para conferir o prazo e assumir.',
-      page: manager ? 'central' : lead.state === 'POOL' ? 'pool' : 'mine',
-      tag: `artisti-${lead.id}`,
+              : 'Você recebeu uma oportunidade. Abra o CRM para conferir o prazo e assumir.'),
+      page: canOpenChat ? 'inbox' : manager ? 'central' : lead.state === 'POOL' ? 'pool' : 'mine',
+      opportunityId: canOpenChat ? lead.id : undefined,
+      userId: user.id,
+      // Each message must alert, even when it belongs to an already-notified lead.
+      tag: `artisti-${createHash('sha256').update(event.id).digest('hex').slice(0, 32)}`,
     };
   }
   async test(user: User, body: unknown) {
@@ -251,7 +292,8 @@ export class PushService {
             title: 'Artisti CRM',
             body: 'Notificações funcionando neste aparelho.',
             page: 'settings',
-            tag: 'artisti-test',
+            tag: `artisti-test-${randomUUID()}`,
+            userId: user.id,
           },
         },
       });

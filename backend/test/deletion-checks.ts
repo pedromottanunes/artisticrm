@@ -235,6 +235,11 @@ export async function checkDeleteCleanup(ops: Ops, manager: User, users: User[],
   }
   assert.equal(await getPush(ops.db, 'deletion-job'), null);
   assert.ok(await getPush(ops.db, 'keep-subscription'));
+  const deletionEvents = (await rows(ops, 'push_records')).filter(
+    (record) => record.data?.kind === 'lead.deleted',
+  );
+  assert.equal(deletionEvents.length, 1, 'idempotent deletion queues a single generic notice');
+  assert.equal(deletionEvents[0].data.target, owner.id);
   assert.deepEqual(await ops.detail(manager, other.id), otherBefore);
   await assert.rejects(ops.ingest(input(), event, manager.id), { code: 'EVENT_DELETED' });
   const fresh = await ops.ingest(input(), randomUUID(), manager.id);

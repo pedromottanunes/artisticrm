@@ -1,7 +1,8 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Sql } from './db.js';
 import { MongoTx } from './mongo-store.js';
 import { DomainError, requireManager, type User, type Opportunity } from './types.js';
+import { putPush } from './push-store.js';
 
 export type DeleteLeadInput = { expected_version: number; confirmation: string };
 export const eventHash = (id: string) => createHash('sha256').update(id).digest('hex');
@@ -55,10 +56,7 @@ export async function deleteLeadData(
     };
     const inbox = await tx.many('whatsapp_inbox', inboxFilter);
     const instagramInbox = await tx.many('instagram_webhook_inbox', {
-      $or: [
-        { opportunity_id: id },
-        { event_id: { $in: events.map((e) => e.external_id) } },
-      ],
+      $or: [{ opportunity_id: id }, { event_id: { $in: events.map((e) => e.external_id) } }],
     });
     for (const externalId of new Set([
       ...events.map((e) => e.external_id),
@@ -83,10 +81,7 @@ export async function deleteLeadData(
     });
     await tx.remove('whatsapp_inbox', inboxFilter);
     await tx.remove('instagram_webhook_inbox', {
-      $or: [
-        { opportunity_id: id },
-        { event_id: { $in: events.map((e) => e.external_id) } },
-      ],
+      $or: [{ opportunity_id: id }, { event_id: { $in: events.map((e) => e.external_id) } }],
     });
     const conversations = await tx.many('conversations', { opportunity_id: id });
     const conversationIds = conversations.map((conversation) => conversation.id);
@@ -178,5 +173,20 @@ export async function deleteLeadData(
     await tx.query('DELETE FROM opportunities WHERE id=$1', [id]);
     if (!shared) await tx.query('DELETE FROM contacts WHERE id=$1', [row.contact_id]);
   }
+  // A generic deletion notice retains no lead/contact ID or deleted content.
+  const now = mongo
+    ? await tx.now()
+    : new Date((await tx.query<{ now: Date }>('SELECT clock_timestamp() AS now')).rows[0].now);
+  await putPush(tx, {
+    id: `event:${randomUUID()}`,
+    kind: 'event',
+    available_at: now.toISOString(),
+    expires_at: new Date(now.getTime() + 3600000).toISOString(),
+    data: {
+      kind: 'lead.deleted',
+      target: row.owner_id ?? row.reserved_to,
+      createdAt: now.toISOString(),
+    },
+  });
   return { deleted: true };
 }

@@ -46,15 +46,24 @@ self.addEventListener('push', (event) => {
         /* A malformed push still shows a generic notice. */
       }
       const requestedPage = data.page === 'distribution' ? 'central' : data.page;
-      const page = ['mine', 'pool', 'central', 'settings'].includes(requestedPage)
+      const page = ['mine', 'pool', 'central', 'settings', 'inbox'].includes(requestedPage)
         ? requestedPage
         : 'mine';
       await self.registration.showNotification(data.title || 'Artisti CRM', {
         body: data.body || 'Há uma atualização no CRM. Abra para consultar.',
         icon: '/icons/icon-192.png',
         tag: data.tag || 'artisti-update',
-        data: { page },
+        renotify: false,
+        silent: false,
+        vibrate: [200, 100, 200],
+        data: { page, opportunityId: data.opportunityId },
       });
+      // Notify exactly one visible window for the custom foreground sound.
+      // Always show the system notification too, as required for Web Push on iOS.
+      const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      const visible = windows.filter((client) => client.visibilityState === 'visible');
+      const client = visible.find((item) => item.focused) || visible[0];
+      client?.postMessage({ type: 'artisti-push', userId: data.userId, tag: data.tag });
     })(),
   );
 });
@@ -66,10 +75,17 @@ self.addEventListener('notificationclick', (event) => {
         event.notification.data?.page === 'distribution'
           ? 'central'
           : event.notification.data?.page;
-      const page = ['mine', 'pool', 'central', 'settings'].includes(requestedPage)
+      const page = ['mine', 'pool', 'central', 'settings', 'inbox'].includes(requestedPage)
         ? requestedPage
         : 'mine';
-      const url = `${self.location.origin}/#${page}`;
+      const lead = event.notification.data?.opportunityId;
+      const query =
+        page === 'inbox' &&
+        typeof lead === 'string' &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(lead)
+          ? `?lead=${encodeURIComponent(lead)}`
+          : '';
+      const url = `${self.location.origin}/#${page}${query}`;
       const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
       const existing = windows.find(
         (client) => new URL(client.url).origin === self.location.origin,

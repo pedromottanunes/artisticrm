@@ -3,7 +3,13 @@ import { createECDH, randomBytes, randomUUID } from 'node:crypto';
 import webpush from 'web-push';
 import { buildApp } from '../src/app.js';
 import { PushService, pushConfig, validPushEndpoint, type PushSender } from '../src/push.js';
-import { inPushTransaction, readyPush, enqueuePushEvent, type PushDb } from '../src/push-store.js';
+import {
+  inPushTransaction,
+  readyPush,
+  enqueuePushEvent,
+  putPush,
+  type PushDb,
+} from '../src/push-store.js';
 import type { CRM } from '../src/crm.js';
 import type { MongoOperations } from '../src/mongo-crm.js';
 import type { User } from '../src/types.js';
@@ -39,8 +45,10 @@ export async function checkPush(
   ])
     assert.equal(validPushEndpoint(endpoint), false);
   assert.equal(validPushEndpoint('https://web.push.apple.com/QH/test'), true);
-  const delivered: { endpoint: string; message: { body: string; page: string; tag: string } }[] =
-    [];
+  const delivered: {
+    endpoint: string;
+    message: { body: string; page: string; tag: string; userId?: string; opportunityId?: string };
+  }[] = [];
   let failure = 0;
   const sender: PushSender = async (subscription, payload, options) => {
     assert.ok(options!.TTL! <= 300);
@@ -175,7 +183,12 @@ export async function checkPush(
     );
     advance(16000);
     await push.tick();
-    assert.equal(delivered.length, 2, 'stale reservation discarded');
+    assert.equal(
+      delivered.length,
+      4,
+      'stale reservation discarded; claim reaches manager and owner',
+    );
+    assert.ok(delivered.slice(2).every((item) => item.message.body.includes('assumido')));
     // Closing the app/restarting the worker does not lose the durable retry.
     await request(manager, '/api/v1/push/test', {
       endpoint: subscriptions.get(manager.id)!.endpoint,
@@ -185,8 +198,8 @@ export async function checkPush(
     failure = 0;
     advance(16000);
     await new PushService(db, config, async () => clock(), sender).tick();
-    assert.equal(delivered.length, 3);
-    assert.equal(delivered[2].message.page, 'settings');
+    assert.equal(delivered.length, 5);
+    assert.equal(delivered[4].message.page, 'settings');
     // Pool notices also reach active attendants paused in the round robin.
     if (db.kind === 'mongo')
       await db.update('users', { id: users[3].id }, { $set: { queue_enabled: false } });
@@ -203,6 +216,87 @@ export async function checkPush(
           (d) =>
             d.endpoint === subscriptions.get(users[3].id)!.endpoint && d.message.page === 'pool',
         ),
+    );
+    // Each received message gets its own alert, limited to manager and owner.
+    const messagesBefore = delivered.length;
+    for (let i = 0; i < 3; i++)
+      await inPushTransaction(db, (tx) =>
+        enqueuePushEvent(tx, `message-${i}`, second.id, 'message.received', clock()),
+      );
+    await push.tick();
+    const messages = delivered.slice(messagesBefore);
+    assert.equal(messages.length, 6);
+    assert.equal(new Set(messages.map((item) => item.message.tag)).size, 3);
+    assert.ok(
+      messages.every(
+        (item) => item.message.page === 'inbox' && item.message.opportunityId === second.id,
+      ),
+    );
+    assert.deepEqual(
+      new Set(messages.map((item) => item.message.userId)),
+      new Set([manager.id, reserved.reserved_to]),
+    );
+    await push.tick();
+    assert.equal(delivered.length, messagesBefore + 6, 'processed messages are not alerted twice');
+    // Closing a sale must not suppress the sale event, subsequent edits or messages.
+    if (db.kind === 'mongo')
+      await db.update(
+        'opportunities',
+        { id: second.id },
+        { $set: { stage: 'CLOSED_WITHOUT_DATE' } },
+      );
+    else
+      await db.query("UPDATE opportunities SET stage='CLOSED_WITHOUT_DATE' WHERE id=$1", [
+        second.id,
+      ]);
+    for (const kind of [
+      'sale.completed',
+      'sale.updated',
+      'appointment.created',
+      'appointment.updated',
+      'opportunity.updated',
+      'message.received',
+    ]) {
+      const count = delivered.length;
+      await inPushTransaction(db, (tx) =>
+        enqueuePushEvent(tx, randomUUID(), second.id, kind, clock()),
+      );
+      await push.tick();
+      assert.equal(delivered.length - count, 2, `${kind} reaches manager and owner after closure`);
+    }
+    // A queued message follows the owner at delivery time, not a former owner.
+    await inPushTransaction(db, (tx) =>
+      enqueuePushEvent(tx, randomUUID(), second.id, 'message.received', clock()),
+    );
+    if (db.kind === 'mongo')
+      await db.update('opportunities', { id: second.id }, { $set: { owner_id: users[2].id } });
+    else
+      await db.query('UPDATE opportunities SET owner_id=$2 WHERE id=$1', [second.id, users[2].id]);
+    const transferredBefore = delivered.length;
+    await push.tick();
+    assert.deepEqual(
+      new Set(delivered.slice(transferredBefore).map((item) => item.message.userId)),
+      new Set([manager.id, users[2].id]),
+    );
+    const deletedBefore = delivered.length;
+    await inPushTransaction(db, (tx) =>
+      putPush(tx, {
+        id: `event:${randomUUID()}`,
+        kind: 'event',
+        available_at: clock().toISOString(),
+        expires_at: new Date(clock().getTime() + 3600000).toISOString(),
+        data: { kind: 'lead.deleted', target: users[2].id, createdAt: clock().toISOString() },
+      }),
+    );
+    await push.tick();
+    assert.deepEqual(
+      new Set(delivered.slice(deletedBefore).map((item) => item.message.userId)),
+      new Set([manager.id, users[2].id]),
+    );
+    assert.ok(
+      delivered
+        .slice(deletedBefore)
+        .every((item) => !item.message.opportunityId && item.message.body.includes('excluído')),
     );
     // Another account cannot remove/test this device; logging out revokes server delivery.
     const firstEndpoint = subscriptions.get(firstUser.id)!.endpoint;

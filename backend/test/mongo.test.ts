@@ -909,6 +909,11 @@ test('Mongo: Direct do Instagram cria identidade sem telefone, conversa e mensag
   assert.equal(await db.count('opportunities'), 1);
   assert.equal(await db.count('conversations'), 1);
   assert.equal(await db.count('messages'), 1);
+  assert.equal(
+    await db.count('push_records', { kind: 'event', 'data.kind': 'message.received' }),
+    1,
+    'media message queues one alert despite duplicate delivery and concurrent workers',
+  );
   const contact = await db.one('contacts', {});
   assert.equal(contact?.phone, undefined);
   assert.equal(contact?.name, 'Perfil Mongo');

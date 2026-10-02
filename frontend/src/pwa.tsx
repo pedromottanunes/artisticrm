@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Bell, BellOff, Download, Send } from 'lucide-react';
+import { Bell, BellOff, Download, Send, Volume2, VolumeX } from 'lucide-react';
 import { api } from './api';
+import {
+  soundEnabled,
+  setSoundEnabled,
+  prepareNotificationSound,
+  playNotificationSound,
+} from './notification-sound';
 
 type InstallEvent = Event & {
   prompt: () => Promise<void>;
@@ -77,6 +83,34 @@ async function bindExisting(publicKey: string | null) {
 }
 export function PushBinding({ userId }: { userId: string }) {
   useEffect(() => {
+    const seen = new Set<string>();
+    const unlock = () => {
+      if (soundEnabled(userId)) void prepareNotificationSound();
+    };
+    const receive = (event: MessageEvent) => {
+      const value = event.data;
+      if (
+        value?.type !== 'artisti-push' ||
+        value.userId !== userId ||
+        typeof value.tag !== 'string' ||
+        document.hidden ||
+        seen.has(value.tag)
+      )
+        return;
+      seen.add(value.tag);
+      if (seen.size > 200) seen.delete(seen.values().next().value!);
+      if (soundEnabled(userId)) playNotificationSound();
+    };
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('keydown', unlock);
+    navigator.serviceWorker?.addEventListener('message', receive);
+    return () => {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+      navigator.serviceWorker?.removeEventListener('message', receive);
+    };
+  }, [userId]);
+  useEffect(() => {
     let disposed = false;
     void api<{ enabled: boolean; publicKey: string | null }>('/push/config')
       .then((value) => {
@@ -99,6 +133,17 @@ export function DevicePanel({ userId }: { userId: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [audible, setAudible] = useState(() => soundEnabled(userId));
+  useEffect(() => {
+    const update = () => setAudible(soundEnabled(userId));
+    update();
+    window.addEventListener('artisti-sound-preference', update);
+    window.addEventListener('storage', update);
+    return () => {
+      window.removeEventListener('artisti-sound-preference', update);
+      window.removeEventListener('storage', update);
+    };
+  }, [userId]);
   const supported =
     'Notification' in window &&
     'PushManager' in window &&
@@ -138,7 +183,9 @@ export function DevicePanel({ userId }: { userId: string }) {
     setNotice('');
     try {
       // Safari requires the permission prompt directly inside the tap handler.
-      const allowed = await Notification.requestPermission();
+      const permissionRequest = Notification.requestPermission();
+      if (soundEnabled(userId)) void prepareNotificationSound();
+      const allowed = await permissionRequest;
       setPermission(allowed);
       if (allowed !== 'granted') return;
       const registration = await registerDeviceWorker();
@@ -275,9 +322,41 @@ export function DevicePanel({ userId }: { userId: string }) {
           {busy ? 'Ativando…' : 'Ativar notificações'}
         </button>
       )}
+      <div className="device-actions">
+        <button
+          type="button"
+          className="button outline"
+          aria-pressed={audible}
+          onClick={() => {
+            setSoundEnabled(userId, !audible);
+            if (!audible) void prepareNotificationSound();
+          }}
+        >
+          {audible ? <VolumeX size={18} /> : <Volume2 size={18} />}
+          {audible ? 'Silenciar som no CRM' : 'Ativar som no CRM'}
+        </button>
+        <button
+          type="button"
+          className="button outline"
+          onClick={async () => {
+            const ready = await prepareNotificationSound();
+            setNotice(
+              ready && playNotificationSound()
+                ? 'Som de teste reproduzido. Confira o volume do aparelho.'
+                : 'Não foi possível tocar o som. Confira as permissões de áudio do navegador.',
+            );
+          }}
+        >
+          <Volume2 size={18} /> Testar som
+        </button>
+      </div>
       <p>
-        Os avisos indicam novos leads e entradas no bolsão. Abra o CRM para conferir a situação
-        atual. Sair da conta desativa os avisos deste aparelho.
+        O alerta sonoro toca com o CRM aberto, após sua primeira interação. Com o aplicativo
+        fechado, o som do push depende do aparelho e do modo silencioso.
+      </p>
+      <p>
+        Os avisos incluem cada nova mensagem, leads, atribuições, consultas e vendas. Sair da conta
+        desativa os avisos deste aparelho.
       </p>
       {error && (
         <p className="form-error" role="alert">

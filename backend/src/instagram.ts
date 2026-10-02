@@ -6,6 +6,7 @@ import type { MongoOperations } from './mongo-crm.js';
 import type { MongoTx } from './mongo-store.js';
 import { DomainError, type Opportunity, type User } from './types.js';
 import { wasDeleted } from './lead-deletion.js';
+import { enqueuePushEvent } from './push-store.js';
 
 export interface InstagramConfig {
   appSecret: string;
@@ -649,7 +650,7 @@ export class InstagramCentral {
               $set: { updated_at: now },
             },
           );
-        await tx.collection('messages').updateOne(
+        const insertedMessage = await tx.collection('messages').updateOne(
           { external_message_id: value.external_message_id },
           {
             $setOnInsert: {
@@ -667,6 +668,14 @@ export class InstagramCentral {
           },
           { upsert: true, session: tx.session },
         );
+        if (insertedMessage.upsertedCount)
+          await enqueuePushEvent(
+            tx,
+            `instagram:${eventId}`,
+            opportunityId,
+            'message.received',
+            now,
+          );
         if (pendingReferralEventId)
           await tx.collection('instagram_pending_referrals').deleteOne(
             {
@@ -726,11 +735,11 @@ export class InstagramCentral {
           [randomUUID(), account.id, opportunity.contact_id, opportunityId, createdAt],
         )
       ).rows[0];
-      await tx.query(
+      const insertedMessage = await tx.query<{ id: string }>(
         `INSERT INTO messages(
            id,conversation_id,external_message_id,direction,sender_external_id,type,text,attachments,status,created_at
          ) VALUES ($1,$2,$3,'inbound',$4,$5,$6,$7,'received',$8)
-         ON CONFLICT (external_message_id) WHERE external_message_id IS NOT NULL DO NOTHING`,
+         ON CONFLICT (external_message_id) WHERE external_message_id IS NOT NULL DO NOTHING RETURNING id`,
         [
           randomUUID(),
           conversation.id,
@@ -742,6 +751,14 @@ export class InstagramCentral {
           createdAt,
         ],
       );
+      if (insertedMessage.rows.length)
+        await enqueuePushEvent(
+          tx,
+          `instagram:${eventId}`,
+          opportunityId,
+          'message.received',
+          new Date((await tx.query<{ now: Date }>('SELECT clock_timestamp() AS now')).rows[0].now),
+        );
       if (pendingReferralEventId)
         await tx.query(
           `DELETE FROM instagram_pending_referrals

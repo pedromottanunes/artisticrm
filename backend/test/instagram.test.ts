@@ -170,6 +170,23 @@ test('novas mensagens do mesmo IGSID preservam oportunidade e responsável', asy
   assert.equal((await db.query('SELECT * FROM conversations')).rows.length, 1);
   assert.equal((await db.query('SELECT * FROM messages')).rows.length, 2);
   assert.equal((await db.query('SELECT * FROM inbound_events')).rows.length, 2);
+  const events = (
+    await db.query(
+      "SELECT * FROM push_records WHERE kind='event' AND data->>'kind'='message.received'",
+    )
+  ).rows;
+  assert.equal(events.length, 2, 'every newly persisted message queues an alert');
+  const repeated = raw(payload('ig-history-2'));
+  await central.receive(repeated, signature(repeated));
+  await central.drain();
+  assert.equal(
+    (
+      await db.query(
+        "SELECT * FROM push_records WHERE kind='event' AND data->>'kind'='message.received'",
+      )
+    ).rows.length,
+    2,
+  );
 });
 
 test('referência explícita de anúncio é atribuída sem inferir campanhas ausentes', async () => {

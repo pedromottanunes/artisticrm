@@ -73,9 +73,15 @@ const salesNav = [
 ];
 
 const readPage = (): Page => {
-  const hash = window.location.hash.slice(1);
+  const hash = window.location.hash.slice(1).split('?')[0];
   if (['overview', 'distribution', 'leads'].includes(hash)) return 'central';
   return [...navItems, ...salesNav].some((item) => item.id === hash) ? (hash as Page) : 'central';
+};
+
+const readInboxTarget = () => {
+  if (readPage() !== 'inbox') return '';
+  const value = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('lead') ?? '';
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) ? value : '';
 };
 
 export function App() {
@@ -91,7 +97,7 @@ export function App() {
   const [leadRevision, setLeadRevision] = useState(0);
   const [notifications, setNotifications] = useState(false);
   const [whatsappUrl, setWhatsappUrl] = useState('');
-  const [inboxTargetId, setInboxTargetId] = useState('');
+  const [inboxTargetId, setInboxTargetId] = useState(readInboxTarget);
   const [busyId, setBusyId] = useState('');
   const [now, setNow] = useState(Date.now());
   const serverClock = useRef({ server: Date.now(), monotonic: performance.now() });
@@ -149,6 +155,8 @@ export function App() {
   useEffect(() => {
     const changed = () => {
       setPage(readPage());
+      const target = readInboxTarget();
+      if (target) setInboxTargetId(target);
       window.scrollTo(0, 0);
     };
     window.addEventListener('hashchange', changed);
