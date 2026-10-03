@@ -107,6 +107,7 @@ export interface ConversationSummary {
   reserved_to: string | null;
   last_message_at: string;
   can_send: boolean;
+  messaging_mode?: 'direct' | 'private_reply' | 'waiting_reply' | 'expired' | 'send_unconfirmed';
 }
 export interface ConversationMessage {
   id: string;

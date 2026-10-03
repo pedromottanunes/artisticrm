@@ -53,9 +53,41 @@ Uma referência de anúncio recebida antes da mensagem fica pendente por até 24
 só é vinculada quando a pessoa envia uma mensagem ou aciona um postback; apenas abrir o
 anúncio não cria lead nem movimenta o rodízio. 6. Envie um Direct a partir de outra conta. 7. Em **Configurações → Instagram Direct**, confirme a última mensagem recebida/processada. 8. Aceite o lead com uma atendente e responda em **Conversas**.
 
-O remetente deve iniciar a conversa. A API responde usando o IGSID recebido no webhook; não é possível escolher um `@usuario` arbitrário no campo “Até”.
+No Direct comum, o remetente inicia a conversa. A resposta privada a um comentário é a exceção descrita abaixo. Não é possível escolher um `@usuario` arbitrário para iniciar um Direct.
 
-## URLs e segurança
+## Bolsão de comentários
+
+O mesmo webhook aceita `entry[].changes` com o campo `comments`. Assine esse campo na Meta e confirme que o token da conta tem `instagram_business_manage_comments` e `instagram_business_manage_messages`, com o acesso necessário para a conta em produção. Não são necessárias novas variáveis nem outro banco de dados.
+
+- Consultores acessam **Bolsão → Comentários**; a gestão tem **Comentários** no menu.
+- Comentários são agrupados por perfil e paginados. Curtidas e comentários de Live não entram neste fluxo.
+- **Assumir e conversar** atribui o perfil de forma atômica, cria ou reaproveita o lead e abre o chat. Contatos já atribuídos mantêm o responsável. Contatos encerrados exigem revisão da gestão.
+- O comentário aparece identificado no histórico e não abre a janela de mensagens do Direct.
+- A primeira abordagem usa `recipient.comment_id`. O servidor consulta a data real do comentário e exige que esteja dentro dos sete dias.
+- Após o primeiro envio, o chat aguarda uma resposta. Uma nova mensagem do lead libera o Direct na janela padrão de 24 horas; o CRM não usa a extensão Human Agent neste fluxo.
+- Um envio recusado ou sem confirmação fica bloqueado para nova abordagem automática. O consultor deve conferir o Instagram; não há reenvio automático que possa duplicar a abordagem.
+- Uma resposta privada confirmada registra também o destinatário retornado pela Meta para associar os próximos Directs ao cadastro.
+- Essa confirmação é persistida como um recibo interno antes da finalização. Vínculo do destinatário e status de envio são finalizados na mesma transação. Se falhar, o mesmo pedido, o recebimento do Direct ou o worker (até três pendências a cada 15 segundos) retoma somente o salvamento, sem reenviar para a Meta. Conflitos com outro cadastro não são mesclados automaticamente. A migração `025_private_reply_recovery.sql` e o índice equivalente no MongoDB são aplicados na inicialização.
+- Novos comentários disponíveis e comentários de leads já atribuídos usam o sistema de push existente. O conteúdo do comentário não aparece na notificação.
+- Apenas texto, IDs e URLs são persistidos. Miniaturas de publicações são opcionais e carregadas diretamente no navegador.
+- A exclusão de um lead pela gestão remove seus comentários e registra hashes contra reentrega dos mesmos eventos.
+
+A migração SQL `023_instagram_comments.sql` e os índices equivalentes do MongoDB são aplicados na inicialização. Testes automatizados usam dados sintéticos. Antes da liberação operacional, validar na conta real: comentar com outra conta, assumir, enviar uma resposta privada, responder pelo Instagram e conferir a continuidade no mesmo chat e com o mesmo responsável.
+
+Referência: [Private Replies — Meta](https://developers.facebook.com/docs/instagram-platform/private-replies).
+
+## Eficiência do chat
+
+- Recebimento é por webhook; atualizar a lista no navegador não consulta a Meta.
+- O chat mantém uma consulta de lista e uma de histórico por vez, cancela leituras ao sair/trocar de conversa e reduz tentativas após falhas. A atualização periódica pausa com a página oculta.
+- A lista usa uma revisão: quando nada mudou, o servidor responde apenas `unchanged` e a revisão. A autenticação e a filtragem por responsável continuam sendo verificadas a cada consulta.
+- O histórico fica limitado às 200 mensagens mais recentes. Após ausência longa, a interface recupera a janela atual em vez de percorrer todo o histórico acumulado.
+- Fotos de perfil são enriquecidas fora da fila de mensagens, em lotes de até três a cada 15 segundos. Resultados, inclusive sem foto, ficam válidos por 24 horas; falhas têm intervalo mínimo de 15 minutos por perfil. Respostas 429/5xx pausam o enriquecimento opcional por 15 minutos.
+- Comentários novos reaproveitam os links da publicação consultada nas últimas 24 horas; falhas de prévia são reaproveitadas por 15 minutos. A data original do comentário é verificada uma vez antes da primeira abordagem e o prazo continua sendo validado a cada envio.
+- Imagens, áudio e vídeo continuam priorizando URLs da Meta no navegador. Identificação de mídia compartilhada também tenta a CDN diretamente; o proxy é fallback para incompatibilidades. Transferências pelo proxy são encerradas quando o navegador desconecta. Nenhum arquivo binário é salvo no banco.
+- A migração SQL `024_chat_efficiency.sql` e os índices equivalentes do MongoDB são aplicados na inicialização. Não há novos serviços nem variáveis obrigatórias.
+
+## Proteções da integração
 
 - O corpo do POST é validado por `X-Hub-Signature-256` usando o App Secret.
 - Eventos repetidos são deduplicados pelo ID da mensagem.

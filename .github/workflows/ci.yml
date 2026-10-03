@@ -6,6 +6,29 @@ on:
 permissions:
   contents: read
 jobs:
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reject tracked credential files
+        shell: bash
+        run: |
+          if git ls-files | grep -Ei '(^|/)(TOKENS\.txt|[^/]+\.tokens\.txt|\.env($|\..+))$' | grep -Eiv '(^|/)\.env\.example$'; then
+            echo 'Credential files must not be tracked in Git.'
+            exit 1
+          fi
+      - name: Scan Git history for secrets (redacted)
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/gitleaks.tar.gz"
+          curl --fail --location --silent --show-error --retry 3 --max-time 120 \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            --output "$archive"
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $archive" | sha256sum --check
+          tar -xzf "$archive" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" git --redact --no-banner .
   validate:
     runs-on: ubuntu-latest
     services:
@@ -26,9 +49,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.18.0
+          node-version: 22.23.3
           cache: npm
       - run: npm ci
+      - run: npm audit --audit-level=moderate
       - run: npm run typecheck
       - run: npm test
       - run: npm test

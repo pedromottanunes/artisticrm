@@ -3,6 +3,7 @@ import webpush from 'web-push';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { tokenHash } from './auth.js';
+import { MongoTx } from './mongo-store.js';
 import { DomainError, isClosedStage, type User } from './types.js';
 import {
   cleanPush,
@@ -197,6 +198,34 @@ export class PushService {
       : null;
   }
   private async message(tx: PushTx, event: PushRecord, user: User, now: Date) {
+    if (event.data.kind === 'comment.received') {
+      const comment =
+        tx instanceof MongoTx
+          ? await tx.one('instagram_comments', {
+              account_id: event.data.accountId,
+              comment_id: event.data.commentId,
+            })
+          : (
+              await tx.query<Record<string, any>>(
+                'SELECT * FROM instagram_comments WHERE account_id=$1 AND comment_id=$2',
+                [event.data.accountId, event.data.commentId],
+              )
+            ).rows[0];
+      if (
+        !comment ||
+        comment.ignored ||
+        comment.opportunity_id ||
+        new Date(comment.reply_deadline_at) <= now
+      )
+        return null;
+      return {
+        title: 'Artisti CRM',
+        body: 'Novo comentário disponível no bolsão.',
+        page: 'comments',
+        userId: user.id,
+        tag: `artisti-${createHash('sha256').update(event.id).digest('hex').slice(0, 32)}`,
+      };
+    }
     if (event.data.kind === 'lead.deleted') {
       if (user.role !== 'manager' && event.data.target !== user.id) return null;
       return {
@@ -210,7 +239,7 @@ export class PushService {
     const lead = await pushOpportunity(tx, event.data.opportunityId);
     if (!lead) return null;
     const kind = String(event.data.kind);
-    const received = kind === 'message.received';
+    const received = kind === 'message.received' || kind === 'comment.received.owned';
     const movement = [
       'opportunity.claimed',
       'opportunity.transferred',
@@ -249,6 +278,7 @@ export class PushService {
     }
     const descriptions: Record<string, string> = {
       'message.received': 'Nova mensagem de um lead. Abra o CRM para conferir.',
+      'comment.received.owned': 'Um lead comentou no Instagram. Abra o CRM para conferir.',
       'opportunity.claimed': 'Um lead foi assumido. Abra o CRM para conferir.',
       'opportunity.updated': 'O cadastro ou a qualificação de um lead foi atualizado.',
       'appointment.created': 'Uma consulta foi agendada. Abra o CRM para conferir.',

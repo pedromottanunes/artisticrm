@@ -1136,7 +1136,7 @@ test('central aceita consulta lenta e usa a mesma fotografia para equipe e leads
   );
   await page.getByRole('button', { name: 'Configurações', exact: true }).click();
   // Simulate the workspace's independent snapshot lagging behind the board.
-  await page.route('**/api/v1/workspace', async (route) => {
+  await page.route('**/api/v1/workspace*', async (route) => {
     const response = await route.fetch();
     const body = await response.json();
     await route.fulfill({
@@ -1305,7 +1305,7 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
   let workspaceRequests = 0;
   const profilePicture =
     'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="58" height="58"/%3E';
-  await page.route('**/api/v1/workspace', async (route) => {
+  await page.route('**/api/v1/workspace*', async (route) => {
     workspaceRequests += 1;
     const response = await route.fetch();
     if (response.status() !== 200) return route.fulfill({ response });
@@ -1468,6 +1468,7 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
   });
   await page.route('https://lookaside.fbsbx.com/**', (route) =>
     route.fulfill({
+      headers: { 'Access-Control-Allow-Origin': '*' },
       contentType: 'image/svg+xml',
       body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240"><rect width="320" height="240" fill="#dcefeb"/></svg>',
     }),
@@ -1505,7 +1506,7 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
   await expect(page.locator('.message-image')).toHaveCount(2);
   const directImage = page.locator('.message-image').first();
   await expect(directImage).toHaveAttribute('src', 'https://lookaside.fbsbx.com/photo.jpg');
-  expect(mediaProxyRequests).toBe(1);
+  expect(mediaProxyRequests).toBe(0);
   await expect(page.getByTitle('Prévia de reel')).toHaveAttribute(
     'src',
     'https://www.instagram.com/reel/TESTE123/embed/',
@@ -1527,7 +1528,7 @@ test('abrir conversa do Instagram seleciona o lead solicitado, nao a primeira co
   expect(readRequests).toBe(2);
   await directImage.dispatchEvent('error');
   await expect(directImage).toHaveAttribute('src', /\/attachments\/0\/media$/);
-  expect(mediaProxyRequests).toBe(2);
+  expect(mediaProxyRequests).toBe(1);
   await page.getByRole('button', { name: 'Abrir imagem em tamanho original' }).first().click();
   await expect(page.getByRole('dialog', { name: 'Imagem ampliada' })).toBeVisible();
   await page.getByRole('button', { name: 'Fechar imagem ampliada' }).click();

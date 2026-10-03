@@ -16,6 +16,7 @@ import {
 import type { CRM, LeadInput } from './crm.js';
 import type { DeleteAttendantInput, Operations } from './operations.js';
 import { hashPassword, verifyPassword } from './auth.js';
+import { commandFingerprint, matchesCommandFingerprint } from './command-fingerprint.js';
 import type { Document } from 'mongodb';
 import {
   compactQueuePositions,
@@ -166,19 +167,15 @@ export class MongoOperations {
   ) {
     // Password-bearing commands must not leave a fast offline password verifier
     // in the receipt table. Preserve idempotency with the same slow salted hash.
-    const sensitive = !!payload && typeof payload === 'object' && 'password' in payload;
-    const serialized = JSON.stringify(payload);
     const prior = await tx.one('operation_receipts', { actor_id: actor.id, key });
     if (prior) {
-      const matches = sensitive
-        ? await verifyPassword(serialized, prior.fingerprint)
-        : prior.fingerprint === digest(payload);
+      const matches = await matchesCommandFingerprint(payload, prior.fingerprint);
       if (!matches)
         throw new DomainError('IDEMPOTENCY_CONFLICT', 'Chave reutilizada com outros dados.');
       return prior.response as T;
     }
     const response = await work();
-    const fingerprint = sensitive ? await hashPassword(serialized) : digest(payload);
+    const fingerprint = await commandFingerprint(payload);
     await tx.insert('operation_receipts', {
       actor_id: actor.id,
       key,
@@ -551,7 +548,7 @@ export class MongoOperations {
       next_action: '',
     };
   }
-  async snapshot(user: User) {
+  async snapshot(user: User, includeAppointments = true) {
     await this.expire();
     return this.db.atomic(async (tx) => {
       await this.actor(tx, user);
@@ -587,36 +584,41 @@ export class MongoOperations {
           ),
         );
       const users = (await tx.many('users', {}, { queue_position: 1 })).map(publicUser);
-      const appointments = await tx
-        .collection('appointments')
-        .aggregate(
-          [
-            {
-              $lookup: {
-                from: 'opportunities',
-                localField: 'opportunity_id',
-                foreignField: 'id',
-                as: 'opportunity',
-              },
-            },
-            { $unwind: '$opportunity' },
-            ...(user.role === 'manager' ? [] : [{ $match: { 'opportunity.owner_id': user.id } }]),
-            {
-              $lookup: {
-                from: 'contacts',
-                localField: 'opportunity.contact_id',
-                foreignField: 'id',
-                as: 'contact',
-              },
-            },
-            { $unwind: '$contact' },
-            { $set: { name: '$contact.name', owner_id: '$opportunity.owner_id' } },
-            { $project: { _id: 0, contact: 0, opportunity: 0 } },
-            { $sort: { starts_at: 1 } },
-          ],
-          { session: tx.session },
-        )
-        .toArray();
+      const appointments = includeAppointments
+        ? await tx
+            .collection('appointments')
+            .aggregate(
+              [
+                { $sort: { starts_at: 1, id: 1 } },
+                {
+                  $lookup: {
+                    from: 'opportunities',
+                    localField: 'opportunity_id',
+                    foreignField: 'id',
+                    as: 'opportunity',
+                  },
+                },
+                { $unwind: '$opportunity' },
+                ...(user.role === 'manager'
+                  ? []
+                  : [{ $match: { 'opportunity.owner_id': user.id } }]),
+                { $limit: 100 },
+                {
+                  $lookup: {
+                    from: 'contacts',
+                    localField: 'opportunity.contact_id',
+                    foreignField: 'id',
+                    as: 'contact',
+                  },
+                },
+                { $unwind: '$contact' },
+                { $set: { name: '$contact.name', owner_id: '$opportunity.owner_id' } },
+                { $project: { _id: 0, contact: 0, opportunity: 0 } },
+              ],
+              { session: tx.session },
+            )
+            .toArray()
+        : [];
       const s = (await tx.one('distribution_settings', { id: 1 }))!;
       return {
         user,

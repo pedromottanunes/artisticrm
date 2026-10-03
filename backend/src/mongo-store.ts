@@ -285,6 +285,7 @@ export async function initializeMongo(db: MongoStore) {
     'appointments',
     'audit_events',
     'message_shortcuts',
+    'instagram_comments',
   ])
     await db.collection(name).createIndex({ id: 1 }, { unique: true });
   await db.collection('users').createIndex({ email: 1 }, { unique: true });
@@ -314,6 +315,7 @@ export async function initializeMongo(db: MongoStore) {
   await db.collection('opportunities').createIndex({ created_at: -1 });
   await db.collection('opportunities').createIndex({ stage: 1, created_at: -1 });
   await db.collection('appointments').createIndex({ opportunity_id: 1, status: 1 });
+  await db.collection('appointments').createIndex({ starts_at: 1, id: 1 });
   await db
     .collection('appointments')
     .createIndex(
@@ -347,11 +349,20 @@ export async function initializeMongo(db: MongoStore) {
     .collection('contact_identities')
     .createIndex({ provider: 1, channel_account_id: 1, external_user_id: 1 }, { unique: true });
   await db.collection('contact_identities').createIndex({ contact_id: 1 });
+  await db.collection('contact_identities').createIndex({
+    provider: 1,
+    channel_account_id: 1,
+    profile_pending: 1,
+    profile_check_after: 1,
+  });
   await db.collection('conversations').createIndex({ id: 1 }, { unique: true });
   await db
     .collection('conversations')
     .createIndex({ channel_account_id: 1, opportunity_id: 1 }, { unique: true });
   await db.collection('conversations').createIndex({ contact_id: 1, last_message_at: -1 });
+  await db
+    .collection('conversations')
+    .createIndex({ channel_account_id: 1, last_message_at: -1, id: 1 });
   await db.collection('messages').createIndex({ id: 1 }, { unique: true });
   await db
     .collection('messages')
@@ -366,6 +377,12 @@ export async function initializeMongo(db: MongoStore) {
       { unique: true, partialFilterExpression: { client_request_id: { $type: 'string' } } },
     );
   await db.collection('messages').createIndex({ conversation_id: 1, created_at: 1, id: 1 });
+  await db
+    .collection('messages')
+    .createIndex(
+      { 'private_reply_receipt.account_id': 1, private_reply_binding_retry_at: 1 },
+      { partialFilterExpression: { private_reply_binding_pending: true } },
+    );
   await db
     .collection('messages')
     .createIndex({ direction: 1, status: 1, sending_started_at: 1, created_at: 1 });
@@ -397,6 +414,20 @@ export async function initializeMongo(db: MongoStore) {
   await db.collection('push_records').createIndex({ kind: 1, available_at: 1 });
   await db.collection('push_records').createIndex({ expires_at: 1 });
   await db.collection('message_shortcuts').createIndex({ user_id: 1, created_at: -1, id: 1 });
+  await db
+    .collection('instagram_comments')
+    .createIndex({ account_id: 1, comment_id: 1 }, { unique: true });
+  await db
+    .collection('instagram_comments')
+    .createIndex({ account_id: 1, ignored: 1, opportunity_id: 1, received_at: -1, id: -1 });
+  await db.collection('instagram_comments').createIndex({ account_id: 1, sender_id: 1 });
+  await db.collection('instagram_comments').createIndex({ opportunity_id: 1 });
+  await db
+    .collection('instagram_comments')
+    .createIndex({ account_id: 1, media_id: 1, preview_checked_at: -1 });
+  await db
+    .collection('instagram_comments')
+    .createIndex({ account_id: 1, preview_checked_at: 1, received_at: -1 });
   await db
     .collection('whatsapp_inbox')
     .createIndex({ phone_number_id: 1, processed_at: 1, available_at: 1 });

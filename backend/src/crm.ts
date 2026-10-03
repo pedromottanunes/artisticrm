@@ -525,7 +525,7 @@ export class CRM {
       next_action: '',
     };
   }
-  async snapshot(user: User) {
+  async snapshot(user: User, includeAppointments = true) {
     await this.expire();
     const rows = (
       await this.db.query<Opportunity>(
@@ -543,13 +543,15 @@ export class CRM {
     const opportunities = rows
       .filter((o) => this.visible(o, user))
       .map((o) => this.sanitize(o, user));
-    const appointments = (
-      await this.db.query(
-        `SELECT a.*,c.name, o.owner_id FROM appointments a JOIN opportunities o ON o.id=a.opportunity_id
-      JOIN contacts c ON c.id=o.contact_id WHERE ($1::boolean OR o.owner_id=$2) ORDER BY a.starts_at`,
-        [user.role === 'manager', user.id],
-      )
-    ).rows;
+    const appointments = includeAppointments
+      ? (
+          await this.db.query(
+            `SELECT a.*,c.name, o.owner_id FROM appointments a JOIN opportunities o ON o.id=a.opportunity_id
+      JOIN contacts c ON c.id=o.contact_id WHERE ($1::boolean OR o.owner_id=$2) ORDER BY a.starts_at,a.id LIMIT 100`,
+            [user.role === 'manager', user.id],
+          )
+        ).rows
+      : [];
     const settings = (await this.db.query('SELECT * FROM distribution_settings WHERE id=1'))
       .rows[0];
     return {

@@ -7,6 +7,8 @@ import type { MongoTx } from './mongo-store.js';
 import { DomainError, type Opportunity, type User } from './types.js';
 import { wasDeleted } from './lead-deletion.js';
 import { enqueuePushEvent } from './push-store.js';
+import { InstagramComments, commentChangeSchema, type CommentEvent } from './instagram-comments.js';
+import { MediaProxy, trustedMediaUrl } from './media-proxy.js';
 
 export interface InstagramConfig {
   appSecret: string;
@@ -93,22 +95,7 @@ const storedAttachmentSchema = z.object({
 const imageAttachmentTypes = new Set(['image', 'photo', 'animated_image']);
 const audioAttachmentTypes = new Set(['audio', 'voice', 'voice_message']);
 const videoAttachmentTypes = new Set(['video']);
-const instagramMediaHostSuffixes = ['cdninstagram.com', 'fbcdn.net', 'fbsbx.com', 'instagram.com'];
-
-function isTrustedInstagramMediaUrl(value: string) {
-  try {
-    const url = new URL(value);
-    const hostname = url.hostname.toLowerCase();
-    return (
-      url.protocol === 'https:' &&
-      instagramMediaHostSuffixes.some(
-        (suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`),
-      )
-    );
-  } catch {
-    return false;
-  }
-}
+const isTrustedInstagramMediaUrl = trustedMediaUrl;
 
 function imageExtension(contentType: string) {
   if (contentType === 'image/png') return 'png';
@@ -173,6 +160,7 @@ const envelopeSchema = z.object({
         id: identifier,
         time: z.number().int().nonnegative().optional(),
         messaging: z.array(z.unknown()).max(1000).optional(),
+        changes: z.array(z.unknown()).max(1000).optional(),
       }),
     )
     .max(1000),
@@ -203,6 +191,10 @@ interface ConversationContext {
   owner_id: string | null;
   reserved_to: string | null;
   external_user_id: string;
+  last_inbound_at?: Date | string | null;
+  private_reply_comment_id?: string | null;
+  private_reply_message_id?: string | null;
+  private_reply_started_at?: Date | string | null;
 }
 
 const present = (value: string | null | undefined) => value || undefined;
@@ -309,16 +301,23 @@ function normalizeEvent(
   };
 }
 
-function parseStoredEvent(value: unknown): NormalizedInstagramEvent {
-  return (typeof value === 'string' ? JSON.parse(value) : value) as NormalizedInstagramEvent;
+function parseStoredEvent(value: unknown): NormalizedInstagramEvent | CommentEvent {
+  return (typeof value === 'string' ? JSON.parse(value) : value) as
+    NormalizedInstagramEvent | CommentEvent;
 }
 
 export class InstagramCentral {
+  readonly comments: InstagramComments;
+  private mediaProxy: MediaProxy;
+  private profilePausedUntil = 0;
   constructor(
     private crm: CRM | MongoOperations,
     private config?: InstagramConfig,
     private request: InstagramFetch = fetch,
-  ) {}
+  ) {
+    this.comments = new InstagramComments(crm.db, config, request);
+    this.mediaProxy = new MediaProxy(request);
+  }
 
   async receive(raw: Buffer, signature: unknown) {
     const config = this.config;
@@ -340,9 +339,27 @@ export class InstagramCentral {
       throw new DomainError('INVALID_WEBHOOK', 'Evento do Instagram inválido.', 400);
     }
 
-    const events: { id: string; value: NormalizedInstagramEvent }[] = [];
+    const events: { id: string; value: NormalizedInstagramEvent | CommentEvent }[] = [];
     for (const entry of envelope.entry) {
       if (entry.id !== config.accountId) continue;
+      for (const change of entry.changes ?? []) {
+        const parsed = commentChangeSchema.safeParse(change);
+        if (!parsed.success || parsed.data.value.from.id === config.accountId || !entry.time)
+          continue;
+        const comment = parsed.data.value;
+        events.push({
+          id: `instagram-comment:${config.accountId}:${comment.id}`,
+          value: {
+            kind: 'comment',
+            comment_id: comment.id,
+            sender_id: comment.from.id,
+            username: comment.from.username ?? '',
+            text: comment.text,
+            media_id: comment.media?.id ?? '',
+            created_at: eventDate(entry.time).toISOString(),
+          },
+        });
+      }
       for (const rawEvent of entry.messaging ?? []) {
         const parsed = messagingEventSchema.safeParse(rawEvent);
         if (!parsed.success) continue;
@@ -500,13 +517,7 @@ export class InstagramCentral {
         ? new Date(identity.profile_updated_at as Date | string)
         : null;
       const checkedAt = db.kind === 'mongo' ? await db.now() : new Date();
-      const completeProfile = Boolean(identity?.username && identity?.profile_picture_url);
-      if (
-        completeProfile &&
-        lastUpdate &&
-        checkedAt.getTime() - lastUpdate.getTime() < 24 * 60 * 60_000
-      )
-        return;
+      if (lastUpdate && checkedAt.getTime() - lastUpdate.getTime() < 24 * 60 * 60_000) return;
 
       const url = new URL(
         `https://graph.instagram.com/${config.graphApiVersion}/${encodeURIComponent(senderId)}`,
@@ -516,7 +527,12 @@ export class InstagramCentral {
         headers: { Authorization: `Bearer ${config.accessToken}` },
         signal: AbortSignal.timeout(5_000),
       });
-      if (!response.ok) return;
+      if (!response.ok) {
+        if (response.status === 429 || response.status >= 500)
+          this.profilePausedUntil = Date.now() + 15 * 60_000;
+        await response.body?.cancel().catch(() => {});
+        return;
+      }
       const profile = userProfileSchema.safeParse(await response.json());
       if (!profile.success || profile.data.id !== senderId) return;
       const displayName = profile.data.name ?? '';
@@ -543,6 +559,7 @@ export class InstagramCentral {
                 ...(displayName ? { display_name: displayName } : {}),
                 ...(picture ? { profile_picture_url: picture } : {}),
                 profile_updated_at: now,
+                profile_check_after: new Date(now.getTime() + 24 * 60 * 60_000),
               },
             },
           );
@@ -569,7 +586,7 @@ export class InstagramCentral {
                  username=CASE WHEN $3='' THEN ci.username ELSE $3 END,
                  display_name=CASE WHEN $4='' THEN ci.display_name ELSE $4 END,
                  profile_picture_url=CASE WHEN $5='' THEN ci.profile_picture_url ELSE $5 END,
-                 profile_updated_at=clock_timestamp()
+                 profile_updated_at=clock_timestamp(),profile_check_after=clock_timestamp()+interval '24 hours'
                FROM opportunities o
                WHERE o.id=$1 AND ci.contact_id=o.contact_id AND ci.provider='instagram'
                  AND ci.channel_account_id=$2 AND ci.external_user_id=$6
@@ -588,6 +605,68 @@ export class InstagramCentral {
         });
     } catch {
       // Profile data is optional. A transient Meta/CDN failure must never block the message.
+    }
+  }
+
+  async drainProfiles(limit = 3) {
+    const config = this.config;
+    if (!config || config.profileLookup === false || this.profilePausedUntil > Date.now()) return;
+    const db = this.crm.db;
+    for (let index = 0; index < limit; index++) {
+      const filter = {
+        provider: 'instagram',
+        channel_account_id: config.accountId,
+        profile_pending: true,
+        $or: [{ profile_check_after: { $lte: new Date() } }, { profile_check_after: null }],
+      };
+      // No transaction/write fence while the optional profile queue is empty.
+      const candidate =
+        db.kind === 'mongo'
+          ? await db.collection('contact_identities').findOne(filter, { projection: { id: 1 } })
+          : (
+              await db.query(
+                "SELECT id FROM contact_identities WHERE provider='instagram' AND channel_account_id=$1 AND profile_pending AND profile_check_after<=clock_timestamp() LIMIT 1",
+                [config.accountId],
+              )
+            ).rows[0];
+      if (!candidate) return;
+      const job =
+        db.kind === 'mongo'
+          ? await db.atomic(async (tx) => {
+              const identity = await tx.one('contact_identities', { ...filter, id: candidate.id });
+              if (!identity) return;
+              await tx.update(
+                'contact_identities',
+                { id: identity.id },
+                {
+                  $set: {
+                    profile_pending: false,
+                    profile_check_after: new Date(Date.now() + 15 * 60_000),
+                  },
+                },
+              );
+              return {
+                sender: identity.external_user_id as string,
+                opportunity: identity.profile_opportunity_id as string,
+              };
+            })
+          : await db.transaction(async (tx) => {
+              const identity = (
+                await tx.query<{ external_user_id: string; profile_opportunity_id: string }>(
+                  `UPDATE contact_identities SET profile_pending=false,profile_check_after=clock_timestamp()+interval '15 minutes'
+          WHERE id=$1 AND profile_pending AND profile_check_after<=clock_timestamp() RETURNING external_user_id,profile_opportunity_id`,
+                  [candidate.id],
+                )
+              ).rows[0];
+              return identity
+                ? {
+                    sender: identity.external_user_id,
+                    opportunity: identity.profile_opportunity_id,
+                  }
+                : undefined;
+            });
+      if (job?.opportunity) await this.refreshProfile(job.sender, job.opportunity);
+      if (this.profilePausedUntil > Date.now()) return;
     }
   }
 
@@ -676,6 +755,16 @@ export class InstagramCentral {
             'message.received',
             now,
           );
+        if (insertedMessage.upsertedCount && config.profileLookup !== false)
+          await tx.update(
+            'contact_identities',
+            {
+              provider: 'instagram',
+              channel_account_id: config.accountId,
+              external_user_id: value.sender_id,
+            },
+            { $set: { profile_pending: true, profile_opportunity_id: opportunityId } },
+          );
         if (pendingReferralEventId)
           await tx.collection('instagram_pending_referrals').deleteOne(
             {
@@ -759,6 +848,11 @@ export class InstagramCentral {
           'message.received',
           new Date((await tx.query<{ now: Date }>('SELECT clock_timestamp() AS now')).rows[0].now),
         );
+      if (insertedMessage.rows.length && config.profileLookup !== false)
+        await tx.query(
+          `UPDATE contact_identities SET profile_pending=true,profile_opportunity_id=$3 WHERE provider='instagram' AND channel_account_id=$1 AND external_user_id=$2`,
+          [config.accountId, value.sender_id, opportunityId],
+        );
       if (pendingReferralEventId)
         await tx.query(
           `DELETE FROM instagram_pending_referrals
@@ -780,11 +874,14 @@ export class InstagramCentral {
     const db = this.crm.db;
     if (
       db.kind === 'mongo' &&
-      !(await db.count('instagram_webhook_inbox', {
-        processed_at: null,
-        available_at: { $lte: await db.now() },
-        instagram_account_id: config.accountId,
-      }))
+      !(await db.collection('instagram_webhook_inbox').findOne(
+        {
+          processed_at: null,
+          available_at: { $lte: new Date() },
+          instagram_account_id: config.accountId,
+        },
+        { projection: { _id: 1 } },
+      ))
     )
       return;
     for (let index = 0; index < limit; index++) {
@@ -841,6 +938,11 @@ export class InstagramCentral {
       if (!row) return;
       try {
         const value = parseStoredEvent(row.event);
+        if ('kind' in value && value.kind === 'comment') {
+          await this.comments.persist(value, row.event_id, lease);
+          continue;
+        }
+        if (!('lead' in value)) continue;
         if (value.deferred_referral) {
           await this.deferReferral(row.event_id, lease, value);
           continue;
@@ -852,9 +954,9 @@ export class InstagramCentral {
           value.lead.source_evidence =
             'ReferÃªncia de anÃºncio recebida pela Meta antes da primeira mensagem.';
         }
+        await this.comments.recoverRecipient(value.sender_id);
         const result = await this.crm.ingest(value.lead, row.event_id, null);
         await this.persistInbound(row.event_id, lease, value, result.id, pending?.sourceEventId);
-        await this.refreshProfile(value.sender_id, result.id);
       } catch {
         const seconds = Math.min(300, 2 ** Math.min(row.attempts + 1, 8));
         if (db.kind === 'mongo')
@@ -944,10 +1046,16 @@ export class InstagramCentral {
                 opportunity_id: 1,
                 contact_id: 1,
                 last_message_at: 1,
+                last_inbound_at: 1,
+                private_reply_comment_id: 1,
+                private_reply_message_id: 1,
+                private_reply_started_at: 1,
                 state: '$opportunity.state',
                 owner_id: '$opportunity.owner_id',
                 reserved_to: '$opportunity.reserved_to',
-                external_user_id: '$identity.external_user_id',
+                external_user_id: {
+                  $ifNull: ['$instagram_recipient_id', '$identity.external_user_id'],
+                },
               },
             },
           ])
@@ -956,14 +1064,16 @@ export class InstagramCentral {
       context =
         (
           await db.query<ConversationContext>(
-            `SELECT cv.id,cv.opportunity_id,cv.contact_id,cv.last_message_at,
+            `SELECT cv.id,cv.opportunity_id,cv.contact_id,cv.last_message_at,cv.last_inbound_at,
+                    cv.private_reply_comment_id,cv.private_reply_message_id,cv.private_reply_started_at,
                     o.state,o.owner_id,o.reserved_to,
-                    ci.external_user_id
+                    COALESCE(cv.instagram_recipient_id,ci.external_user_id) AS external_user_id
              FROM conversations cv
              JOIN opportunities o ON o.id=cv.opportunity_id
              JOIN channel_accounts ca ON ca.id=cv.channel_account_id
-             JOIN contact_identities ci ON ci.contact_id=cv.contact_id
-               AND ci.provider='instagram' AND ci.channel_account_id=ca.external_account_id
+             JOIN LATERAL (SELECT * FROM contact_identities i WHERE i.contact_id=cv.contact_id
+               AND i.provider='instagram' AND i.channel_account_id=ca.external_account_id
+               ORDER BY i.username DESC LIMIT 1) ci ON TRUE
              WHERE cv.id=$1 AND ca.provider='instagram' AND ca.external_account_id=$2`,
             [conversationId, config.accountId],
           )
@@ -999,28 +1109,61 @@ export class InstagramCentral {
         external_account_id: this.config.accountId,
       });
       if (!account) return { configured: true, conversations: [] };
+      const all = user.role === 'manager' && view === 'all';
       const conversations = await db
-        .collection('conversations')
+        .collection(all ? 'conversations' : 'opportunities')
         .aggregate<Record<string, unknown>>([
-          { $match: { channel_account_id: account.id } },
-          {
-            $lookup: {
-              from: 'opportunities',
-              localField: 'opportunity_id',
-              foreignField: 'id',
-              as: 'opportunity',
-            },
-          },
-          { $unwind: '$opportunity' },
-          {
-            $match: Object.fromEntries(
-              Object.entries(opportunityFilter).map(([key, value]) => [
-                `opportunity.${key}`,
-                value,
+          ...(all
+            ? [
+                { $match: { channel_account_id: account.id } },
+                { $sort: { last_message_at: -1, id: 1 } },
+                { $limit: 100 },
+                {
+                  $lookup: {
+                    from: 'opportunities',
+                    localField: 'opportunity_id',
+                    foreignField: 'id',
+                    as: 'opportunity',
+                  },
+                },
+                { $unwind: '$opportunity' },
+              ]
+            : [
+                { $match: opportunityFilter },
+                {
+                  $project: {
+                    _id: 0,
+                    opportunity: {
+                      id: '$id',
+                      state: '$state',
+                      owner_id: '$owner_id',
+                      reserved_to: '$reserved_to',
+                    },
+                  },
+                },
+                {
+                  $lookup: {
+                    from: 'conversations',
+                    let: { opportunityId: '$opportunity.id' },
+                    pipeline: [
+                      {
+                        $match: {
+                          channel_account_id: account.id,
+                          $expr: { $eq: ['$opportunity_id', '$$opportunityId'] },
+                        },
+                      },
+                    ],
+                    as: 'conversation',
+                  },
+                },
+                { $unwind: '$conversation' },
+                {
+                  $replaceRoot: {
+                    newRoot: { $mergeObjects: ['$conversation', { opportunity: '$opportunity' }] },
+                  },
+                },
               ]),
-            ),
-          },
-          { $sort: { last_message_at: -1 } },
+          { $sort: { last_message_at: -1, id: 1 } },
           { $limit: 100 },
           {
             $lookup: {
@@ -1065,16 +1208,36 @@ export class InstagramCentral {
               owner_id: '$opportunity.owner_id',
               reserved_to: '$opportunity.reserved_to',
               last_message_at: 1,
+              last_inbound_at: 1,
+              private_reply_comment_id: 1,
+              private_reply_message_id: 1,
+              private_reply_started_at: 1,
             },
           },
         ])
         .toArray();
+      const modes = await this.comments.modes(conversations);
       return {
         configured: true,
-        conversations: conversations.map((conversation) => ({
-          ...conversation,
-          can_send: conversation.state === 'CLAIMED' && conversation.owner_id === user.id,
-        })),
+        conversations: conversations.map((conversation, index) => {
+          const mode = modes[index];
+          return {
+            id: conversation.id,
+            opportunity_id: conversation.opportunity_id,
+            contact_name: conversation.contact_name,
+            instagram_username: conversation.instagram_username,
+            profile_picture_url: conversation.profile_picture_url,
+            state: conversation.state,
+            owner_id: conversation.owner_id,
+            reserved_to: conversation.reserved_to,
+            last_message_at: conversation.last_message_at,
+            messaging_mode: mode,
+            can_send:
+              conversation.state === 'CLAIMED' &&
+              conversation.owner_id === user.id &&
+              ['direct', 'private_reply'].includes(mode),
+          };
+        }),
       };
     }
     const visibility =
@@ -1101,37 +1264,51 @@ export class InstagramCentral {
           instagram_username: string;
           profile_picture_url: string;
           conversation_last_message_at: Date | string;
+          last_inbound_at: Date | string | null;
+          private_reply_comment_id: string | null;
+          private_reply_message_id: string | null;
+          private_reply_started_at: Date | string | null;
         }
       >(
         `SELECT o.*,cv.id AS conversation_id,c.name AS contact_name,
                 ci.username AS instagram_username,ci.profile_picture_url,
-                cv.last_message_at AS conversation_last_message_at
+                cv.last_message_at AS conversation_last_message_at,cv.last_inbound_at,
+                cv.private_reply_comment_id,cv.private_reply_message_id,cv.private_reply_started_at
          FROM conversations cv
          JOIN opportunities o ON o.id=cv.opportunity_id
          JOIN contacts c ON c.id=cv.contact_id
          JOIN channel_accounts ca ON ca.id=cv.channel_account_id
-         JOIN contact_identities ci ON ci.contact_id=cv.contact_id
-           AND ci.provider='instagram' AND ci.channel_account_id=ca.external_account_id
+         JOIN LATERAL (SELECT * FROM contact_identities i WHERE i.contact_id=cv.contact_id
+           AND i.provider='instagram' AND i.channel_account_id=ca.external_account_id
+           ORDER BY i.username DESC LIMIT 1) ci ON TRUE
           WHERE ca.provider='instagram' AND ca.external_account_id=$1
             AND (${visibility})
-          ORDER BY cv.last_message_at DESC LIMIT 100`,
+          ORDER BY cv.last_message_at DESC,cv.id LIMIT 100`,
         visibility.includes('$2') ? [this.config.accountId, user.id] : [this.config.accountId],
       )
     ).rows;
+    const modes = await this.comments.modes(rows);
     return {
       configured: true,
-      conversations: rows.map((row) => ({
-        id: row.conversation_id,
-        opportunity_id: row.id,
-        contact_name: row.contact_name,
-        instagram_username: row.instagram_username,
-        profile_picture_url: row.profile_picture_url,
-        state: row.state,
-        owner_id: row.owner_id,
-        reserved_to: row.reserved_to,
-        last_message_at: row.conversation_last_message_at,
-        can_send: row.state === 'CLAIMED' && row.owner_id === user.id,
-      })),
+      conversations: rows.map((row, index) => {
+        const mode = modes[index];
+        return {
+          id: row.conversation_id,
+          opportunity_id: row.id,
+          contact_name: row.contact_name,
+          instagram_username: row.instagram_username,
+          profile_picture_url: row.profile_picture_url,
+          state: row.state,
+          owner_id: row.owner_id,
+          reserved_to: row.reserved_to,
+          last_message_at: row.conversation_last_message_at,
+          messaging_mode: mode,
+          can_send:
+            row.state === 'CLAIMED' &&
+            row.owner_id === user.id &&
+            ['direct', 'private_reply'].includes(mode),
+        };
+      }),
     };
   }
 
@@ -1140,32 +1317,51 @@ export class InstagramCentral {
     const db = this.crm.db;
     let messages: Record<string, unknown>[];
     if (db.kind === 'mongo') {
+      const projection = {
+        _id: 0,
+        id: 1,
+        external_message_id: 1,
+        direction: 1,
+        sender_user_id: 1,
+        type: 1,
+        text: 1,
+        attachments: 1,
+        status: 1,
+        error_code: 1,
+        sent_at: 1,
+        delivered_at: 1,
+        read_at: 1,
+        created_at: 1,
+      };
       if (afterMessageId) {
         const cursor = await db.one<{ created_at: Date; id: string }>('messages', {
           id: afterMessageId,
           conversation_id: context.id,
         });
         if (!cursor) throw new DomainError('INVALID_CURSOR', 'Atualize a conversa novamente.', 400);
-        messages = await db.many(
-          'messages',
-          {
-            conversation_id: context.id,
-            $or: [
-              { created_at: { $gt: cursor.created_at } },
-              { created_at: cursor.created_at, id: { $gt: cursor.id } },
-            ],
-          },
-          { created_at: 1, id: 1 },
-          201,
-        );
+        messages = await db
+          .collection('messages')
+          .find(
+            {
+              conversation_id: context.id,
+              $or: [
+                { created_at: { $gt: cursor.created_at } },
+                { created_at: cursor.created_at, id: { $gt: cursor.id } },
+              ],
+            },
+            { projection },
+          )
+          .sort({ created_at: 1, id: 1 })
+          .limit(201)
+          .toArray();
       } else
         messages = (
-          await db.many(
-            'messages',
-            { conversation_id: context.id },
-            { created_at: -1, id: -1 },
-            201,
-          )
+          await db
+            .collection('messages')
+            .find({ conversation_id: context.id }, { projection })
+            .sort({ created_at: -1, id: -1 })
+            .limit(201)
+            .toArray()
         ).reverse();
     } else if (afterMessageId) {
       const cursor = (
@@ -1197,11 +1393,16 @@ export class InstagramCentral {
         )
       ).rows;
     const hasMore = messages.length > 200;
+    const messagingMode = await this.comments.mode(context);
     if (hasMore) messages = afterMessageId ? messages.slice(0, 200) : messages.slice(-200);
     return {
       conversation_id: context.id,
       opportunity_id: context.opportunity_id,
-      can_send: context.state === 'CLAIMED' && context.owner_id === user.id,
+      can_send:
+        context.state === 'CLAIMED' &&
+        context.owner_id === user.id &&
+        ['direct', 'private_reply'].includes(messagingMode),
+      messaging_mode: messagingMode,
       last_message_at: context.last_message_at,
       has_more: hasMore,
       messages,
@@ -1213,8 +1414,17 @@ export class InstagramCentral {
     conversationId: string,
     messageId: string,
     attachmentIndex: number,
+    signal?: AbortSignal,
   ) {
-    const media = await this.streamAttachment(user, conversationId, messageId, attachmentIndex);
+    const media = await this.streamAttachment(
+      user,
+      conversationId,
+      messageId,
+      attachmentIndex,
+      undefined,
+      signal,
+      25 * 1024 * 1024,
+    );
     if (!media.contentType.startsWith('image/')) {
       await media.body.cancel().catch(() => {});
       throw new DomainError('MEDIA_UNAVAILABLE', 'O arquivo recebido não é uma imagem.', 502);
@@ -1235,6 +1445,8 @@ export class InstagramCentral {
     messageId: string,
     attachmentIndex: number,
     range?: string,
+    signal?: AbortSignal,
+    maxBytes?: number,
   ) {
     const context = await this.context(user, conversationId);
     const db = this.crm.db;
@@ -1264,36 +1476,18 @@ export class InstagramCentral {
     if (!attachment?.url || !isTrustedInstagramMediaUrl(attachment.url))
       throw new DomainError('MEDIA_UNAVAILABLE', 'Mídia indisponível.', 404);
 
-    let response: Response;
-    const responseController = new AbortController();
-    const responseTimeout = setTimeout(() => responseController.abort(), 20_000);
-    try {
-      response = await this.request(attachment.url, {
-        method: 'GET',
-        ...(range ? { headers: { Range: range } } : {}),
-        redirect: 'follow',
-        signal: responseController.signal,
-      });
-    } catch {
-      throw new DomainError('MEDIA_UNAVAILABLE', 'Não foi possível carregar a mídia.', 502);
-    } finally {
-      // O limite protege somente a espera pelos cabeçalhos da Meta. Manter o sinal
-      // ativo interromperia áudios e vídeos válidos durante a reprodução.
-      clearTimeout(responseTimeout);
-    }
-    if (
-      !response.ok ||
-      !response.body ||
-      (response.url && !isTrustedInstagramMediaUrl(response.url))
-    )
-      throw new DomainError('MEDIA_UNAVAILABLE', 'Mídia indisponível.', 502);
+    const response = await this.mediaProxy.open(user.id, attachment.url, range, signal, maxBytes);
 
     const receivedContentType = (response.headers.get('content-type') ?? '')
       .split(';')[0]
       .trim()
       .toLowerCase();
     const contentType = mediaContentType(attachment.type, receivedContentType);
-    if (!/^(image|audio|video)\//.test(contentType)) {
+    if (
+      !/^(image\/(jpeg|png|gif|webp|avif)|audio\/(mpeg|mp4|aac|ogg|opus|wav|x-wav|webm|3gpp|amr)|video\/(mp4|webm|quicktime|ogg|3gpp))$/.test(
+        contentType,
+      )
+    ) {
       await response.body.cancel().catch(() => {});
       throw new DomainError('MEDIA_UNAVAILABLE', 'A URL não contém uma mídia exibível.', 502);
     }
@@ -1401,6 +1595,7 @@ export class InstagramCentral {
         {
           direction: 'outbound',
           status: 'sending',
+          private_reply_binding_pending: { $ne: true },
           $or: [
             { sending_started_at: { $lte: cutoff } },
             { sending_started_at: { $exists: false }, created_at: { $lte: cutoff } },
@@ -1421,6 +1616,7 @@ export class InstagramCentral {
     const result = await db.query<{ id: string }>(
       `UPDATE messages SET status='unknown',error_code='PROCESS_INTERRUPTED',sending_started_at=NULL
        WHERE direction='outbound' AND status='sending'
+         AND NOT private_reply_binding_pending
          AND COALESCE(sending_started_at,created_at) <= clock_timestamp()-($1 * interval '1 millisecond')
        RETURNING id`,
       [maxAgeMs],
@@ -1439,6 +1635,14 @@ export class InstagramCentral {
     const db = this.crm.db;
     let messageId: string;
     let shouldSend = false;
+    let recipient: { id: string } | { comment_id: string } = { id: context.external_user_id };
+    const replay =
+      db.kind === 'mongo'
+        ? await db.one('messages', { client_request_id: requestId })
+        : (await db.query('SELECT id FROM messages WHERE client_request_id=$1', [requestId]))
+            .rows[0];
+    if (!replay && (await this.comments.mode(context)) === 'private_reply')
+      await this.comments.verifyPrivateReply(context.private_reply_comment_id!);
     if (db.kind === 'mongo') {
       const queued = await db.atomic(async (tx) => {
         const candidateId = randomUUID();
@@ -1466,23 +1670,38 @@ export class InstagramCentral {
         if (!current) throw new Error('Missing outbound message');
         if (current.request_fingerprint !== fingerprint)
           throw new DomainError('IDEMPOTENCY_CONFLICT', 'Chave reutilizada com outra mensagem.');
+        const target =
+          current.status === 'queued'
+            ? await this.comments.authorizeSend(
+                tx,
+                user,
+                conversationId,
+                current.id as string,
+                context.external_user_id,
+              )
+            : undefined;
         const claimed = await tx.update(
           'messages',
           { id: current.id, status: 'queued' },
           { $set: { status: 'sending', sending_started_at: await tx.now() } },
         );
-        return { current, claimed: claimed.modifiedCount === 1 };
+        return { current, claimed: claimed.modifiedCount === 1, target };
       });
       messageId = queued.current.id as string;
       shouldSend = queued.claimed;
-      if (!shouldSend)
+      if (queued.target) recipient = queued.target;
+      if (!shouldSend) {
+        if (queued.current.private_reply_binding_pending)
+          return this.comments.completePrivateReply(messageId);
         return {
           id: messageId,
           status: queued.current.status,
           external_message_id: queued.current.external_message_id ?? null,
         };
+      }
     } else {
       const queued = await db.transaction(async (tx) => {
+        await tx.query('SELECT id FROM distribution_settings WHERE id=1 FOR UPDATE');
         await tx.query(
           `INSERT INTO messages(
              id,conversation_id,client_request_id,request_fingerprint,direction,sender_user_id,
@@ -1497,11 +1716,22 @@ export class InstagramCentral {
             status: string;
             request_fingerprint: string;
             external_message_id: string | null;
+            private_reply_binding_pending: boolean;
           }>('SELECT * FROM messages WHERE client_request_id=$1 FOR UPDATE', [requestId])
         ).rows[0];
         if (!current) throw new Error('Missing outbound message');
         if (current.request_fingerprint !== fingerprint)
           throw new DomainError('IDEMPOTENCY_CONFLICT', 'Chave reutilizada com outra mensagem.');
+        const target =
+          current.status === 'queued'
+            ? await this.comments.authorizeSend(
+                tx,
+                user,
+                conversationId,
+                current.id,
+                context.external_user_id,
+              )
+            : undefined;
         const claimed =
           (
             await tx.query<{ id: string }>(
@@ -1510,16 +1740,20 @@ export class InstagramCentral {
               [current.id],
             )
           ).rows.length === 1;
-        return { current, claimed };
+        return { current, claimed, target };
       });
       messageId = queued.current.id;
       shouldSend = queued.claimed;
-      if (!shouldSend)
+      if (queued.target) recipient = queued.target;
+      if (!shouldSend) {
+        if (queued.current.private_reply_binding_pending)
+          return this.comments.completePrivateReply(messageId);
         return {
           id: messageId,
           status: queued.current.status,
           external_message_id: queued.current.external_message_id,
         };
+      }
     }
 
     let response: Response;
@@ -1533,7 +1767,7 @@ export class InstagramCentral {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            recipient: { id: context.external_user_id },
+            recipient,
             message: { text },
           }),
           signal: AbortSignal.timeout(15_000),
@@ -1548,6 +1782,7 @@ export class InstagramCentral {
       );
     }
     if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
       await this.setOutboundState(messageId, 'failed', undefined, `META_HTTP_${response.status}`);
       throw new DomainError(
         'INSTAGRAM_SEND_FAILED',
@@ -1566,6 +1801,12 @@ export class InstagramCentral {
         502,
       );
     }
+    if ('comment_id' in recipient)
+      return this.comments.confirmPrivateReply(
+        messageId,
+        result.data.recipient_id,
+        result.data.message_id,
+      );
     await this.setOutboundState(messageId, 'sent', result.data.message_id);
     return { id: messageId, status: 'sent', external_message_id: result.data.message_id };
   }
@@ -1674,13 +1915,23 @@ export async function registerInstagram(
   });
   let active: Promise<void> | undefined;
   let lastStaleSendRecoveryAt = 0;
+  let lastPrivateReplyRecoveryAt = 0;
   const tick = () => {
     if (!active) {
       const now = Date.now();
       const shouldRecoverStaleSends = now - lastStaleSendRecoveryAt >= staleSendRecoveryIntervalMs;
       if (shouldRecoverStaleSends) lastStaleSendRecoveryAt = now;
+      const shouldRecoverPrivateReplies = now - lastPrivateReplyRecoveryAt >= 15_000;
+      if (shouldRecoverPrivateReplies) lastPrivateReplyRecoveryAt = now;
       active = Promise.resolve()
         .then(() => (shouldRecoverStaleSends ? central.recoverStaleSends() : undefined))
+        .then(() =>
+          shouldRecoverPrivateReplies
+            ? central.comments
+                .recoverPrivateReplies()
+                .catch(() => app.log.error('Instagram private reply recovery failed'))
+            : undefined,
+        )
         .then(() => central.drain())
         .catch(() => app.log.error('Instagram inbox processing failed'))
         .finally(() => {
@@ -1690,9 +1941,25 @@ export async function registerInstagram(
   };
   const timer = config && runWorker ? setInterval(tick, 1000) : undefined;
   timer?.unref();
+  let profileActive: Promise<void> | undefined;
+  const profileTimer =
+    config && runWorker
+      ? setInterval(() => {
+          if (!profileActive)
+            profileActive = central
+              .drainProfiles()
+              .catch(() => app.log.error('Instagram profile processing failed'))
+              .finally(() => {
+                profileActive = undefined;
+              });
+        }, 15_000)
+      : undefined;
+  profileTimer?.unref();
   app.addHook('onClose', async () => {
     if (timer) clearInterval(timer);
+    if (profileTimer) clearInterval(profileTimer);
     await active;
+    await profileActive;
   });
   return central;
 }

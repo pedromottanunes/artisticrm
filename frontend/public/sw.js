@@ -51,7 +51,7 @@ self.addEventListener('push', (event) => {
         /* A malformed push still shows a generic notice. */
       }
       const requestedPage = data.page === 'distribution' ? 'central' : data.page;
-      const page = ['mine', 'pool', 'central', 'settings', 'inbox'].includes(requestedPage)
+      const page = ['mine', 'pool', 'comments', 'central', 'settings', 'inbox'].includes(requestedPage)
         ? requestedPage
         : 'mine';
       await self.registration.showNotification(data.title || 'Artisti CRM', {
@@ -80,7 +80,7 @@ self.addEventListener('notificationclick', (event) => {
         event.notification.data?.page === 'distribution'
           ? 'central'
           : event.notification.data?.page;
-      const page = ['mine', 'pool', 'central', 'settings', 'inbox'].includes(requestedPage)
+      const page = ['mine', 'pool', 'comments', 'central', 'settings', 'inbox'].includes(requestedPage)
         ? requestedPage
         : 'mine';
       const lead = event.notification.data?.opportunityId;

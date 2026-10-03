@@ -7,6 +7,7 @@ import { seedDemo, DEMO_PASSWORD } from '../src/seed.js';
 import { buildApp } from '../src/app.js';
 import { InstagramCentral, instagramConfig, type InstagramConfig } from '../src/instagram.js';
 import type { User } from '../src/types.js';
+import { checkChatEfficiency } from './chat-efficiency-checks.js';
 
 const config: InstagramConfig = {
   appSecret: 'instagram-test-secret-only',
@@ -73,6 +74,79 @@ beforeEach(async () => {
 });
 
 after(async () => db.close());
+
+test('chat efficiency: bounded asynchronous profile lookups and compact history (SQL)', async () => {
+  await checkChatEfficiency(crm, manager);
+});
+
+test('media fallback cancels rejected bodies and forwards browser cancellation', async () => {
+  let cancelled = false;
+  const central = new InstagramCentral(
+    crm,
+    config,
+    async () =>
+      new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { status: 403 },
+      ),
+  );
+  const value = payload('media-cancel');
+  Object.assign(value.entry[0].messaging[0].message, {
+    attachments: [{ type: 'image', payload: { url: 'https://lookaside.fbsbx.com/test.jpg' } }],
+  });
+  const bytes = raw(value);
+  await central.receive(bytes, signature(bytes));
+  await central.drain();
+  const conversation = (await central.list(manager, 'all')).conversations[0];
+  const message = (await central.messages(manager, String(conversation.id))).messages[0];
+  await assert.rejects(
+    central.streamAttachment(manager, String(conversation.id), String(message.id), 0),
+    /indisponível/,
+  );
+  assert.equal(cancelled, true, 'Rejected CDN bodies must be released');
+  let started!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  let aborted = false;
+  const slow = new InstagramCentral(
+    crm,
+    config,
+    async (_url, init) =>
+      new Promise<Response>((_resolve, reject) => {
+        assert.ok(init?.signal);
+        init.signal.addEventListener(
+          'abort',
+          () => {
+            aborted = true;
+            reject(new Error('Aborted'));
+          },
+          { once: true },
+        );
+        started();
+      }),
+  );
+  const controller = new AbortController();
+  const pending = assert.rejects(
+    slow.streamAttachment(
+      manager,
+      String(conversation.id),
+      String(message.id),
+      0,
+      undefined,
+      controller.signal,
+    ),
+    /carregar/,
+  );
+  await ready;
+  controller.abort();
+  await pending;
+  assert.equal(aborted, true);
+});
 
 test('Instagram fica desligado por padrão e configuração parcial falha fechada', () => {
   assert.equal(instagramConfig({}), undefined);
@@ -419,6 +493,25 @@ test('rotas autenticadas listam e leem conversa sem expor token', async () => {
     const list = await app.inject({ url: '/api/v1/conversations', headers: { cookie } });
     assert.equal(list.statusCode, 200);
     assert.equal(list.json().conversations.length, 1);
+    const revision = list.json().revision;
+    assert.match(revision, /^[a-f0-9]{64}$/);
+    const unchanged = await app.inject({
+      url: `/api/v1/conversations?revision=${revision}`,
+      headers: { cookie },
+    });
+    assert.deepEqual(unchanged.json(), { unchanged: true, revision });
+    assert.ok(unchanged.body.length < list.body.length);
+    assert.equal(
+      (await app.inject({ url: `/api/v1/conversations?revision=${revision}` })).statusCode,
+      401,
+    );
+    await db.query("UPDATE contacts SET name='Nome atualizado'");
+    const changed = await app.inject({
+      url: `/api/v1/conversations?revision=${revision}`,
+      headers: { cookie },
+    });
+    assert.notEqual(changed.json().revision, revision);
+    assert.equal(changed.json().conversations[0].contact_name, 'Nome atualizado');
   } finally {
     await app.close();
   }
@@ -638,10 +731,13 @@ test('consulta o perfil do remetente e exibe nome, usuario e foto sem bloquear o
   const body = raw(payload('ig-profile-message', 'ig-profile-sender'));
   await central.receive(body, signature(body));
   await central.drain();
+  assert.equal(requests.length, 0, 'profile enrichment never delays incoming messages');
+  await central.drainProfiles();
 
   const second = raw(payload('ig-profile-message-2', 'ig-profile-sender'));
   await central.receive(second, signature(second));
   await central.drain();
+  await central.drainProfiles();
 
   assert.equal(requests.length, 1);
   assert.equal(

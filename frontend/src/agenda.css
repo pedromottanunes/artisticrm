@@ -1,0 +1,30 @@
+.agenda-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 20px;
+}
+.agenda-controls label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.agenda-controls input {
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.agenda-message,
+.agenda-panel > .form-error {
+  padding: 14px 20px;
+}
+@media (max-width: 600px) {
+  .agenda-panel .panel-heading {
+    padding: 16px;
+  }
+  .agenda-controls {
+    padding: 12px 16px;
+    gap: 8px;
+  }
+}

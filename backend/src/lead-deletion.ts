@@ -58,10 +58,12 @@ export async function deleteLeadData(
     const instagramInbox = await tx.many('instagram_webhook_inbox', {
       $or: [{ opportunity_id: id }, { event_id: { $in: events.map((e) => e.external_id) } }],
     });
+    const comments = await tx.many('instagram_comments', { opportunity_id: id });
     for (const externalId of new Set([
       ...events.map((e) => e.external_id),
       ...inbox.map((e) => e.event_id),
       ...instagramInbox.map((e) => e.event_id),
+      ...comments.map((c) => `instagram-comment:${c.account_id}:${c.comment_id}`),
     ]))
       await tx
         .collection('deleted_inbound_events')
@@ -73,9 +75,20 @@ export async function deleteLeadData(
     const appointments = await tx.many('appointments', { opportunity_id: id });
     await tx.remove('push_records', {
       kind: { $in: ['event', 'job'] },
-      $or: [{ 'data.opportunityId': id }, { 'data.event.data.opportunityId': id }],
+      $or: [
+        { 'data.opportunityId': id },
+        { 'data.event.data.opportunityId': id },
+        ...comments.flatMap((comment) => [
+          { 'data.accountId': comment.account_id, 'data.commentId': comment.comment_id },
+          {
+            'data.event.data.accountId': comment.account_id,
+            'data.event.data.commentId': comment.comment_id,
+          },
+        ]),
+      ],
     });
     await tx.remove('claims', { 'response.id': id });
+    await tx.remove('instagram_comments', { opportunity_id: id });
     await tx.remove('operation_receipts', {
       'response.id': { $in: [id, ...appointments.map((a) => a.id)] },
     });
@@ -95,6 +108,11 @@ export async function deleteLeadData(
       'inbound_events',
     ])
       await tx.remove(collection, { opportunity_id: id });
+    await tx.update(
+      'contact_identities',
+      { profile_opportunity_id: id },
+      { $set: { profile_opportunity_id: null, profile_pending: false } },
+    );
     await tx.remove('opportunities', { id });
     if (!shared) {
       await tx.remove('contact_identities', { contact_id: row.contact_id });
@@ -130,10 +148,17 @@ export async function deleteLeadData(
         [id, events.map((event) => event.external_id)],
       )
     ).rows;
+    const comments = (
+      await tx.query<{ account_id: string; comment_id: string }>(
+        'SELECT account_id,comment_id FROM instagram_comments WHERE opportunity_id=$1',
+        [id],
+      )
+    ).rows;
     for (const externalId of new Set([
       ...events.map((e) => e.external_id),
       ...inbox.map((e) => e.event_id),
       ...instagramInbox.map((e) => e.event_id),
+      ...comments.map((c) => `instagram-comment:${c.account_id}:${c.comment_id}`),
     ]))
       await tx.query('INSERT INTO deleted_inbound_events(hash) VALUES($1) ON CONFLICT DO NOTHING', [
         eventHash(externalId),
@@ -144,6 +169,15 @@ export async function deleteLeadData(
       [id],
     );
     await tx.query("DELETE FROM claims WHERE response->>'id'=$1", [id]);
+    await tx.query(
+      `DELETE FROM push_records p WHERE kind IN ('event','job') AND EXISTS (
+      SELECT 1 FROM instagram_comments c WHERE c.opportunity_id=$1 AND (
+        (p.data->>'accountId'=c.account_id AND p.data->>'commentId'=c.comment_id) OR
+        (p.data->'event'->'data'->>'accountId'=c.account_id AND p.data->'event'->'data'->>'commentId'=c.comment_id)
+      ))`,
+      [id],
+    );
+    await tx.query('DELETE FROM instagram_comments WHERE opportunity_id=$1', [id]);
     await tx.query(
       `DELETE FROM operation_receipts WHERE response->>'id'=$1 OR response->>'id' IN
       (SELECT id::text FROM appointments WHERE opportunity_id=$1::uuid)`,

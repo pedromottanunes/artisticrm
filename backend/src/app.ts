@@ -3,6 +3,8 @@ import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import { randomBytes } from 'node:crypto';
+import { chatSnapshot } from './chat-snapshot.js';
+import { agendaPage, agendaQuery } from './agenda.js';
 import { Readable } from 'node:stream';
 import { z, ZodError } from 'zod';
 import { registerWhatsApp, type WhatsAppConfig } from './whatsapp.js';
@@ -110,9 +112,13 @@ export async function buildApp(
         .header('Strict-Transport-Security', 'max-age=31536000')
         .header(
           'Content-Security-Policy',
-          "default-src 'self'; script-src 'self'; worker-src 'self'; manifest-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.cdninstagram.com https://*.fbcdn.net https://lookaside.fbsbx.com https://*.fbsbx.com; media-src 'self' https://*.cdninstagram.com https://*.fbcdn.net https://lookaside.fbsbx.com https://*.fbsbx.com; frame-src 'self' https://www.instagram.com; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
+          "default-src 'self'; script-src 'self'; worker-src 'self'; manifest-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.cdninstagram.com https://*.fbcdn.net https://lookaside.fbsbx.com https://*.fbsbx.com; media-src 'self' https://*.cdninstagram.com https://*.fbcdn.net https://lookaside.fbsbx.com https://*.fbsbx.com; frame-src 'self' https://www.instagram.com; font-src 'self'; connect-src 'self' https://*.cdninstagram.com https://*.fbcdn.net https://lookaside.fbsbx.com https://*.fbsbx.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
         );
-    if (!request.url.startsWith('/api/')) return;
+    // The router decodes static path segments. Authorize the matched route, not
+    // the raw URL (e.g. /%61pi/ must have exactly the same protection as /api/).
+    const matchedPath = request.routeOptions.url;
+    const apiPath = matchedPath?.startsWith('/api/') ? matchedPath : request.url.split('?')[0];
+    if (!apiPath.startsWith('/api/')) return;
     if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(request.method)) {
       const origin = request.headers.origin;
       const allowedOrigins = options.production
@@ -132,7 +138,7 @@ export async function buildApp(
       if (request.headers['x-artisti-client'] !== 'web')
         throw new DomainError('FORBIDDEN', 'Cabeçalho de segurança ausente.', 403);
     }
-    if (request.url.split('?')[0] === '/api/v1/auth/login' || request.url === '/api/health') return;
+    if (apiPath === '/api/v1/auth/login' || apiPath === '/api/health') return;
     const token = request.cookies.artisti_session;
     if (!token) throw new DomainError('UNAUTHENTICATED', 'Entre para continuar.', 401);
     const session =
@@ -168,7 +174,7 @@ export async function buildApp(
     if (
       user.must_change_password &&
       !['/api/v1/me', '/api/v1/workspace', '/api/v1/auth/password', '/api/v1/auth/logout'].includes(
-        request.url.split('?')[0],
+        apiPath,
       )
     )
       throw new DomainError(
@@ -310,7 +316,18 @@ export async function buildApp(
           demo: !options.production && db.kind !== 'mongo',
           limit: 0,
         }
-      : { ...(await crm.snapshot(request.user)), demo: !options.production && db.kind !== 'mongo' },
+      : {
+          ...(await crm.snapshot(
+            request.user,
+            z
+              .object({ appointments: z.enum(['include', 'omit']).default('include') })
+              .parse(request.query).appointments === 'include',
+          )),
+          demo: !options.production && db.kind !== 'mongo',
+        },
+  );
+  app.get('/api/v1/appointments', async (request) =>
+    agendaPage(db, request.user, agendaQuery.parse(request.query)),
   );
   app.get('/api/v1/distribution/board', async (request) => {
     requireManager(request.user);
@@ -626,6 +643,7 @@ export async function buildApp(
     options.pushSender,
   );
   registerShortcuts(app, db, () => crm.now());
+  instagram.comments.register(app, options.reconcile !== false);
   app.get('/api/v1/whatsapp/status', async (request) => {
     requireManager(request.user);
     return central.status();
@@ -656,11 +674,20 @@ export async function buildApp(
   });
   app.get('/api/v1/conversations', async (request) => {
     const query = z
-      .object({ view: z.enum(['mine', 'reserved', 'pool', 'all']).optional() })
+      .object({
+        view: z.enum(['mine', 'reserved', 'pool', 'all']).optional(),
+        revision: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
+      })
       .parse(request.query);
-    return instagram.list(
-      request.user,
-      query.view ?? (request.user.role === 'manager' ? 'all' : 'mine'),
+    return chatSnapshot(
+      await instagram.list(
+        request.user,
+        query.view ?? (request.user.role === 'manager' ? 'all' : 'mine'),
+      ),
+      query.revision,
     );
   });
   app.get('/api/v1/conversations/:id/messages', async (request) => {
@@ -675,12 +702,15 @@ export async function buildApp(
     async (request, reply) => {
       const params = attachmentParams.parse(request.params);
       const range = typeof request.headers.range === 'string' ? request.headers.range : undefined;
+      const controller = new AbortController();
+      reply.raw.once('close', () => controller.abort());
       const media = await instagram.streamAttachment(
         request.user,
         params.id,
         params.messageId,
         params.index,
         range,
+        controller.signal,
       );
       reply.code(media.status).type(media.contentType);
       if (media.contentLength) reply.header('Content-Length', media.contentLength);
@@ -689,6 +719,7 @@ export async function buildApp(
       return reply.send(
         Readable.fromWeb(
           media.body as unknown as import('node:stream/web').ReadableStream<Uint8Array>,
+          { signal: controller.signal },
         ),
       );
     },
@@ -697,11 +728,14 @@ export async function buildApp(
     '/api/v1/conversations/:id/messages/:messageId/attachments/:index/download',
     async (request, reply) => {
       const params = attachmentParams.parse(request.params);
+      const controller = new AbortController();
+      reply.raw.once('close', () => controller.abort());
       const media = await instagram.downloadImage(
         request.user,
         params.id,
         params.messageId,
         params.index,
+        controller.signal,
       );
       reply
         .type(media.contentType)
@@ -710,6 +744,7 @@ export async function buildApp(
       return reply.send(
         Readable.fromWeb(
           media.body as unknown as import('node:stream/web').ReadableStream<Uint8Array>,
+          { signal: controller.signal },
         ),
       );
     },

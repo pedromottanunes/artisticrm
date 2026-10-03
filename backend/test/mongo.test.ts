@@ -21,6 +21,11 @@ import { checkDistribution } from './distribution-checks.js';
 import { checkPush } from './push-checks.js';
 import { checkReports } from './report-checks.js';
 import { checkShortcuts } from './shortcut-checks.js';
+import { checkComments } from './comment-checks.js';
+import { checkChatEfficiency } from './chat-efficiency-checks.js';
+import { checkPrivateReplyRecovery } from './private-reply-recovery-checks.js';
+import { checkEncodedRoutes } from './security-checks.js';
+import { checkAgenda } from './agenda-checks.js';
 import {
   checkDeletePermissions,
   checkDeleteCleanup,
@@ -98,7 +103,25 @@ const input = (n = 1) => ({
   unit: 'Teste',
   source: 'Cadastro manual',
 });
+
+test('comment pool: atomic ownership, private replies, incoming Direct and deletion (MongoDB)', async () => {
+  await checkComments(ops, users, manager);
+});
 const lead = (n = 1) => ops.ingest(input(n), `event-${n}`, manager.id);
+
+test('Mongo: encoded API paths preserve authentication, CSRF and roles', () =>
+  checkEncodedRoutes(db, password, users[0].email));
+
+test('Mongo: agenda pages are bounded, stable and scoped to their owner', () =>
+  checkAgenda(ops, manager, users));
+
+test('chat efficiency: bounded asynchronous profile lookups and compact history (MongoDB)', async () => {
+  await checkChatEfficiency(ops, manager);
+});
+
+test('private reply recovery: durable receipt, atomic binding, restart and incoming reply (MongoDB)', async () => {
+  await checkPrivateReplyRecovery(ops, users[0], manager);
+});
 test('Mongo: retenção técnica e índices dos caminhos frequentes ficam configurados', async () => {
   const receiptIndexes = await db.collection('operation_receipts').listIndexes().toArray();
   const instagramInboxIndexes = await db
@@ -904,6 +927,7 @@ test('Mongo: Direct do Instagram cria identidade sem telefone, conversa e mensag
     central.drain(),
     new InstagramCentral(ops, profileConfig, profileFetch).drain(),
   ]);
+  await central.drainProfiles();
   assert.equal(await db.count('contacts'), 1);
   assert.equal(await db.count('contact_identities'), 1);
   assert.equal(await db.count('opportunities'), 1);

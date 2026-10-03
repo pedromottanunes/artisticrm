@@ -16,6 +16,7 @@ import './manager-reports.css';
 import './inbox.css';
 import './shortcuts.css';
 import './clinical-light.css';
+import './comment-pool.css';
 import './public-legal.css';
 import { registerDeviceWorker } from './pwa';
 import { PublicLegalPage, type PublicLegalPageName } from './public-legal';

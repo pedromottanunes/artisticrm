@@ -1,4 +1,5 @@
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { commandFingerprint, matchesCommandFingerprint } from './command-fingerprint.js';
 import { CRM } from './crm.js';
 import { deleteLeadData, type DeleteLeadInput } from './lead-deletion.js';
 import type { Sql } from './db.js';
@@ -49,7 +50,6 @@ export class Operations extends CRM {
     work: () => Promise<T>,
   ): Promise<T> {
     // Commands always lock the actor exclusively before calling this method.
-    const fingerprint = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
     const prior = (
       await tx.query<{ fingerprint: string; response: T }>(
         'SELECT * FROM operation_receipts WHERE actor_id=$1 AND key=$2',
@@ -57,11 +57,12 @@ export class Operations extends CRM {
       )
     ).rows[0];
     if (prior) {
-      if (prior.fingerprint !== fingerprint)
+      if (!(await matchesCommandFingerprint(payload, prior.fingerprint)))
         throw new DomainError('IDEMPOTENCY_CONFLICT', 'Chave reutilizada com dados diferentes.');
       return prior.response;
     }
     const result = await work();
+    const fingerprint = await commandFingerprint(payload);
     await tx.query('INSERT INTO operation_receipts VALUES($1,$2,$3,$4,$5)', [
       user.id,
       key,

@@ -13,6 +13,8 @@ import { seedDemo, DEMO_PASSWORD } from '../src/seed.js';
 import { buildApp } from '../src/app.js';
 import type { User, Opportunity } from '../src/types.js';
 import { checkShortcuts } from './shortcut-checks.js';
+import { checkEncodedRoutes } from './security-checks.js';
+import { checkAgenda } from './agenda-checks.js';
 
 let db: Database, ops: Operations, manager: User, users: User[];
 let now = new Date('2026-09-10T12:00:00Z');
@@ -91,6 +93,12 @@ test('exclusão SQL: reentrega WhatsApp não recria lead excluído', () =>
   checkDeleteWebhook(ops, manager));
 test('atalhos SQL: são privados, validados, versionados e idempotentes', () =>
   checkShortcuts(db, manager, users, DEMO_PASSWORD, () => now));
+
+test('SQL: encoded API paths preserve authentication, CSRF and roles', () =>
+  checkEncodedRoutes(db, DEMO_PASSWORD));
+
+test('SQL: agenda pages are bounded, stable and scoped to their owner', () =>
+  checkAgenda(ops, manager, users));
 
 test('transferência é auditada, idempotente e não muda cursor nem marca aceite', async () => {
   const { id } = await lead();

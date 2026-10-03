@@ -72,11 +72,41 @@ const insightSchema = z.object({
 });
 
 const insightsResponseSchema = z.object({
-  data: z.array(insightSchema).max(10_000),
+  data: z.array(insightSchema).max(500),
   paging: z
-    .object({ cursors: z.object({ after: z.string().max(2048).optional() }).optional() })
+    .object({
+      cursors: z.object({ after: z.string().max(2048).optional() }).optional(),
+      next: z.string().max(16_384).optional(),
+    })
     .optional(),
 });
+
+// Small clinic workloads must not consume the entire web process while syncing ads.
+// Reject incomplete/oversized results before replacing any previously synced rows.
+const syncLimits = {
+  pages: 20,
+  rows: 10_000,
+  pageBytes: 2 * 1024 * 1024,
+  totalBytes: 8 * 1024 * 1024,
+};
+async function readInsightPage(response: Response) {
+  if (!response.body) throw new Error('INVALID_META_RESPONSE');
+  const reader = response.body.getReader();
+  let size = 0;
+  const chunks: Uint8Array[] = [];
+  try {
+    for (;;) {
+      const part = await reader.read();
+      if (part.done) break;
+      size += part.value.byteLength;
+      if (size > syncLimits.pageBytes) throw new Error('META_SYNC_LIMIT');
+      chunks.push(part.value);
+    }
+    return { value: JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown, size };
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+}
 
 function formatDate(date: Date, timeZone = 'America/Sao_Paulo') {
   try {
@@ -173,13 +203,14 @@ export class MetaMarketing {
           },
           { session: tx.session },
         );
-        for (const row of rows) {
+        const last = rows.at(-1);
+        if (last) {
           await tx.collection('meta_marketing_accounts').updateOne(
             { account_id: config.adAccountId },
             {
               $set: {
-                account_name: row.account_name,
-                currency: row.account_currency,
+                account_name: last.account_name,
+                currency: last.account_currency,
                 status: 'active',
                 updated_at: updatedAt,
               },
@@ -187,30 +218,37 @@ export class MetaMarketing {
             },
             { upsert: true, session: tx.session },
           );
-          await tx.collection('meta_marketing_daily_insights').updateOne(
-            {
-              account_id: config.adAccountId,
-              date_start: row.date_start,
-              ad_id: row.ad_id,
-            },
-            {
-              $set: {
-                date_stop: row.date_stop,
-                campaign_id: row.campaign_id,
-                campaign_name: row.campaign_name,
-                adset_id: row.adset_id,
-                adset_name: row.adset_name,
-                ad_name: row.ad_name,
-                currency: row.account_currency,
-                spend: Number(row.spend),
-                impressions: Number(row.impressions),
-                reach: Number(row.reach),
-                clicks: Number(row.clicks),
-                actions: row.actions,
-                updated_at: updatedAt,
+        }
+        for (let offset = 0; offset < rows.length; offset += 500) {
+          await tx.collection('meta_marketing_daily_insights').bulkWrite(
+            rows.slice(offset, offset + 500).map((row) => ({
+              updateOne: {
+                filter: {
+                  account_id: config.adAccountId,
+                  date_start: row.date_start,
+                  ad_id: row.ad_id,
+                },
+                update: {
+                  $set: {
+                    date_stop: row.date_stop,
+                    campaign_id: row.campaign_id,
+                    campaign_name: row.campaign_name,
+                    adset_id: row.adset_id,
+                    adset_name: row.adset_name,
+                    ad_name: row.ad_name,
+                    currency: row.account_currency,
+                    spend: Number(row.spend),
+                    impressions: Number(row.impressions),
+                    reach: Number(row.reach),
+                    clicks: Number(row.clicks),
+                    actions: row.actions,
+                    updated_at: updatedAt,
+                  },
+                },
+                upsert: true,
               },
-            },
-            { upsert: true, session: tx.session },
+            })),
+            { ordered: true, session: tx.session },
           );
         }
       });
@@ -221,19 +259,27 @@ export class MetaMarketing {
          WHERE account_id=$1 AND date_start BETWEEN $2::date AND $3::date`,
         [config.adAccountId, since, until],
       );
-      for (const row of rows) {
+      const last = rows.at(-1);
+      if (last) {
         await tx.query(
           `INSERT INTO meta_marketing_accounts(account_id,account_name,currency,status)
            VALUES ($1,$2,$3,'active')
            ON CONFLICT (account_id) DO UPDATE SET account_name=EXCLUDED.account_name,
              currency=EXCLUDED.currency,status='active',updated_at=clock_timestamp()`,
-          [config.adAccountId, row.account_name, row.account_currency],
+          [config.adAccountId, last.account_name, last.account_currency],
         );
+      }
+      for (let offset = 0; offset < rows.length; offset += 500) {
+        const batch = rows.slice(offset, offset + 500);
         await tx.query(
           `INSERT INTO meta_marketing_daily_insights(
              account_id,date_start,date_stop,campaign_id,campaign_name,adset_id,adset_name,
              ad_id,ad_name,currency,spend,impressions,reach,clicks,actions
-           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+           ) SELECT $1,r.date_start,r.date_stop,r.campaign_id,r.campaign_name,r.adset_id,r.adset_name,
+               r.ad_id,r.ad_name,r.account_currency,r.spend,r.impressions,r.reach,r.clicks,r.actions
+             FROM jsonb_to_recordset($2::jsonb) AS r(
+               date_start date,date_stop date,campaign_id text,campaign_name text,adset_id text,adset_name text,
+               ad_id text,ad_name text,account_currency text,spend numeric,impressions bigint,reach bigint,clicks bigint,actions jsonb)
            ON CONFLICT (account_id,date_start,ad_id) DO UPDATE SET
              date_stop=EXCLUDED.date_stop,campaign_id=EXCLUDED.campaign_id,
              campaign_name=EXCLUDED.campaign_name,adset_id=EXCLUDED.adset_id,
@@ -241,23 +287,7 @@ export class MetaMarketing {
              currency=EXCLUDED.currency,spend=EXCLUDED.spend,impressions=EXCLUDED.impressions,
              reach=EXCLUDED.reach,clicks=EXCLUDED.clicks,actions=EXCLUDED.actions,
              updated_at=clock_timestamp()`,
-          [
-            config.adAccountId,
-            row.date_start,
-            row.date_stop,
-            row.campaign_id,
-            row.campaign_name,
-            row.adset_id,
-            row.adset_name,
-            row.ad_id,
-            row.ad_name,
-            row.account_currency,
-            row.spend,
-            row.impressions,
-            row.reach,
-            row.clicks,
-            JSON.stringify(row.actions),
-          ],
+          [config.adAccountId, JSON.stringify(batch)],
         );
       }
     });
@@ -289,10 +319,13 @@ export class MetaMarketing {
       'clicks',
       'actions',
     ].join(',');
-    const all: z.infer<typeof insightSchema>[] = [];
+    const all = new Map<string, z.infer<typeof insightSchema>>();
+    const cursors = new Set<string>();
+    let bytes = 0;
+    let complete = false;
     let after: string | undefined;
     try {
-      for (let page = 0; page < 1000; page++) {
+      for (let page = 0; page < syncLimits.pages; page++) {
         const params = new URLSearchParams({
           fields,
           level: 'ad',
@@ -305,24 +338,49 @@ export class MetaMarketing {
           `https://graph.facebook.com/${config.graphApiVersion}/${config.adAccountId}/insights?${params}`,
           {
             headers: { Authorization: `Bearer ${config.accessToken}` },
+            redirect: 'error',
             signal: AbortSignal.timeout(30_000),
           },
         );
-        if (!response.ok) throw new Error(`META_HTTP_${response.status}`);
-        const parsed = insightsResponseSchema.safeParse(await response.json().catch(() => null));
+        if (!response.ok) {
+          await response.body?.cancel().catch(() => {});
+          throw new Error(`META_HTTP_${response.status}`);
+        }
+        const body = await readInsightPage(response);
+        bytes += body.size;
+        if (bytes > syncLimits.totalBytes) throw new Error('META_SYNC_LIMIT');
+        const parsed = insightsResponseSchema.safeParse(body.value);
         if (!parsed.success) throw new Error('INVALID_META_RESPONSE');
-        all.push(...parsed.data.data);
+        for (const row of parsed.data.data) {
+          if (
+            row.account_id !== config.adAccountId.replace(/^act_/, '') ||
+            row.date_start < since ||
+            row.date_start > until
+          )
+            throw new Error('INVALID_META_RESPONSE');
+          all.set(`${row.date_start}:${row.ad_id}`, row);
+        }
+        if (all.size > syncLimits.rows) throw new Error('META_SYNC_LIMIT');
         const next = parsed.data.paging?.cursors?.after;
-        if (!next || next === after) break;
+        // Cursors can exist on the last page. Only paging.next signals more data;
+        // rebuild the request ourselves instead of following a credential-bearing URL.
+        if (!parsed.data.paging?.next) {
+          complete = true;
+          break;
+        }
+        if (!next) throw new Error('INVALID_META_RESPONSE');
+        if (cursors.has(next)) throw new Error('META_PAGINATION_CYCLE');
+        cursors.add(next);
         after = next;
       }
-      await this.persist(all, since, until);
+      if (!complete) throw new Error('META_SYNC_LIMIT');
+      await this.persist([...all.values()], since, until);
       await this.setSyncState('idle', {
         completed: this.clock(),
         error: null,
-        rows: all.length,
+        rows: all.size,
       });
-      return { rows_synced: all.length };
+      return { rows_synced: all.size };
     } catch (error) {
       const code =
         error instanceof Error && /^META_HTTP_\d+$/.test(error.message)

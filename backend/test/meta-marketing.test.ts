@@ -51,7 +51,10 @@ function paginatedFetch(calls: string[]): MetaMarketingFetch {
       ? { data: [insight('ad-3', 'campaign-2', '5')] }
       : {
           data: [insight('ad-1', 'campaign-1', '10'), insight('ad-2', 'campaign-1', '20')],
-          paging: { cursors: { after: 'synthetic-next-page' } },
+          paging: {
+            cursors: { after: 'synthetic-next-page' },
+            next: 'https://graph.facebook.com/next',
+          },
         };
     return new Response(JSON.stringify(body), {
       status: 200,
@@ -82,6 +85,61 @@ after(async () => db.close());
 test('Marketing API fica desligada por padrão e configuração parcial falha fechada', () => {
   assert.equal(metaMarketingConfig({}), undefined);
   assert.throws(() => metaMarketingConfig({ META_MARKETING_ENABLED: 'true' }), /incompleta/);
+});
+
+test('sync respects final-page cursors, deduplicates rows and never follows next URLs', async () => {
+  let calls = 0;
+  const marketing = new MetaMarketing(
+    db,
+    config,
+    async (input, options) => {
+      calls++;
+      assert.equal(new URL(String(input)).hostname, 'graph.facebook.com');
+      assert.equal(options?.redirect, 'error');
+      return Response.json({
+        data: [insight('duplicate', 'campaign', '10'), insight('duplicate', 'campaign', '20')],
+        paging: { cursors: { after: 'last-cursor' } },
+      });
+    },
+    () => now,
+  );
+  assert.deepEqual(await marketing.sync(), { rows_synced: 1 });
+  assert.equal(calls, 1);
+  assert.equal((await marketing.report('2026-09-23', '2026-09-23')).spend, 20);
+});
+
+test('sync failures keep previous data: cycles, too many pages, oversized bodies and wrong accounts', async () => {
+  await new MetaMarketing(db, config, paginatedFetch([]), () => now).sync();
+  for (const failure of ['cycle', 'pages', 'size', 'account', 'http'] as const) {
+    let calls = 0;
+    const marketing = new MetaMarketing(
+      db,
+      config,
+      async () => {
+        calls++;
+        if (failure === 'size') return new Response('x'.repeat(2 * 1024 * 1024 + 1));
+        if (failure === 'http') return new Response(null, { status: 429 });
+        const row = insight('new-ad', 'new-campaign', '500');
+        if (failure === 'account') row.account_id = 'other-account';
+        return Response.json({
+          data: [row],
+          ...(failure !== 'account'
+            ? {
+                paging: {
+                  cursors: { after: failure === 'cycle' ? 'repeated' : String(calls) },
+                  next: 'https://never-follow.example/next',
+                },
+              }
+            : {}),
+        });
+      },
+      () => now,
+    );
+    await assert.rejects(marketing.sync(), { code: 'META_MARKETING_SYNC_FAILED' });
+    assert.equal((await marketing.status()).state, 'error');
+    assert.equal((await marketing.report('2026-09-23', '2026-09-23')).spend, 35);
+    assert.ok(calls <= 20);
+  }
 });
 
 test('sincroniza páginas, atualiza insights e não expõe credenciais no status', async () => {

@@ -1,6 +1,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import pg from 'pg';
 import { readFile } from 'node:fs/promises';
+import { protectLegacySqlReceipts } from './command-fingerprint.js';
 
 export interface Sql {
   query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>;
@@ -75,6 +76,11 @@ export async function migrate(db: Database) {
       '019_consultation_outcomes_and_sales.sql',
       '020_new_lead_status.sql',
       '022_message_shortcuts.sql',
+      '023_instagram_comments.sql',
+      '024_chat_efficiency.sql',
+      '025_private_reply_recovery.sql',
+      '026_receipt_security.sql',
+      '027_agenda_paging.sql',
     ]) {
       const version = file.split('_')[0];
       const done = await tx.query('SELECT version FROM schema_migrations WHERE version=$1', [
@@ -87,6 +93,7 @@ export async function migrate(db: Database) {
         .map((s) => s.trim())
         .filter(Boolean))
         await tx.query(statement);
+      if (version === '026') await protectLegacySqlReceipts(tx);
       await tx.query('INSERT INTO schema_migrations(version) VALUES($1)', [version]);
     }
   });

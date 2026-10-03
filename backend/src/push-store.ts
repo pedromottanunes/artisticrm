@@ -123,6 +123,7 @@ export async function enqueuePushEvent(
       'sale.updated',
       'lead.repeated',
       'message.received',
+      'comment.received.owned',
     ].includes(kind)
   )
     return;

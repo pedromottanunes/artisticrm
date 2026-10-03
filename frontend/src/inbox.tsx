@@ -26,6 +26,7 @@ import {
 import { Empty } from './components';
 
 interface ListResponse {
+  revision?: string;
   configured: boolean;
   conversations: ConversationSummary[];
 }
@@ -34,6 +35,7 @@ interface ThreadResponse {
   conversation_id: string;
   opportunity_id: string;
   can_send: boolean;
+  messaging_mode?: ConversationSummary['messaging_mode'];
   last_message_at: string;
   has_more: boolean;
   messages: ConversationMessage[];
@@ -227,26 +229,41 @@ function MediaAttachment({
   useEffect(() => {
     if (!sharedMedia || !shouldProbeSharedMedia) return;
     const controller = new AbortController();
-    let response: Response | undefined;
-    void fetch(previewUrl, {
-      headers: { Range: 'bytes=0-0' },
-      signal: controller.signal,
-    })
-      .then((result) => {
-        response = result;
+    const probe = async (url: string) => {
+      const result = await fetch(url, {
+        headers: { Range: 'bytes=0-0' },
+        credentials: url === previewUrl ? 'same-origin' : 'omit',
+        referrerPolicy: 'no-referrer',
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]),
+      });
+      try {
         if (!result.ok) throw new Error('media unavailable');
         const contentType = (result.headers.get('content-type') ?? '').toLowerCase();
-        if (contentType.startsWith('image/')) setSharedKind('image');
-        else if (contentType.startsWith('video/')) setSharedKind('video');
-        else throw new Error('unsupported media');
-      })
-      .catch((error: unknown) => {
+        if (contentType.startsWith('image/')) return 'image' as const;
+        if (contentType.startsWith('video/')) return 'video' as const;
+        throw new Error('unsupported media');
+      } finally {
+        // Even when the CDN ignores Range, do not download the entire file to identify it.
+        await result.body?.cancel().catch(() => {});
+      }
+    };
+    void (async () => {
+      try {
+        let kind: 'image' | 'video';
+        try {
+          kind = await probe(directUrl ?? previewUrl);
+        } catch (error) {
+          if (!directUrl || controller.signal.aborted) throw error;
+          // Some CDN URLs cannot be fetched with CORS, but still play directly.
+          kind = await probe(previewUrl);
+        }
+        if (!controller.signal.aborted) setSharedKind(kind);
+      } catch {
         if (!controller.signal.aborted) setFailed(true);
-        void error;
-      })
-      .finally(() => void response?.body?.cancel().catch(() => {}));
+      }
+    })();
     return () => controller.abort();
-  }, [previewUrl, probeAttempt, sharedMedia, shouldProbeSharedMedia]);
+  }, [directUrl, previewUrl, probeAttempt, sharedMedia, shouldProbeSharedMedia]);
 
   const retryMedia = () => {
     setFailed(false);
@@ -443,6 +460,12 @@ export function InstagramInbox({
   const loadedThreadVersion = useRef(new Map<string, string>());
   const listSequence = useRef(0);
   const threadSequence = useRef(0);
+  const threadLoadedAt = useRef(0);
+  const listRequest = useRef<AbortController | null>(null);
+  const threadRequest = useRef<{ id: string; controller: AbortController } | null>(null);
+  const listCache = useRef<ListResponse | null>(null);
+  const retryAfter = useRef(0);
+  const pollFailures = useRef(0);
   const inboxRef = useRef<HTMLElement>(null);
   const messageListRef = useRef<HTMLDivElement>(null);
   const stickToLatestMessage = useRef(true);
@@ -497,6 +520,10 @@ export function InstagramInbox({
     return () => {
       mounted.current = false;
       shortcutRequest.current?.abort();
+      listRequest.current?.abort();
+      listRequest.current = null;
+      threadRequest.current?.controller.abort();
+      threadRequest.current = null;
       selectedIdRef.current = '';
       threadSequence.current += 1;
       listSequence.current += 1;
@@ -546,11 +573,22 @@ export function InstagramInbox({
   const loadThread = useCallback(
     async (id: string, quiet = false, incremental = false) => {
       if (!mounted.current || !id || selectedIdRef.current !== id) return;
+      if (quiet && threadRequest.current?.id === id) return;
+      threadRequest.current?.controller.abort();
+      const controller = new AbortController();
+      threadRequest.current = { id, controller };
+      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]);
       const sequence = ++threadSequence.current;
       try {
         const current = threadRef.current;
         let append = Boolean(
-          incremental && current?.conversation_id === id && current.messages.length,
+          incremental &&
+          current?.conversation_id === id &&
+          current.messages.length &&
+          !current.messages.some(
+            (message) =>
+              message.direction === 'outbound' && ['sending', 'queued'].includes(message.status),
+          ),
         );
         let after = append ? current?.messages.at(-1)?.id : undefined;
         let result: ThreadResponse;
@@ -559,19 +597,29 @@ export function InstagramInbox({
         try {
           do {
             const suffix = after ? `?after=${encodeURIComponent(after)}` : '';
-            result = await api<ThreadResponse>(`/conversations/${id}/messages${suffix}`);
+            result = await api<ThreadResponse>(`/conversations/${id}/messages${suffix}`, {
+              signal,
+            });
             received.push(...result.messages);
             after = result.messages.at(-1)?.id ?? after;
             pages += 1;
-          } while (append && result.has_more && result.messages.length && pages < 10);
+          } while (append && result.has_more && result.messages.length && pages < 2);
+          // After a long absence only the latest visible window is useful.
+          if (append && result.has_more) {
+            append = false;
+            received.length = 0;
+            result = await api<ThreadResponse>(`/conversations/${id}/messages`, { signal });
+            received.push(...result.messages);
+          }
         } catch (error) {
           if (!(append && error instanceof ApiError && error.status === 400)) throw error;
           append = false;
           received.length = 0;
-          result = await api<ThreadResponse>(`/conversations/${id}/messages`);
+          result = await api<ThreadResponse>(`/conversations/${id}/messages`, { signal });
           received.push(...result.messages);
         }
-        if (sequence !== threadSequence.current || selectedIdRef.current !== id) return;
+        if (signal.aborted || sequence !== threadSequence.current || selectedIdRef.current !== id)
+          return;
         const base = append && current?.conversation_id === id ? current.messages : [];
         const merged = new Map(base.map((message) => [message.id, message]));
         for (const message of received) merged.set(message.id, message);
@@ -581,21 +629,34 @@ export function InstagramInbox({
         };
         const messageList = messageListRef.current;
         stickToLatestMessage.current =
-          !append ||
+          current?.conversation_id !== id ||
           !messageList ||
           messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight < 120;
         threadRef.current = next;
+        threadLoadedAt.current = Date.now();
         setThread(next);
         loadedThreadVersion.current.set(
           id,
           append && result!.has_more ? '' : String(result!.last_message_at),
         );
         onConnectionChange(true);
-        if (!append || received.some((message) => message.direction === 'inbound'))
+        if (
+          current?.conversation_id !== id ||
+          (current.messages.at(-1)?.id !== next.messages.at(-1)?.id &&
+            received.some((message) => message.direction === 'inbound'))
+        )
           void api(`/conversations/${id}/read`, { method: 'POST', body: '{}' }).catch(() => {});
       } catch (error) {
-        if (sequence !== threadSequence.current || selectedIdRef.current !== id) return;
-        if (!quiet) handleError(error);
+        if (
+          controller.signal.aborted ||
+          sequence !== threadSequence.current ||
+          selectedIdRef.current !== id
+        )
+          return;
+        onConnectionChange(false);
+        if (!quiet || (error instanceof ApiError && error.status === 401)) handleError(error);
+      } finally {
+        if (threadRequest.current?.controller === controller) threadRequest.current = null;
       }
     },
     [handleError, onConnectionChange],
@@ -604,11 +665,26 @@ export function InstagramInbox({
   const refresh = useCallback(
     async (quiet = false, forceThread = false) => {
       if (!mounted.current) return;
+      if (quiet && (listRequest.current || Date.now() < retryAfter.current)) return;
+      listRequest.current?.abort();
+      const controller = new AbortController();
+      listRequest.current = controller;
       const sequence = ++listSequence.current;
       try {
         const view = user.role === 'manager' ? 'all' : 'mine';
-        const result = await api<ListResponse>(`/conversations?view=${view}`);
+        const revision = listCache.current?.revision;
+        const response = await api<ListResponse | { unchanged: true; revision: string }>(
+          `/conversations?view=${view}${revision ? `&revision=${revision}` : ''}`,
+          {
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]),
+          },
+        );
         if (sequence !== listSequence.current) return;
+        const result = 'unchanged' in response ? listCache.current : response;
+        if (!result) return;
+        listCache.current = result;
+        pollFailures.current = 0;
+        retryAfter.current = 0;
         setConfigured(result.configured);
         setConversations(result.conversations);
         const targeted = targetOpportunityId
@@ -627,6 +703,8 @@ export function InstagramInbox({
         selectedIdRef.current = next;
         setSelectedId(next);
         if (previous !== next) {
+          threadRequest.current?.controller.abort();
+          threadRequest.current = null;
           threadSequence.current += 1;
           threadRef.current = null;
           setThread(null);
@@ -640,20 +718,39 @@ export function InstagramInbox({
           const summary = result.conversations.find((item) => item.id === next)!;
           const current = threadRef.current;
           const sameThread = current?.conversation_id === next;
-          if (sameThread && current.can_send !== summary.can_send) {
-            const updated = { ...current, can_send: summary.can_send };
+          if (
+            sameThread &&
+            (current.can_send !== summary.can_send ||
+              current.messaging_mode !== summary.messaging_mode)
+          ) {
+            const updated = {
+              ...current,
+              can_send: summary.can_send,
+              messaging_mode: summary.messaging_mode,
+            };
             threadRef.current = updated;
             setThread(updated);
           }
           const version = String(summary.last_message_at);
+          // A pending send can change status without adding a new message. Refresh
+          // only that exceptional case, and less frequently than the list.
+          const pendingStatus =
+            sameThread &&
+            current.messages.some(
+              (message) =>
+                message.direction === 'outbound' && ['sending', 'queued'].includes(message.status),
+            );
           if (
             forceThread ||
             previous !== next ||
             !sameThread ||
-            loadedThreadVersion.current.get(next) !== version
+            loadedThreadVersion.current.get(next) !== version ||
+            (pendingStatus && Date.now() - threadLoadedAt.current >= 15_000)
           )
-            void loadThread(next, quiet, sameThread);
+            void loadThread(next, quiet, sameThread && !forceThread);
         } else {
+          threadRequest.current?.controller.abort();
+          threadRequest.current = null;
           threadSequence.current += 1;
           threadRef.current = null;
           setThread(null);
@@ -662,9 +759,13 @@ export function InstagramInbox({
         }
         onConnectionChange(true);
       } catch (error) {
-        if (sequence !== listSequence.current || quiet) return;
-        handleError(error);
+        if (controller.signal.aborted || sequence !== listSequence.current) return;
+        retryAfter.current =
+          Date.now() + Math.min(30_000, 5000 * 2 ** Math.min(++pollFailures.current, 3));
+        onConnectionChange(false);
+        if (!quiet || (error instanceof ApiError && error.status === 401)) handleError(error);
       } finally {
+        if (listRequest.current === controller) listRequest.current = null;
         if (sequence === listSequence.current) setLoading(false);
       }
     },
@@ -741,6 +842,8 @@ export function InstagramInbox({
   };
 
   const returnToConversationList = () => {
+    threadRequest.current?.controller.abort();
+    threadRequest.current = null;
     setShortcutPickerOpen(false);
     mobileThreadOpenRef.current = false;
     setMobileThreadOpen(false);
@@ -935,6 +1038,9 @@ export function InstagramInbox({
                   key={message.id}
                   className={`thread-message ${message.direction === 'outbound' ? 'outbound' : 'inbound'}`}
                 >
+                  {message.type === 'instagram_comment' && (
+                    <small className="comment-context">Comentário na publicação</small>
+                  )}
                   {message.text ? (
                     <MessageText text={message.text} />
                   ) : !message.attachments?.length ? (
@@ -960,6 +1066,11 @@ export function InstagramInbox({
               ))}
               {!thread.messages.length && <p className="muted">Nenhuma mensagem armazenada.</p>}
             </div>
+            {thread.can_send && thread.messaging_mode === 'private_reply' && (
+              <div className="thread-comment-notice">
+                Primeira mensagem privada. Depois do envio, aguarde o lead responder.
+              </div>
+            )}
             {thread.can_send ? (
               <form className="thread-composer" onSubmit={submit}>
                 {user.role === 'attendant' && (
@@ -1035,7 +1146,13 @@ export function InstagramInbox({
                 <AlertTriangle size={18} />
                 {user.role === 'manager'
                   ? 'A gestão pode acompanhar o histórico. A resposta pertence à atendente responsável.'
-                  : 'Assuma o lead antes de responder pelo CRM.'}
+                  : thread.messaging_mode === 'waiting_reply'
+                    ? 'Aguardando o lead responder no Instagram.'
+                    : thread.messaging_mode === 'send_unconfirmed'
+                      ? 'Envio não confirmado. Confira a conversa no Instagram antes de uma nova abordagem.'
+                      : thread.messaging_mode === 'expired'
+                        ? 'Prazo de envio encerrado. Aguarde uma nova mensagem do lead.'
+                        : 'Assuma o lead antes de responder pelo CRM.'}
               </div>
             )}
           </>

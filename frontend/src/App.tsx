@@ -37,6 +37,8 @@ import { Team, PasswordChange } from './operations';
 import { MobileNavigation } from './mobile-navigation';
 import { DevicePanel, disconnectPush, PushBinding } from './pwa';
 import { ShortcutsPage } from './shortcuts';
+import { CommentPool } from './comment-pool';
+import { Agenda } from './agenda';
 
 type Page =
   | 'central'
@@ -53,10 +55,12 @@ type Page =
   | 'settings'
   | 'mine'
   | 'pool'
+  | 'comments'
   | 'shortcuts';
 const navItems: { id: Page; label: string; icon: typeof Users; group: string }[] = [
   { id: 'central', label: 'Central de atendimentos', icon: LayoutDashboard, group: 'workspace' },
   { id: 'inbox', label: 'Conversas', icon: MessageCircle, group: 'workspace' },
+  { id: 'comments', label: 'Comentários', icon: Inbox, group: 'workspace' },
   { id: 'pipeline', label: 'Funil de vendas', icon: GitBranch, group: 'workspace' },
   { id: 'agenda', label: 'Agenda', icon: CalendarDays, group: 'workspace' },
   { id: 'reports', label: 'Relatórios', icon: BarChart3, group: 'workspace' },
@@ -103,38 +107,51 @@ export function App() {
   const serverClock = useRef({ server: Date.now(), monotonic: performance.now() });
   const generation = useRef(0);
   const requestSeq = useRef(0);
-  const appliedSeq = useRef(0);
   const claims = useRef(new Map<string, { key: string; version: number; mode: string }>());
   const detailSeq = useRef(0);
-  const refresh = useCallback(async () => {
+  const refreshRequest = useRef<
+    { epoch: number; controller: AbortController; promise: Promise<void> } | undefined
+  >(undefined);
+  const refresh = useCallback(async (force = true) => {
     const epoch = generation.current;
+    if (!force && refreshRequest.current?.epoch === epoch) return refreshRequest.current.promise;
+    refreshRequest.current?.controller.abort();
+    const controller = new AbortController();
     const sequence = ++requestSeq.current;
-    try {
-      const snapshot = await api<Snapshot>('/workspace');
-      if (epoch !== generation.current || sequence < appliedSeq.current) return;
-      appliedSeq.current = sequence;
-      setData(snapshot);
-      setConnected(true);
-      serverClock.current = {
-        server: Date.parse(snapshot.server_time),
-        monotonic: performance.now(),
-      };
-      setNow(new Date(snapshot.server_time).getTime());
-    } catch (error) {
-      if (epoch !== generation.current || sequence < appliedSeq.current) return;
-      if (error instanceof ApiError && error.status === 401) {
-        generation.current++;
-        detailSeq.current++;
-        setData(null);
-        setDetail(null);
-        setWhatsappUrl('');
-        setNewLead(false);
-        setNotifications(false);
-        setLoading(false);
-      } else setConnected(false);
-    } finally {
-      if (epoch === generation.current) setLoading(false);
-    }
+    const timeout = setTimeout(() => controller.abort(), 20_000);
+    const promise = (async () => {
+      try {
+        const snapshot = await api<Snapshot>('/workspace?appointments=omit', {
+          signal: controller.signal,
+        });
+        if (epoch !== generation.current || sequence !== requestSeq.current) return;
+        setData(snapshot);
+        setConnected(true);
+        serverClock.current = {
+          server: Date.parse(snapshot.server_time),
+          monotonic: performance.now(),
+        };
+        setNow(new Date(snapshot.server_time).getTime());
+      } catch (error) {
+        if (epoch !== generation.current || sequence !== requestSeq.current) return;
+        if (error instanceof ApiError && error.status === 401) {
+          generation.current++;
+          detailSeq.current++;
+          setData(null);
+          setDetail(null);
+          setWhatsappUrl('');
+          setNewLead(false);
+          setNotifications(false);
+          setLoading(false);
+        } else setConnected(false);
+      } finally {
+        clearTimeout(timeout);
+        if (epoch === generation.current && sequence === requestSeq.current) setLoading(false);
+        if (refreshRequest.current?.controller === controller) refreshRequest.current = undefined;
+      }
+    })();
+    refreshRequest.current = { epoch, controller, promise };
+    return promise;
   }, []);
   useEffect(() => {
     if (!detail || !data || data.user.role === 'manager') return;
@@ -151,6 +168,7 @@ export function App() {
   }, [data, detail]);
   useEffect(() => {
     void refresh();
+    return () => refreshRequest.current?.controller.abort();
   }, [refresh]);
   useEffect(() => {
     const changed = () => {
@@ -168,6 +186,8 @@ export function App() {
     // Avoid transferring the complete workspace while the attendant is using the chat.
     if (
       page === 'inbox' ||
+      page === 'agenda' ||
+      page === 'comments' ||
       page === 'reports' ||
       page === 'meta' ||
       page === 'google' ||
@@ -181,13 +201,13 @@ export function App() {
         ? 5000
         : 15_000;
     const interval = setInterval(() => {
-      if (!document.hidden) void refresh();
+      if (!document.hidden) void refresh(false);
     }, pollingIntervalMs);
-    const focus = () => void refresh();
+    const focus = () => void refresh(false);
     window.addEventListener('focus', focus);
     window.addEventListener('online', focus);
     const visible = () => {
-      if (!document.hidden) void refresh();
+      if (!document.hidden) void refresh(false);
     };
     document.addEventListener('visibilitychange', visible);
     return () => {
@@ -348,7 +368,8 @@ export function App() {
     );
   const isManager = data.user.role === 'manager';
   const activePage =
-    !isManager && !['mine', 'pool', 'inbox', 'agenda', 'shortcuts', 'settings'].includes(page)
+    !isManager &&
+    !['mine', 'pool', 'comments', 'inbox', 'agenda', 'shortcuts', 'settings'].includes(page)
       ? 'mine'
       : isManager && ['mine', 'pool', 'shortcuts'].includes(page)
         ? 'central'
@@ -362,7 +383,9 @@ export function App() {
   );
   const title = isManager
     ? navItems.find((n) => n.id === activePage)?.label
-    : salesNav.find((n) => n.id === activePage)?.label;
+    : activePage === 'comments'
+      ? 'Bolsão'
+      : salesNav.find((n) => n.id === activePage)?.label;
   const actionButton = (lead: Lead) => {
     if (!isManager && ['RESERVED', 'POOL'].includes(lead.state))
       return (
@@ -497,7 +520,7 @@ export function App() {
               {salesNav.map(({ id, label, icon: Icon }) => (
                 <button
                   key={id}
-                  className={`nav-item ${activePage === id ? 'active' : ''}`}
+                  className={`nav-item ${activePage === id || (id === 'pool' && activePage === 'comments') ? 'active' : ''}`}
                   onClick={() => navigate(id)}
                 >
                   <Icon size={18} />
@@ -611,61 +634,13 @@ export function App() {
           )}
 
           {activePage === 'agenda' && (
-            <section className="panel">
-              <div className="panel-heading">
-                <div>
-                  <h2>Próximas consultas</h2>
-                  <p>
-                    Horários no fuso deste dispositivo:{' '}
-                    {Intl.DateTimeFormat().resolvedOptions().timeZone}.
-                  </p>
-                </div>
-                <CalendarDays size={22} />
-              </div>
-              {!data.appointments.length ? (
-                <Empty
-                  title="Nenhuma consulta agendada"
-                  description="Abra a ficha de um lead para agendar uma consulta."
-                />
-              ) : (
-                <div className="appointment-list">
-                  {data.appointments.map((a) => (
-                    <button
-                      className="appointment-card"
-                      key={a.id}
-                      onClick={() => void openDetail(a.opportunity_id)}
-                    >
-                      <span className="calendar-date">
-                        <strong>{new Date(a.starts_at).getDate()}</strong>
-                        {new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(
-                          new Date(a.starts_at),
-                        )}
-                      </span>
-                      <div>
-                        <strong>{a.name}</strong>
-                        <span>{a.unit}</span>
-                      </div>
-                      <span className="appointment-time">
-                        <Clock3 size={15} />
-                        {new Intl.DateTimeFormat('pt-BR', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        }).format(new Date(a.starts_at))}
-                      </span>
-                      <span className="stage-pill">
-                        {{
-                          scheduled: 'Agendada',
-                          attended: 'Compareceu',
-                          no_show: 'Não compareceu',
-                          cancelled: 'Cancelada',
-                        }[a.status] ?? a.status}
-                      </span>
-                      <ArrowUpRight size={18} />
-                    </button>
-                  ))}
-                </div>
-              )}
-            </section>
+            <Agenda
+              key={data.user.id}
+              revision={leadRevision}
+              onOpen={(id) => void openDetail(id)}
+              onSessionExpired={refresh}
+              onConnectionChange={setConnected}
+            />
           )}
 
           {activePage === 'shortcuts' && (
@@ -677,6 +652,36 @@ export function App() {
             />
           )}
 
+          {!isManager && (activePage === 'pool' || activePage === 'comments') && (
+            <nav className="comment-pool-tabs" aria-label="Tipo de bolsão">
+              <button
+                className={activePage === 'pool' ? 'active' : ''}
+                aria-current={activePage === 'pool' ? 'page' : undefined}
+                onClick={() => navigate('pool')}
+              >
+                Leads
+              </button>
+              <button
+                className={activePage === 'comments' ? 'active' : ''}
+                aria-current={activePage === 'comments' ? 'page' : undefined}
+                onClick={() => navigate('comments')}
+              >
+                Comentários
+              </button>
+            </nav>
+          )}
+          {activePage === 'comments' && (
+            <CommentPool
+              key={data.user.id}
+              user={data.user}
+              onSessionExpired={refresh}
+              onOpenChat={(id) => {
+                setInboxTargetId(id);
+                navigate('inbox');
+                void refresh();
+              }}
+            />
+          )}
           {(activePage === 'mine' || activePage === 'pool') && (
             <AttendantLeads
               leads={activePage === 'pool' ? pool : owned}
@@ -751,7 +756,7 @@ export function App() {
       <PushBinding userId={data.user.id} />
       <MobileNavigation
         items={isManager ? navItems : salesNav}
-        active={activePage}
+        active={!isManager && activePage === 'comments' ? 'pool' : activePage}
         manager={isManager}
         poolCount={pool.length}
         onNavigate={navigate}
@@ -801,7 +806,7 @@ export function App() {
           }}
           onDeleted={async () => {
             detailSeq.current++;
-            appliedSeq.current = ++requestSeq.current;
+            requestSeq.current++;
             claims.current.delete(detail.id);
             setDetail(null);
             setWhatsappUrl('');

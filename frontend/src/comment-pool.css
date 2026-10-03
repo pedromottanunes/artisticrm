@@ -1,0 +1,117 @@
+.comment-pool-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line, #d7e2e8);
+}
+.comment-pool-tabs button {
+  padding: 12px 18px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.comment-pool-tabs button.active {
+  border-bottom-color: #009e96;
+  color: #008d85;
+}
+.comment-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  gap: 16px;
+  padding: 16px;
+}
+.comment-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid #d7e2e8;
+  border-radius: 12px;
+  padding: 16px;
+  min-width: 0;
+}
+.comment-profile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.comment-profile a {
+  overflow-wrap: anywhere;
+  display: inline;
+}
+.comment-profile small {
+  color: #718a9f;
+}
+.comment-avatar {
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #e6f5f2;
+  color: #008d85;
+  flex-shrink: 0;
+}
+.comment-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.comment-publication {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.comment-publication img {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+.comment-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: auto;
+}
+.comment-error {
+  margin: 16px;
+  color: #a13939;
+}
+.comment-context {
+  display: block;
+  color: #718a9f;
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+.thread-comment-notice {
+  padding: 8px 16px;
+  color: #687d8b;
+  font-size: 12px;
+  border-top: 1px solid #d7e2e8;
+}
+@media (max-width: 760px) {
+  .comment-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 10px;
+  }
+  .comment-card {
+    padding: 12px;
+  }
+  .comment-actions button {
+    min-height: 44px;
+  }
+  .comment-pool .panel-heading {
+    padding: 14px;
+  }
+  .comment-pool .panel-heading p {
+    font-size: 12px;
+  }
+}
