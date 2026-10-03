@@ -81,6 +81,7 @@ export async function migrate(db: Database) {
       '025_private_reply_recovery.sql',
       '026_receipt_security.sql',
       '027_agenda_paging.sql',
+      '028_lead_lists.sql',
     ]) {
       const version = file.split('_')[0];
       const done = await tx.query('SELECT version FROM schema_migrations WHERE version=$1', [

@@ -138,6 +138,34 @@ export interface Appointment {
 export type ConsultationStatus =
   'UNDEFINED' | 'NOT_SCHEDULED' | 'SCHEDULED' | 'ATTENDED' | 'NO_SHOW' | 'CANCELLED';
 export type ContractStatus = 'awaiting' | 'signed' | 'not_signed';
+export type LeadListCategory =
+  | 'ALL'
+  | 'NOT_SCHEDULED'
+  | 'SCHEDULED'
+  | 'ATTENDED'
+  | 'NO_SHOW'
+  | 'FOLLOW_UP'
+  | 'CONTRACT_PENDING'
+  | 'CLOSED'
+  | 'DECLINED';
+export interface LeadListRow {
+  id: string;
+  name: string;
+  source: string;
+  stage: string;
+  consultation_status: ConsultationStatus;
+  owner_id: string | null;
+  reserved_to: string | null;
+  state: string;
+  next_action: string;
+}
+export interface LeadListsResponse {
+  rows: LeadListRow[];
+  counts: Record<LeadListCategory, number>;
+  total: number;
+  page: number;
+  page_size: number;
+}
 export const consultationStatusLabels: Record<ConsultationStatus, string> = {
   UNDEFINED: 'Ainda não definido',
   NOT_SCHEDULED: 'Consulta não agendada',

@@ -15,6 +15,7 @@ import type { User, Opportunity } from '../src/types.js';
 import { checkShortcuts } from './shortcut-checks.js';
 import { checkEncodedRoutes } from './security-checks.js';
 import { checkAgenda } from './agenda-checks.js';
+import { checkLeadLists } from './lead-list-checks.js';
 
 let db: Database, ops: Operations, manager: User, users: User[];
 let now = new Date('2026-09-10T12:00:00Z');
@@ -99,6 +100,8 @@ test('SQL: encoded API paths preserve authentication, CSRF and roles', () =>
 
 test('SQL: agenda pages are bounded, stable and scoped to their owner', () =>
   checkAgenda(ops, manager, users));
+test('SQL: listas resumem etapas e isolam os leads de cada atendente', () =>
+  checkLeadLists(ops, manager, users));
 
 test('transferência é auditada, idempotente e não muda cursor nem marca aceite', async () => {
   const { id } = await lead();

@@ -23,6 +23,7 @@ import {
   Smartphone,
   BarChart3,
   Zap,
+  ClipboardList,
 } from 'lucide-react';
 import { api, ApiError, stages, type Snapshot, type Lead, type Detail } from './api';
 import { CentralStatusPanel } from './central';
@@ -39,6 +40,7 @@ import { DevicePanel, disconnectPush, PushBinding } from './pwa';
 import { ShortcutsPage } from './shortcuts';
 import { CommentPool } from './comment-pool';
 import { Agenda } from './agenda';
+import { LeadLists } from './lead-lists';
 
 type Page =
   | 'central'
@@ -56,12 +58,14 @@ type Page =
   | 'mine'
   | 'pool'
   | 'comments'
-  | 'shortcuts';
+  | 'shortcuts'
+  | 'lists';
 const navItems: { id: Page; label: string; icon: typeof Users; group: string }[] = [
   { id: 'central', label: 'Central de atendimentos', icon: LayoutDashboard, group: 'workspace' },
   { id: 'inbox', label: 'Conversas', icon: MessageCircle, group: 'workspace' },
   { id: 'comments', label: 'Comentários', icon: Inbox, group: 'workspace' },
   { id: 'pipeline', label: 'Funil de vendas', icon: GitBranch, group: 'workspace' },
+  { id: 'lists', label: 'Listas', icon: ClipboardList, group: 'workspace' },
   { id: 'agenda', label: 'Agenda', icon: CalendarDays, group: 'workspace' },
   { id: 'reports', label: 'Relatórios', icon: BarChart3, group: 'workspace' },
   { id: 'contracts', label: 'Contratos', icon: FileCheck2, group: 'growth' },
@@ -69,6 +73,7 @@ const navItems: { id: Page; label: string; icon: typeof Users; group: string }[]
 ];
 const salesNav = [
   { id: 'mine' as Page, label: 'Meus leads', icon: Users },
+  { id: 'lists' as Page, label: 'Listas', icon: ClipboardList },
   { id: 'inbox' as Page, label: 'Conversas', icon: MessageCircle },
   { id: 'pool' as Page, label: 'Bolsão', icon: Inbox },
   { id: 'agenda' as Page, label: 'Agenda', icon: CalendarDays },
@@ -188,6 +193,7 @@ export function App() {
       page === 'inbox' ||
       page === 'agenda' ||
       page === 'comments' ||
+      page === 'lists' ||
       page === 'reports' ||
       page === 'meta' ||
       page === 'google' ||
@@ -369,7 +375,9 @@ export function App() {
   const isManager = data.user.role === 'manager';
   const activePage =
     !isManager &&
-    !['mine', 'pool', 'comments', 'inbox', 'agenda', 'shortcuts', 'settings'].includes(page)
+    !['mine', 'pool', 'comments', 'inbox', 'agenda', 'lists', 'shortcuts', 'settings'].includes(
+      page,
+    )
       ? 'mine'
       : isManager && ['mine', 'pool', 'shortcuts'].includes(page)
         ? 'central'
@@ -640,6 +648,17 @@ export function App() {
               onOpen={(id) => void openDetail(id)}
               onSessionExpired={refresh}
               onConnectionChange={setConnected}
+            />
+          )}
+
+          {activePage === 'lists' && (
+            <LeadLists
+              key={data.user.id}
+              data={data}
+              revision={leadRevision}
+              onOpen={(id) => void openDetail(id)}
+              onConnectionChange={setConnected}
+              onSessionExpired={refresh}
             />
           )}
 

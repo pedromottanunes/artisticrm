@@ -5,6 +5,7 @@ import fastifyStatic from '@fastify/static';
 import { randomBytes } from 'node:crypto';
 import { chatSnapshot } from './chat-snapshot.js';
 import { agendaPage, agendaQuery } from './agenda.js';
+import { leadListsPage, leadListsQuery } from './lead-lists.js';
 import { Readable } from 'node:stream';
 import { z, ZodError } from 'zod';
 import { registerWhatsApp, type WhatsAppConfig } from './whatsapp.js';
@@ -328,6 +329,9 @@ export async function buildApp(
   );
   app.get('/api/v1/appointments', async (request) =>
     agendaPage(db, request.user, agendaQuery.parse(request.query)),
+  );
+  app.get('/api/v1/lead-lists', async (request) =>
+    leadListsPage(db, request.user, leadListsQuery.parse(request.query)),
   );
   app.get('/api/v1/distribution/board', async (request) => {
     requireManager(request.user);

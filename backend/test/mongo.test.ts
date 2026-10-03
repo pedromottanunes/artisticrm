@@ -26,6 +26,7 @@ import { checkChatEfficiency } from './chat-efficiency-checks.js';
 import { checkPrivateReplyRecovery } from './private-reply-recovery-checks.js';
 import { checkEncodedRoutes } from './security-checks.js';
 import { checkAgenda } from './agenda-checks.js';
+import { checkLeadLists } from './lead-list-checks.js';
 import {
   checkDeletePermissions,
   checkDeleteCleanup,
@@ -114,6 +115,8 @@ test('Mongo: encoded API paths preserve authentication, CSRF and roles', () =>
 
 test('Mongo: agenda pages are bounded, stable and scoped to their owner', () =>
   checkAgenda(ops, manager, users));
+test('Mongo: listas resumem etapas e isolam os leads de cada atendente', () =>
+  checkLeadLists(ops, manager, users));
 
 test('chat efficiency: bounded asynchronous profile lookups and compact history (MongoDB)', async () => {
   await checkChatEfficiency(ops, manager);
@@ -130,6 +133,7 @@ test('Mongo: retenção técnica e índices dos caminhos frequentes ficam config
     .toArray();
   const whatsappInboxIndexes = await db.collection('whatsapp_inbox').listIndexes().toArray();
   const messageIndexes = await db.collection('messages').listIndexes().toArray();
+  const opportunityIndexes = await db.collection('opportunities').listIndexes().toArray();
   assert.equal(
     receiptIndexes.find((index) => index.key.created_at === 1)?.expireAfterSeconds,
     30 * 24 * 60 * 60,
@@ -149,6 +153,12 @@ test('Mongo: retenção técnica e índices dos caminhos frequentes ficam config
         index.key.status === 1 &&
         index.key.sending_started_at === 1 &&
         index.key.created_at === 1,
+    ),
+  );
+  assert.ok(
+    opportunityIndexes.some(
+      (index) =>
+        index.key.consultation_status === 1 && index.key.created_at === -1 && index.key.id === -1,
     ),
   );
 });
