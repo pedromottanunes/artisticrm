@@ -24,6 +24,7 @@ import {
   type User,
 } from './api';
 import { Empty } from './components';
+import { signalWithTimeout } from './abort';
 
 interface ListResponse {
   revision?: string;
@@ -230,21 +231,26 @@ function MediaAttachment({
     if (!sharedMedia || !shouldProbeSharedMedia) return;
     const controller = new AbortController();
     const probe = async (url: string) => {
-      const result = await fetch(url, {
-        headers: { Range: 'bytes=0-0' },
-        credentials: url === previewUrl ? 'same-origin' : 'omit',
-        referrerPolicy: 'no-referrer',
-        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]),
-      });
+      const request = signalWithTimeout(controller.signal, 10_000);
       try {
-        if (!result.ok) throw new Error('media unavailable');
-        const contentType = (result.headers.get('content-type') ?? '').toLowerCase();
-        if (contentType.startsWith('image/')) return 'image' as const;
-        if (contentType.startsWith('video/')) return 'video' as const;
-        throw new Error('unsupported media');
+        const result = await fetch(url, {
+          headers: { Range: 'bytes=0-0' },
+          credentials: url === previewUrl ? 'same-origin' : 'omit',
+          referrerPolicy: 'no-referrer',
+          signal: request.signal,
+        });
+        try {
+          if (!result.ok) throw new Error('media unavailable');
+          const contentType = (result.headers.get('content-type') ?? '').toLowerCase();
+          if (contentType.startsWith('image/')) return 'image' as const;
+          if (contentType.startsWith('video/')) return 'video' as const;
+          throw new Error('unsupported media');
+        } finally {
+          // Even when the CDN ignores Range, do not download the entire file to identify it.
+          await result.body?.cancel().catch(() => {});
+        }
       } finally {
-        // Even when the CDN ignores Range, do not download the entire file to identify it.
-        await result.body?.cancel().catch(() => {});
+        request.dispose();
       }
     };
     void (async () => {
@@ -595,7 +601,8 @@ export function InstagramInbox({
       threadRequest.current?.controller.abort();
       const controller = new AbortController();
       threadRequest.current = { id, controller };
-      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]);
+      const request = signalWithTimeout(controller.signal, 20_000);
+      const signal = request.signal;
       const sequence = ++threadSequence.current;
       try {
         const current = threadRef.current;
@@ -674,6 +681,7 @@ export function InstagramInbox({
         onConnectionChange(false);
         if (!quiet || (error instanceof ApiError && error.status === 401)) handleError(error);
       } finally {
+        request.dispose();
         if (threadRequest.current?.controller === controller) threadRequest.current = null;
       }
     },
@@ -687,6 +695,7 @@ export function InstagramInbox({
       listRequest.current?.abort();
       const controller = new AbortController();
       listRequest.current = controller;
+      const request = signalWithTimeout(controller.signal, 20_000);
       const sequence = ++listSequence.current;
       try {
         const view = user.role === 'manager' ? 'all' : 'mine';
@@ -694,7 +703,7 @@ export function InstagramInbox({
         const response = await api<ListResponse | { unchanged: true; revision: string }>(
           `/conversations?view=${view}${revision ? `&revision=${revision}` : ''}`,
           {
-            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]),
+            signal: request.signal,
           },
         );
         if (sequence !== listSequence.current) return;
@@ -783,6 +792,7 @@ export function InstagramInbox({
         onConnectionChange(false);
         if (!quiet || (error instanceof ApiError && error.status === 401)) handleError(error);
       } finally {
+        request.dispose();
         if (listRequest.current === controller) listRequest.current = null;
         if (sequence === listSequence.current) setLoading(false);
       }

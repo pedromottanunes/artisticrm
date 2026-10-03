@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ExternalLink, MessageCircle, RefreshCw } from 'lucide-react';
 import { api, ApiError, type User } from './api';
 import { Empty } from './components';
+import { signalWithTimeout } from './abort';
 
 interface Comment {
   id: string;
@@ -45,10 +46,11 @@ export function CommentPool({
       request.current?.abort();
       const controller = new AbortController();
       request.current = controller;
+      const timed = signalWithTimeout(controller.signal, 20_000);
       try {
         const next = await api<Result>(
           `/instagram/comments${before ? `?before=${encodeURIComponent(before)}` : ''}`,
-          { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]) },
+          { signal: timed.signal },
         );
         if (!mounted.current || seq !== sequence.current) return;
         paginated.current = Boolean(before);
@@ -74,6 +76,7 @@ export function CommentPool({
             err instanceof Error ? err.message : 'Não foi possível carregar os comentários.',
           );
       } finally {
+        timed.dispose();
         if (request.current === controller) request.current = null;
         if (mounted.current && seq === sequence.current) setLoadingMore(false);
       }
