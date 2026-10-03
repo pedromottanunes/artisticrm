@@ -2,6 +2,95 @@ import { test, expect } from '@playwright/test';
 
 test.use({ serviceWorkers: 'block' });
 
+test('an unread reply is distinct from selection and clears after opening the chat', async ({
+  page,
+}) => {
+  const login = await page.request.post('/api/v1/auth/login', {
+    headers: { 'X-Artisti-Client': 'web' },
+    data: { login: 'vanessa@demo.artisti.local', password: 'Artisti.demo2026!' },
+  });
+  expect(login.ok()).toBeTruthy();
+  const conversations = [
+    {
+      id: 'conversation-open',
+      opportunity_id: 'lead-open',
+      contact_name: 'Conversa aberta',
+      instagram_username: 'aberta',
+      profile_picture_url: '',
+      state: 'CLAIMED',
+      owner_id: 'fixture',
+      reserved_to: null,
+      last_message_at: '2026-10-02T12:00:00Z',
+      unread: false,
+      can_send: true,
+      messaging_mode: 'direct',
+    },
+    {
+      id: 'conversation-unread',
+      opportunity_id: 'lead-unread',
+      contact_name: 'Lead com resposta',
+      instagram_username: 'resposta',
+      profile_picture_url: '',
+      state: 'CLAIMED',
+      owner_id: 'fixture',
+      reserved_to: null,
+      last_message_at: '2026-10-02T12:01:00Z',
+      unread: true,
+      can_send: true,
+      messaging_mode: 'direct',
+    },
+  ];
+  await page.route('**/api/v1/conversations?*', (route) =>
+    route.fulfill({ json: { configured: true, conversations } }),
+  );
+  const readRequests: { last_message_id?: string }[] = [];
+  await page.route('**/api/v1/conversations/*/read', (route) => {
+    readRequests.push(route.request().postDataJSON());
+    return route.fulfill({ json: { read: true } });
+  });
+  await page.route('**/api/v1/conversations/*/messages*', (route) => {
+    const id = new URL(route.request().url()).pathname.split('/')[4];
+    return route.fulfill({
+      json: {
+        conversation_id: id,
+        opportunity_id: id === 'conversation-unread' ? 'lead-unread' : 'lead-open',
+        can_send: true,
+        last_message_at:
+          id === 'conversation-unread' ? '2026-10-02T12:01:00Z' : '2026-10-02T12:00:00Z',
+        has_more: false,
+        messaging_mode: 'direct',
+        messages: [
+          {
+            id: `message-${id}`,
+            direction: 'inbound',
+            type: 'text',
+            text: id === 'conversation-unread' ? 'Nova resposta' : 'Conversa anterior',
+            attachments: [],
+            status: 'received',
+            created_at: '2026-10-02T12:01:00Z',
+          },
+        ],
+      },
+    });
+  });
+
+  await page.goto('/#inbox');
+  const selected = page.getByRole('button', { name: 'Conversa aberta' });
+  const unread = page
+    .locator('.inbox-conversations > button')
+    .filter({ hasText: 'Lead com resposta' });
+  await expect(selected).toHaveClass(/active/);
+  await expect(selected).not.toHaveClass(/unread/);
+  await expect(unread).toHaveClass(/unread/);
+  await expect(unread).toHaveCSS('background-color', 'rgb(238, 249, 247)');
+  await expect(page.locator('.unread-indicator')).toHaveCount(0);
+
+  await unread.click();
+  await expect(page.getByText('Nova resposta', { exact: true })).toBeVisible();
+  await expect.poll(() => readRequests.at(-1)?.last_message_id).toBe('message-conversation-unread');
+  await expect(unread).not.toHaveClass(/unread/);
+});
+
 test('slow polling stays single-flight and unchanged snapshots retain the conversation', async ({
   page,
 }) => {

@@ -484,6 +484,24 @@ export function InstagramInbox({
     [onConnectionChange, onNotice, onSessionExpired],
   );
 
+  const markConversationRead = useCallback(async (id: string, lastMessageId?: string) => {
+    if (!lastMessageId) return;
+    try {
+      await api(`/conversations/${id}/read`, {
+        method: 'POST',
+        body: JSON.stringify({ last_message_id: lastMessageId }),
+      });
+      if (!mounted.current) return;
+      const clearUnread = (items: ConversationSummary[]) =>
+        items.map((item) => (item.id === id && item.unread ? { ...item, unread: false } : item));
+      setConversations(clearUnread);
+      // Keep the cached server snapshot untouched. If a newer message arrived
+      // during this request, the next poll restores its unread state.
+    } catch {
+      // The next poll restores the server state; reading a chat must stay non-blocking.
+    }
+  }, []);
+
   const openShortcutPicker = async () => {
     if (shortcutPickerOpen) {
       setShortcutPickerOpen(false);
@@ -645,7 +663,7 @@ export function InstagramInbox({
           (current.messages.at(-1)?.id !== next.messages.at(-1)?.id &&
             received.some((message) => message.direction === 'inbound'))
         )
-          void api(`/conversations/${id}/read`, { method: 'POST', body: '{}' }).catch(() => {});
+          void markConversationRead(id, next.messages.at(-1)?.id);
       } catch (error) {
         if (
           controller.signal.aborted ||
@@ -659,7 +677,7 @@ export function InstagramInbox({
         if (threadRequest.current?.controller === controller) threadRequest.current = null;
       }
     },
-    [handleError, onConnectionChange],
+    [handleError, markConversationRead, onConnectionChange],
   );
 
   const refresh = useCallback(
@@ -959,8 +977,9 @@ export function InstagramInbox({
           {conversations.map((conversation) => (
             <button
               key={conversation.id}
-              className={selectedId === conversation.id ? 'active' : ''}
+              className={`${selectedId === conversation.id ? 'active' : ''}${conversation.unread ? ' unread' : ''}`.trim()}
               onClick={() => select(conversation.id)}
+              aria-label={`${conversation.contact_name}${conversation.unread ? ', nova mensagem' : ''}`}
             >
               <span className="instagram-avatar">
                 <MessageCircle size={18} />

@@ -486,6 +486,7 @@ test('rotas autenticadas listam e leem conversa sem expor token', async () => {
       payload: { email: 'cadu@demo.artisti.local', password: DEMO_PASSWORD },
     });
     const cookie = `artisti_session=${login.cookies[0].value}`;
+    const mutationHeaders = { cookie, 'x-artisti-client': 'web' };
     const status = await app.inject({ url: '/api/v1/instagram/status', headers: { cookie } });
     assert.equal(status.statusCode, 200);
     assert.ok(!status.body.includes(config.accessToken));
@@ -493,6 +494,13 @@ test('rotas autenticadas listam e leem conversa sem expor token', async () => {
     const list = await app.inject({ url: '/api/v1/conversations', headers: { cookie } });
     assert.equal(list.statusCode, 200);
     assert.equal(list.json().conversations.length, 1);
+    assert.equal(list.json().conversations[0].unread, true);
+    const conversationId = list.json().conversations[0].id;
+    const history = await app.inject({
+      url: `/api/v1/conversations/${conversationId}/messages`,
+      headers: { cookie },
+    });
+    const firstMessageId = history.json().messages[0].id;
     const revision = list.json().revision;
     assert.match(revision, /^[a-f0-9]{64}$/);
     const unchanged = await app.inject({
@@ -504,6 +512,56 @@ test('rotas autenticadas listam e leem conversa sem expor token', async () => {
     assert.equal(
       (await app.inject({ url: `/api/v1/conversations?revision=${revision}` })).statusCode,
       401,
+    );
+    const read = await app.inject({
+      method: 'POST',
+      url: `/api/v1/conversations/${conversationId}/read`,
+      headers: mutationHeaders,
+      payload: { last_message_id: firstMessageId },
+    });
+    assert.equal(read.statusCode, 200);
+    assert.equal(
+      (await app.inject({ url: '/api/v1/conversations', headers: { cookie } })).json()
+        .conversations[0].unread,
+      false,
+    );
+    const nextPayload = payload('ig-mid-synthetic-2');
+    nextPayload.entry[0].messaging[0].timestamp += 1_000;
+    const nextBody = raw(nextPayload);
+    await central.receive(nextBody, signature(nextBody));
+    await central.drain();
+    assert.equal(
+      (await app.inject({ url: '/api/v1/conversations', headers: { cookie } })).json()
+        .conversations[0].unread,
+      true,
+    );
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/conversations/${conversationId}/read`,
+      headers: mutationHeaders,
+      payload: { last_message_id: firstMessageId },
+    });
+    assert.equal(
+      (await app.inject({ url: '/api/v1/conversations', headers: { cookie } })).json()
+        .conversations[0].unread,
+      true,
+      'an older visible message cannot hide a newer inbound reply',
+    );
+    const updatedHistory = await app.inject({
+      url: `/api/v1/conversations/${conversationId}/messages`,
+      headers: { cookie },
+    });
+    const latestMessageId = updatedHistory.json().messages.at(-1).id;
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/conversations/${conversationId}/read`,
+      headers: mutationHeaders,
+      payload: { last_message_id: latestMessageId },
+    });
+    assert.equal(
+      (await app.inject({ url: '/api/v1/conversations', headers: { cookie } })).json()
+        .conversations[0].unread,
+      false,
     );
     await db.query("UPDATE contacts SET name='Nome atualizado'");
     const changed = await app.inject({

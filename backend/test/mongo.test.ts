@@ -968,6 +968,7 @@ test('Mongo: Direct do Instagram cria identidade sem telefone, conversa e mensag
   await ops.claim(users[0], opportunity.id, 'reservation', opportunity.version, randomUUID());
   const listed = await central.list(users[0], 'mine');
   assert.equal(listed.conversations.length, 1);
+  assert.equal(listed.conversations[0]?.unread, true);
   assert.equal(listed.conversations[0]?.contact_name, 'Perfil Mongo');
   assert.equal(listed.conversations[0]?.instagram_username, 'perfil.mongo');
   assert.equal(
@@ -978,13 +979,16 @@ test('Mongo: Direct do Instagram cria identidade sem telefone, conversa e mensag
   const initialThread = await central.messages(users[0], conversation.id);
   const instagramMessages = initialThread.messages;
   assert.equal(instagramMessages.length, 1);
+  await central.markRead(users[0], conversation.id, String(instagramMessages[0]?.id));
+  assert.equal((await central.list(users[0], 'mine')).conversations[0]?.unread, false);
   assert.deepEqual(instagramMessages[0]?.attachments, [
     { type: 'image', url: 'https://lookaside.fbsbx.com/mongo-image.jpg' },
     { type: 'audio', url: 'https://lookaside.fbsbx.com/mongo-audio.mp4' },
   ]);
   const nextMessageAt = new Date(now.getTime() + 1000);
+  const nextMessageId = randomUUID();
   await db.insert('messages', {
-    id: randomUUID(),
+    id: nextMessageId,
     conversation_id: conversation.id,
     direction: 'inbound',
     type: 'text',
@@ -998,6 +1002,15 @@ test('Mongo: Direct do Instagram cria identidade sem telefone, conversa e mensag
     { id: conversation.id },
     { $set: { last_message_at: nextMessageAt } },
   );
+  assert.equal((await central.list(users[0], 'mine')).conversations[0]?.unread, true);
+  await central.markRead(users[0], conversation.id, String(instagramMessages[0]?.id));
+  assert.equal(
+    (await central.list(users[0], 'mine')).conversations[0]?.unread,
+    true,
+    'an older visible message cannot hide a newer inbound reply',
+  );
+  await central.markRead(users[0], conversation.id, nextMessageId);
+  assert.equal((await central.list(users[0], 'mine')).conversations[0]?.unread, false);
   const incrementalThread = await central.messages(
     users[0],
     conversation.id,

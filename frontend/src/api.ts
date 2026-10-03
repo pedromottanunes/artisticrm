@@ -106,6 +106,7 @@ export interface ConversationSummary {
   owner_id: string | null;
   reserved_to: string | null;
   last_message_at: string;
+  unread: boolean;
   can_send: boolean;
   messaging_mode?: 'direct' | 'private_reply' | 'waiting_reply' | 'expired' | 'send_unconfirmed';
 }

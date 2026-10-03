@@ -749,9 +749,17 @@ export async function buildApp(
       );
     },
   );
-  app.post('/api/v1/conversations/:id/read', async (request) =>
-    instagram.markRead(request.user, idParams.parse(request.params).id),
-  );
+  app.post('/api/v1/conversations/:id/read', async (request) => {
+    const input = z
+      .object({ last_message_id: z.string().uuid().optional() })
+      .strict()
+      .parse(request.body ?? {});
+    return instagram.markRead(
+      request.user,
+      idParams.parse(request.params).id,
+      input.last_message_id,
+    );
+  });
   app.post('/api/v1/conversations/:id/messages', async (request) => {
     const input = z
       .object({ text: z.string().trim().min(1).max(1000) })

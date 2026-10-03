@@ -89,6 +89,10 @@
   background: #faf6ed;
 }
 
+.inbox-conversations > button.unread {
+  background: #eef9f7;
+}
+
 .instagram-avatar {
   position: relative;
   display: grid;

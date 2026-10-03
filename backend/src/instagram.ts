@@ -1217,6 +1217,10 @@ export class InstagramCentral {
         ])
         .toArray();
       const modes = await this.comments.modes(conversations);
+      const unread = await this.unreadConversationIds(
+        user.id,
+        conversations.map((conversation) => String(conversation.id)),
+      );
       return {
         configured: true,
         conversations: conversations.map((conversation, index) => {
@@ -1231,6 +1235,7 @@ export class InstagramCentral {
             owner_id: conversation.owner_id,
             reserved_to: conversation.reserved_to,
             last_message_at: conversation.last_message_at,
+            unread: unread.has(String(conversation.id)),
             messaging_mode: mode,
             can_send:
               conversation.state === 'CLAIMED' &&
@@ -1288,6 +1293,10 @@ export class InstagramCentral {
       )
     ).rows;
     const modes = await this.comments.modes(rows);
+    const unread = await this.unreadConversationIds(
+      user.id,
+      rows.map((row) => row.conversation_id),
+    );
     return {
       configured: true,
       conversations: rows.map((row, index) => {
@@ -1302,6 +1311,7 @@ export class InstagramCentral {
           owner_id: row.owner_id,
           reserved_to: row.reserved_to,
           last_message_at: row.conversation_last_message_at,
+          unread: unread.has(row.conversation_id),
           messaging_mode: mode,
           can_send:
             row.state === 'CLAIMED' &&
@@ -1310,6 +1320,102 @@ export class InstagramCentral {
         };
       }),
     };
+  }
+
+  private async unreadConversationIds(userId: string, conversationIds: string[]) {
+    const unread = new Set<string>();
+    if (!conversationIds.length) return unread;
+    const db = this.crm.db;
+    if (db.kind === 'mongo') {
+      const latestInbound = await db
+        .collection('conversations')
+        .aggregate<{ id: string }>([
+          { $match: { id: { $in: conversationIds } } },
+          {
+            $lookup: {
+              from: 'messages',
+              let: { conversationId: '$id' },
+              pipeline: [
+                {
+                  $match: {
+                    direction: 'inbound',
+                    $expr: { $eq: ['$conversation_id', '$$conversationId'] },
+                  },
+                },
+                { $sort: { created_at: -1, id: -1 } },
+                { $limit: 1 },
+              ],
+              as: 'inbound',
+            },
+          },
+          { $set: { inbound: { $first: '$inbound' } } },
+          { $match: { 'inbound.id': { $exists: true } } },
+          {
+            $lookup: {
+              from: 'conversation_reads',
+              let: { conversationId: '$id' },
+              pipeline: [
+                {
+                  $match: {
+                    user_id: userId,
+                    $expr: { $eq: ['$conversation_id', '$$conversationId'] },
+                  },
+                },
+                { $limit: 1 },
+              ],
+              as: 'read',
+            },
+          },
+          {
+            $lookup: {
+              from: 'messages',
+              localField: 'read.last_read_message_id',
+              foreignField: 'id',
+              as: 'read_message',
+            },
+          },
+          { $set: { read_message: { $first: '$read_message' } } },
+          {
+            $match: {
+              $expr: {
+                $or: [
+                  { $eq: [{ $ifNull: ['$read_message.id', null] }, null] },
+                  { $gt: ['$inbound.created_at', '$read_message.created_at'] },
+                  {
+                    $and: [
+                      { $eq: ['$inbound.created_at', '$read_message.created_at'] },
+                      { $gt: ['$inbound.id', '$read_message.id'] },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+          { $project: { _id: 0, id: 1 } },
+        ])
+        .toArray();
+      for (const inbound of latestInbound) unread.add(inbound.id);
+      return unread;
+    }
+    const rows = (
+      await db.query<{ conversation_id: string }>(
+        `SELECT selected.conversation_id
+         FROM unnest($1::uuid[]) AS selected(conversation_id)
+         JOIN LATERAL (
+           SELECT id,created_at FROM messages
+           WHERE conversation_id=selected.conversation_id AND direction='inbound'
+           ORDER BY created_at DESC,id DESC LIMIT 1
+         ) inbound ON TRUE
+         LEFT JOIN conversation_reads reads
+           ON reads.conversation_id=selected.conversation_id AND reads.user_id=$2
+         LEFT JOIN messages read_message ON read_message.id=reads.last_read_message_id
+         WHERE read_message.id IS NULL
+            OR (read_message.created_at,read_message.id)<(inbound.created_at,inbound.id)`,
+        [conversationIds, userId],
+      )
+    ).rows;
+    for (const row of rows) unread.add(row.conversation_id);
+    return unread;
   }
 
   async messages(user: User, conversationId: string, afterMessageId?: string) {
@@ -1502,36 +1608,85 @@ export class InstagramCentral {
     };
   }
 
-  async markRead(user: User, conversationId: string) {
+  async markRead(user: User, conversationId: string, lastMessageId?: string) {
     const context = await this.context(user, conversationId);
     const db = this.crm.db;
     if (db.kind === 'mongo') {
-      const latest = (
-        await db.many<{ id: string }>(
-          'messages',
-          { conversation_id: context.id },
-          { created_at: -1, id: -1 },
-          1,
-        )
-      )[0];
-      await db.collection('conversation_reads').updateOne(
-        { conversation_id: context.id, user_id: user.id },
-        {
-          $set: {
-            last_read_message_id: latest?.id ?? null,
-            read_at: await db.now(),
-          },
-        },
-        { upsert: true },
-      );
-    } else
+      await db.atomic(async (tx) => {
+        const target = lastMessageId
+          ? await tx.one<{ id: string; created_at: Date }>('messages', {
+              id: lastMessageId,
+              conversation_id: context.id,
+            })
+          : (
+              await tx.many<{ id: string; created_at: Date }>(
+                'messages',
+                { conversation_id: context.id },
+                { created_at: -1, id: -1 },
+                1,
+              )
+            )[0];
+        if (lastMessageId && !target)
+          throw new DomainError('INVALID_MESSAGE', 'Mensagem nÃ£o pertence Ã  conversa.', 400);
+        if (!target) return;
+        const existing = await tx.one<{ last_read_message_id?: string | null }>(
+          'conversation_reads',
+          { conversation_id: context.id, user_id: user.id },
+        );
+        const previous = existing?.last_read_message_id
+          ? await tx.one<{ id: string; created_at: Date }>('messages', {
+              id: existing.last_read_message_id,
+              conversation_id: context.id,
+            })
+          : null;
+        const advances =
+          !previous ||
+          target.created_at.getTime() > previous.created_at.getTime() ||
+          (target.created_at.getTime() === previous.created_at.getTime() &&
+            target.id > previous.id);
+        if (!existing || advances)
+          await tx.collection('conversation_reads').updateOne(
+            { conversation_id: context.id, user_id: user.id },
+            {
+              $set: {
+                last_read_message_id: target?.id ?? null,
+                read_at: await tx.now(),
+              },
+            },
+            { upsert: true, session: tx.session },
+          );
+      });
+    } else {
+      const target = lastMessageId
+        ? (
+            await db.query<{ id: string; created_at: Date | string }>(
+              'SELECT id,created_at FROM messages WHERE id=$1 AND conversation_id=$2',
+              [lastMessageId, context.id],
+            )
+          ).rows[0]
+        : (
+            await db.query<{ id: string; created_at: Date | string }>(
+              'SELECT id,created_at FROM messages WHERE conversation_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1',
+              [context.id],
+            )
+          ).rows[0];
+      if (lastMessageId && !target)
+        throw new DomainError('INVALID_MESSAGE', 'Mensagem nÃ£o pertence Ã  conversa.', 400);
+      if (!target) return { read: true };
       await db.query(
         `INSERT INTO conversation_reads(conversation_id,user_id,last_read_message_id,read_at)
-         VALUES ($1,$2,(SELECT id FROM messages WHERE conversation_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1),clock_timestamp())
+         VALUES ($1,$2,$3,clock_timestamp())
          ON CONFLICT (conversation_id,user_id) DO UPDATE SET
-           last_read_message_id=EXCLUDED.last_read_message_id,read_at=EXCLUDED.read_at`,
-        [context.id, user.id],
+           last_read_message_id=EXCLUDED.last_read_message_id,read_at=EXCLUDED.read_at
+         WHERE conversation_reads.last_read_message_id IS NULL
+            OR EXISTS (
+              SELECT 1 FROM messages previous
+              WHERE previous.id=conversation_reads.last_read_message_id
+                AND (previous.created_at,previous.id)<=($4,$3)
+            )`,
+        [context.id, user.id, target.id, target.created_at],
       );
+    }
     return { read: true };
   }
 
