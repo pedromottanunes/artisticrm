@@ -89,6 +89,7 @@ export async function deleteLeadData(
     });
     await tx.remove('claims', { 'response.id': id });
     await tx.remove('instagram_comments', { opportunity_id: id });
+    await tx.remove('instagram_prospects', { opportunity_id: id });
     await tx.remove('operation_receipts', {
       'response.id': { $in: [id, ...appointments.map((a) => a.id)] },
     });
@@ -178,6 +179,7 @@ export async function deleteLeadData(
       [id],
     );
     await tx.query('DELETE FROM instagram_comments WHERE opportunity_id=$1', [id]);
+    await tx.query('DELETE FROM instagram_prospects WHERE opportunity_id=$1', [id]);
     await tx.query(
       `DELETE FROM operation_receipts WHERE response->>'id'=$1 OR response->>'id' IN
       (SELECT id::text FROM appointments WHERE opportunity_id=$1::uuid)`,

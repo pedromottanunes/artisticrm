@@ -4,6 +4,7 @@ import { CRM } from './crm.js';
 import { deleteLeadData, type DeleteLeadInput } from './lead-deletion.js';
 import type { Sql } from './db.js';
 import { lockActor } from './access.js';
+import { transferProspects } from './instagram-prospects.js';
 import { hashPassword, verifyPassword } from './auth.js';
 import {
   closedStages,
@@ -265,6 +266,7 @@ export class Operations extends CRM {
     });
   }
   private async assign(tx: Sql, row: Opportunity, target: User, actor: User, reason: string) {
+    await transferProspects(tx, row.id, target.id, await this.now(tx));
     // Transfer is an administrative assignment, not an attendant's acceptance.
     await tx.query(
       `UPDATE opportunities SET state='CLAIMED',owner_id=$2,reserved_to=NULL,expires_at=NULL,

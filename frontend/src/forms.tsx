@@ -24,40 +24,77 @@ import {
 } from './api';
 import { Transfer, AppointmentEditor } from './operations';
 import { Modal, Source, Badge, dateLabel } from './components';
+import { InstagramProspectForm } from './instagram-prospects';
 
-export function LeadForm({
+export function LeadForm(props: {
+  isManager: boolean;
+  users: User[];
+  onClose: () => void;
+  onCreated: (result: { id: string; duplicate: boolean }) => Promise<void>;
+  onOpenLead: (id: string) => void;
+}) {
+  const [prospects, setProspects] = useState(!props.isManager);
+  return prospects ? (
+    <InstagramProspectForm {...props} onManual={() => setProspects(false)} />
+  ) : (
+    <ManualLeadForm
+      isManager={props.isManager}
+      onClose={props.onClose}
+      onCreated={props.onCreated}
+      onProspects={() => setProspects(true)}
+    />
+  );
+}
+
+function ManualLeadForm({
+  isManager,
   onClose,
   onCreated,
+  onProspects,
 }: {
+  isManager: boolean;
   onClose: () => void;
-  onCreated: () => Promise<void>;
+  onCreated: (result: { id: string; duplicate: boolean }) => Promise<void>;
+  onProspects: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const key = useRef(crypto.randomUUID());
+  const pending = useRef(false);
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (busy) return;
+    if (pending.current) return;
+    pending.current = true;
     setBusy(true);
     setError('');
     const values = Object.fromEntries(new FormData(e.currentTarget));
     try {
-      await api('/opportunities', {
+      const result = await api<{ id: string; duplicate: boolean }>('/opportunities', {
         method: 'POST',
         headers: { 'Idempotency-Key': key.current },
         body: JSON.stringify(values),
       });
-      await onCreated();
+      await onCreated(result);
     } catch (err) {
       setError((err as Error).message);
     } finally {
+      pending.current = false;
       setBusy(false);
     }
   };
   return (
     <Modal
       title="Novo lead"
-      description="Novo contato entra no rodízio. Retornos após encerramento aguardam revisão da gestão."
+      titleAccessory={
+        <button className="button outline compact" disabled={busy} onClick={onProspects}>
+          Reservas Instagram
+        </button>
+      }
+      description={
+        isManager
+          ? 'Novo contato entra no rodízio. Retornos após encerramento aguardam revisão da gestão.'
+          : 'O novo lead ficará vinculado a você, sem passar pelo rodízio.'
+      }
       onClose={onClose}
     >
       <form onSubmit={submit}>
@@ -92,7 +129,7 @@ export function LeadForm({
           </label>
           <label className="full">
             Origem informada
-            <select name="source">
+            <select name="source" defaultValue={isManager ? 'Cadastro manual' : 'Indicação'}>
               <option>Cadastro manual</option>
               <option>Não identificada</option>
               <option>Google Ads</option>
@@ -103,9 +140,7 @@ export function LeadForm({
           </label>
           <div className="inline-info full">
             <ShieldCheck size={18} />
-            <span>
-              Use apenas dados de teste nesta etapa. Nenhuma mensagem será enviada automaticamente.
-            </span>
+            <span>Nenhuma mensagem será enviada automaticamente.</span>
           </div>
           {error && (
             <p className="form-error full" role="alert">
@@ -118,7 +153,7 @@ export function LeadForm({
             Cancelar
           </button>
           <button className="button gold" disabled={busy}>
-            {busy ? 'Distribuindo…' : 'Cadastrar e distribuir'}
+            {busy ? 'Salvando…' : isManager ? 'Cadastrar e distribuir' : 'Cadastrar lead'}
             <ArrowRight size={16} />
           </button>
         </div>

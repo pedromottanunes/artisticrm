@@ -7,6 +7,7 @@ import { DomainError, isClosedStage, type User } from './types.js';
 import type { InstagramConfig, InstagramFetch } from './instagram.js';
 import { enqueuePushEvent, putPush } from './push-store.js';
 import { wasDeleted } from './lead-deletion.js';
+import { findProspect, finishProspect, prospectBlocksComment } from './instagram-prospects.js';
 
 const DAY = 86_400_000;
 const privateReplyReceiptSchema = z.object({
@@ -457,9 +458,40 @@ export class InstagramComments {
           [this.config.accountId, time, cursor?.[0] ?? null, cursor?.[1] ?? null],
         )
       ).rows;
+    const usernames = rows
+      .slice(0, 30)
+      .map((row) => String(row.username).toLowerCase())
+      .filter(Boolean);
+    const reservations =
+      this.db.kind === 'mongo'
+        ? await this.db.many(
+            'instagram_prospects',
+            { account_id: this.config.accountId, username: { $in: usernames } },
+            {},
+            30,
+          )
+        : (
+            await this.db.query<Row>(
+              'SELECT * FROM instagram_prospects WHERE account_id=$1 AND username=ANY($2::text[]) LIMIT 30',
+              [this.config.accountId, usernames],
+            )
+          ).rows;
+    const owners = new Map(reservations.map((row) => [row.username, row]));
     return {
       configured: true,
-      comments: rows.slice(0, 30).map((row) => ({ ...row, can_claim: user.role === 'attendant' })),
+      comments: rows
+        .slice(0, 30)
+        .map((row) => ({
+          ...row,
+          can_claim:
+            user.role === 'attendant' &&
+            !prospectBlocksComment(
+              owners.get(row.username.toLowerCase()),
+              user.id,
+              time,
+              row.sender_id,
+            ),
+        })),
       next_cursor:
         rows.length > 30 ? `${new Date(rows[29].received_at).toISOString()}|${rows[29].id}` : null,
     };
@@ -471,6 +503,11 @@ export class InstagramComments {
       await this.actor(tx, user);
       const row = await one(tx, 'instagram_comments', { id, account_id: config.accountId });
       if (!row) throw new DomainError('NOT_FOUND', 'Comentário não encontrado.', 404);
+      const reservation = row.username
+        ? await findProspect(tx, config.accountId, row.username)
+        : null;
+      if (prospectBlocksComment(reservation, user.id, new Date(), row.sender_id))
+        throw new DomainError('PROFILE_RESERVED', 'Este perfil foi reservado por outro consultor.');
       if (row.opportunity_id || row.version !== version)
         throw new DomainError('COMMENT_CHANGED', 'Este comentário mudou. Atualize o bolsão.');
       await update(
@@ -499,6 +536,14 @@ export class InstagramComments {
         );
       }
       const time = await now(tx);
+      const reservation = comment.username
+        ? await findProspect(tx, config.accountId, comment.username)
+        : null;
+      if (prospectBlocksComment(reservation, user.id, time, comment.sender_id))
+        throw new DomainError(
+          'PROFILE_RESERVED',
+          'Este perfil possui uma reserva. Solicite revisão à gestão.',
+        );
       if (comment.ignored || comment.version !== version)
         throw new DomainError('COMMENT_CHANGED', 'Este comentário mudou. Atualize o bolsão.');
       if (new Date(comment.reply_deadline_at).getTime() <= time.getTime())
@@ -652,6 +697,19 @@ export class InstagramComments {
         );
       }
       // Keep the public comment in history without treating it as an inbound Direct/open window.
+      if (reservation?.status === 'waiting' && new Date(reservation.expires_at) > time)
+        await finishProspect(
+          tx,
+          { reservation },
+          {
+            provider: 'instagram',
+            account_id: config.accountId,
+            external_user_id: comment.sender_id,
+          },
+          lead.id,
+          user.id,
+          time,
+        );
       await insert(tx, 'messages', {
         id: randomUUID(),
         conversation_id: conversation.id,

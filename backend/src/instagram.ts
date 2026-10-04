@@ -9,6 +9,13 @@ import { wasDeleted } from './lead-deletion.js';
 import { enqueuePushEvent } from './push-store.js';
 import { InstagramComments, commentChangeSchema, type CommentEvent } from './instagram-comments.js';
 import { MediaProxy, trustedMediaUrl } from './media-proxy.js';
+import { InstagramProspects, type ProspectRouting } from './instagram-prospects.js';
+
+class ProspectProfileRetry extends Error {
+  constructor(readonly retryAt: number) {
+    super('PROSPECT_PROFILE_RETRY');
+  }
+}
 
 export interface InstagramConfig {
   appSecret: string;
@@ -868,6 +875,65 @@ export class InstagramCentral {
     });
   }
 
+  private async prospectRouting(
+    value: NormalizedInstagramEvent & { lead: LeadInput },
+    receivedAt: Date | string,
+    attempts: number,
+    beforeRequest: () => Promise<void>,
+  ): Promise<ProspectRouting> {
+    const config = this.config!;
+    const db = this.crm.db;
+    const routing: ProspectRouting = { receivedAt: new Date(receivedAt).toISOString() };
+    const identity =
+      db.kind === 'mongo'
+        ? await db.one('contact_identities', {
+            provider: 'instagram',
+            channel_account_id: config.accountId,
+            external_user_id: value.sender_id,
+          })
+        : (
+            await db.query<{ username: string }>(
+              "SELECT username FROM contact_identities WHERE provider='instagram' AND channel_account_id=$1 AND external_user_id=$2",
+              [config.accountId, value.sender_id],
+            )
+          ).rows[0];
+    // An existing ID/owner always wins. Do not slow established conversations down.
+    if (identity) return { ...routing, username: identity.username || undefined };
+    if (!(await new InstagramProspects(db, config.accountId).hasReservationsToResolve()))
+      return routing;
+    if (config.profileLookup === false || attempts >= 3) return { ...routing, unresolved: true };
+    // A paused circuit did not attempt a lookup. Reschedule without consuming its request budget.
+    if (this.profilePausedUntil > Date.now())
+      throw new ProspectProfileRetry(this.profilePausedUntil);
+    await beforeRequest();
+    try {
+      const url = new URL(
+        `https://graph.instagram.com/${config.graphApiVersion}/${encodeURIComponent(value.sender_id)}`,
+      );
+      url.searchParams.set('fields', 'id,username');
+      const response = await this.request(url, {
+        headers: { Authorization: `Bearer ${config.accessToken}` },
+        signal: AbortSignal.timeout(4_000),
+      });
+      if (response.ok) {
+        const profile = userProfileSchema.safeParse(await response.json());
+        if (profile.success && profile.data.id === value.sender_id && profile.data.username)
+          return { ...routing, username: profile.data.username.toLowerCase() };
+      } else {
+        if (response.status === 429 || response.status >= 500)
+          this.profilePausedUntil = Date.now() + 60_000;
+        await response.body?.cancel().catch(() => {});
+      }
+    } catch {
+      /* Retry the stored webhook, never fall through to random assignment. */
+    }
+    if (attempts < 2)
+      throw new ProspectProfileRetry(
+        Math.max(this.profilePausedUntil, Date.now() + 2 ** (attempts + 1) * 1000),
+      );
+    return { ...routing, unresolved: true };
+  }
+
   async drain(limit = 25) {
     const config = this.config;
     if (!config) return;
@@ -895,6 +961,9 @@ export class InstagramCentral {
                   event_id: string;
                   event: NormalizedInstagramEvent;
                   attempts: number;
+                  received_at: Date;
+                  prospect_routing?: ProspectRouting | null;
+                  prospect_profile_attempts?: number;
                 }>(
                   'instagram_webhook_inbox',
                   {
@@ -919,8 +988,15 @@ export class InstagramCentral {
             })
           : await db.transaction(async (tx) => {
               const selected = (
-                await tx.query<{ event_id: string; event: unknown; attempts: number }>(
-                  `SELECT event_id,event,attempts FROM instagram_webhook_inbox
+                await tx.query<{
+                  event_id: string;
+                  event: unknown;
+                  attempts: number;
+                  received_at: Date;
+                  prospect_routing?: ProspectRouting | null;
+                  prospect_profile_attempts?: number;
+                }>(
+                  `SELECT event_id,event,attempts,received_at,prospect_routing,prospect_profile_attempts FROM instagram_webhook_inbox
                    WHERE processed_at IS NULL AND available_at<=clock_timestamp()
                      AND instagram_account_id=$1
                    ORDER BY received_at,event_id LIMIT 1 FOR UPDATE SKIP LOCKED`,
@@ -955,10 +1031,56 @@ export class InstagramCentral {
             'ReferÃªncia de anÃºncio recebida pela Meta antes da primeira mensagem.';
         }
         await this.comments.recoverRecipient(value.sender_id);
-        const result = await this.crm.ingest(value.lead, row.event_id, null);
+        const routing =
+          row.prospect_routing ??
+          (await this.prospectRouting(
+            value,
+            row.received_at,
+            row.prospect_profile_attempts ?? 0,
+            async () => {
+              // Persist before network I/O, outside any transaction. A restart keeps the bounded budget.
+              const recorded =
+                db.kind === 'mongo'
+                  ? (
+                      await db.update(
+                        'instagram_webhook_inbox',
+                        { event_id: row.event_id, lease_id: lease },
+                        { $inc: { prospect_profile_attempts: 1 } },
+                      )
+                    ).matchedCount > 0
+                  : (
+                      await db.query(
+                        'UPDATE instagram_webhook_inbox SET prospect_profile_attempts=prospect_profile_attempts+1 WHERE event_id=$1 AND lease_id=$2 RETURNING event_id',
+                        [row.event_id, lease],
+                      )
+                    ).rows.length > 0;
+              if (!recorded) throw new Error('PROSPECT_PROFILE_LEASE_LOST');
+            },
+          ));
+        if (!row.prospect_routing) {
+          // Persist the decision inputs before ingest so replay never changes the event fingerprint.
+          if (db.kind === 'mongo')
+            await db.update(
+              'instagram_webhook_inbox',
+              { event_id: row.event_id, lease_id: lease },
+              { $set: { prospect_routing: routing } },
+            );
+          else
+            await db.query(
+              'UPDATE instagram_webhook_inbox SET prospect_routing=$3 WHERE event_id=$1 AND lease_id=$2',
+              [row.event_id, lease, JSON.stringify(routing)],
+            );
+        }
+        const result = await this.crm.ingest(value.lead, row.event_id, null, undefined, routing);
         await this.persistInbound(row.event_id, lease, value, result.id, pending?.sourceEventId);
-      } catch {
+      } catch (error) {
         const seconds = Math.min(300, 2 ** Math.min(row.attempts + 1, 8));
+        const delayMs =
+          error instanceof ProspectProfileRetry
+            ? Math.max(0, error.retryAt - Date.now())
+            : seconds * 1000;
+        const reason =
+          error instanceof ProspectProfileRetry ? 'PROFILE_RETRY_PENDING' : 'PROCESSING_FAILED';
         if (db.kind === 'mongo')
           await db.update(
             'instagram_webhook_inbox',
@@ -966,17 +1088,17 @@ export class InstagramCentral {
             {
               $set: {
                 lease_id: null,
-                last_error: 'PROCESSING_FAILED',
-                available_at: new Date((await db.now()).getTime() + seconds * 1000),
+                last_error: reason,
+                available_at: new Date((await db.now()).getTime() + delayMs),
               },
             },
           );
         else
           await db.query(
-            `UPDATE instagram_webhook_inbox SET lease_id=NULL,last_error='PROCESSING_FAILED',
-               available_at=clock_timestamp()+($3 * interval '1 second')
+            `UPDATE instagram_webhook_inbox SET lease_id=NULL,last_error=$4,
+               available_at=clock_timestamp()+($3 * interval '1 millisecond')
              WHERE event_id=$1 AND lease_id=$2`,
-            [row.event_id, lease, seconds],
+            [row.event_id, lease, delayMs, reason],
           );
       }
     }

@@ -82,6 +82,8 @@ export async function migrate(db: Database) {
       '026_receipt_security.sql',
       '027_agenda_paging.sql',
       '028_lead_lists.sql',
+      '029_instagram_prospects.sql',
+      '030_prospect_profile_retries.sql',
     ]) {
       const version = file.split('_')[0];
       const done = await tx.query('SELECT version FROM schema_migrations WHERE version=$1', [

@@ -354,6 +354,25 @@ export async function initializeMongo(db: MongoStore) {
     .collection('contact_identities')
     .createIndex({ provider: 1, channel_account_id: 1, external_user_id: 1 }, { unique: true });
   await db.collection('contact_identities').createIndex({ contact_id: 1 });
+  await db
+    .collection('contact_identities')
+    .createIndex(
+      { provider: 1, channel_account_id: 1, username: 1 },
+      { collation: { locale: 'en', strength: 2 } },
+    );
+  await db.collection('instagram_prospects').createIndex({ id: 1 }, { unique: true });
+  await db
+    .collection('instagram_prospects')
+    .createIndex({ account_id: 1, username: 1 }, { unique: true });
+  await db
+    .collection('instagram_prospects')
+    .createIndex({ account_id: 1, owner_id: 1, updated_at: -1, id: -1 });
+  await db.collection('instagram_prospects').createIndex({ account_id: 1, updated_at: -1, id: -1 });
+  await db
+    .collection('instagram_prospects')
+    .createIndex({ account_id: 1, status: 1, expires_at: 1 });
+  await db.collection('instagram_prospects').createIndex({ account_id: 1, external_user_id: 1 });
+  await db.collection('instagram_prospects').createIndex({ opportunity_id: 1 });
   await db.collection('contact_identities').createIndex({
     provider: 1,
     channel_account_id: 1,

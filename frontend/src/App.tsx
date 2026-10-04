@@ -564,17 +564,15 @@ export function App() {
             </h1>
           </div>
           <div className="topbar-right">
-            {isManager && (
-              <button
-                className="button gold compact header-primary-action"
-                aria-label="Novo lead"
-                onClick={() => setNewLead(true)}
-                disabled={!connected}
-              >
-                <Plus size={17} />
-                <span>Novo lead</span>
-              </button>
-            )}
+            <button
+              className="button gold compact header-primary-action"
+              aria-label="Novo lead"
+              onClick={() => setNewLead(true)}
+              disabled={!connected}
+            >
+              <Plus size={17} />
+              <span>Novo lead</span>
+            </button>
             <span className={`sync-status ${connected ? '' : 'offline'}`}>
               <i />
               {connected ? 'Sincronizado' : 'Sem conexão'}
@@ -797,12 +795,25 @@ export function App() {
       )}
       {newLead && (
         <LeadForm
-          onClose={() => setNewLead(false)}
-          onCreated={async () => {
+          isManager={isManager}
+          users={data.users}
+          onOpenLead={(id) => {
             setNewLead(false);
-            setNotice('Cadastro recebido. O servidor aplicou a regra de distribuição.');
+            void openDetail(id);
+          }}
+          onClose={() => setNewLead(false)}
+          onCreated={async (result) => {
+            setNewLead(false);
+            setNotice(
+              isManager
+                ? 'Cadastro recebido. O servidor aplicou a regra de distribuição.'
+                : result.duplicate
+                  ? 'Este lead já está vinculado a você.'
+                  : 'Lead cadastrado e vinculado a você.',
+            );
             setLeadRevision((value) => value + 1);
             await refresh();
+            if (!isManager) await openDetail(result.id);
           }}
         />
       )}

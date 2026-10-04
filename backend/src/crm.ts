@@ -13,8 +13,10 @@ import {
   type User,
 } from './types.js';
 import { lockActor } from './access.js';
+import { assertManualLeadAccess } from './manual-leads.js';
 import { enqueuePushEvent } from './push-store.js';
 import { wasDeleted } from './lead-deletion.js';
+import { decideProspect, finishProspect, type ProspectRouting } from './instagram-prospects.js';
 import {
   selectWeightedParticipant,
   type WeightedQueueParticipant,
@@ -205,6 +207,7 @@ export class CRM {
     externalId: string,
     actor: string | null,
     authenticatedUser?: User,
+    prospectRouting?: ProspectRouting,
   ) {
     const fingerprint = createHash('sha256')
       .update(
@@ -228,7 +231,8 @@ export class CRM {
           'SELECT * FROM distribution_settings WHERE id=1 FOR UPDATE',
         )
       ).rows[0];
-      if (authenticatedUser) await lockActor(tx, authenticatedUser);
+      const currentActor = authenticatedUser ? await lockActor(tx, authenticatedUser) : undefined;
+      const manualOwner = currentActor?.role === 'attendant' ? currentActor.id : undefined;
       if (await wasDeleted(tx, externalId))
         throw new DomainError(
           'EVENT_DELETED',
@@ -246,6 +250,15 @@ export class CRM {
           throw new DomainError(
             'IDEMPOTENCY_CONFLICT',
             'Esta solicitação já foi usada com outros dados. Reabra o formulário para um novo cadastro.',
+          );
+        if (manualOwner)
+          assertManualLeadAccess(
+            manualOwner,
+            (
+              await tx.query<Opportunity>('SELECT * FROM opportunities WHERE id=$1', [
+                duplicate.opportunity_id,
+              ])
+            ).rows[0],
           );
         return { id: duplicate.opportunity_id, duplicate: true };
       }
@@ -288,18 +301,21 @@ export class CRM {
             input.identity.provider,
             input.identity.account_id,
             input.identity.external_user_id,
-            input.identity.username ?? '',
+            prospectRouting?.username ?? input.identity.username ?? '',
             input.identity.display_name ?? '',
             now,
           ],
         );
       const existing = (
-        await tx.query<{ id: string }>(
-          `SELECT id FROM opportunities WHERE contact_id=$1 AND stage NOT IN (${closedStageSql}) FOR UPDATE`,
+        await tx.query<Pick<Opportunity, 'id' | 'owner_id' | 'state' | 'stage'>>(
+          `SELECT id,owner_id,state,stage FROM opportunities WHERE contact_id=$1 AND stage NOT IN (${closedStageSql}) FOR UPDATE`,
           [contact.id],
         )
       ).rows[0];
+      const prospect = await decideProspect(tx, input.identity, prospectRouting, now);
       if (existing) {
+        if (manualOwner) assertManualLeadAccess(manualOwner, existing);
+        await finishProspect(tx, prospect, input.identity, existing.id, existing.owner_id, now);
         await tx.query('UPDATE opportunities SET last_message_at=$2 WHERE id=$1', [
           existing.id,
           now,
@@ -324,7 +340,11 @@ export class CRM {
       const returning = !!(
         await tx.query('SELECT id FROM opportunities WHERE contact_id=$1 LIMIT 1', [contact.id])
       ).rows.length;
-      const selection = returning ? undefined : await this.next(tx, settings.last_position);
+      if (manualOwner && returning) assertManualLeadAccess(manualOwner, null);
+      const selection =
+        returning || manualOwner || prospect.ownerId || prospect.review
+          ? undefined
+          : await this.next(tx, settings.last_position);
       const attendant = selection?.selected;
       const id = randomUUID();
       const expires = attendant
@@ -350,7 +370,16 @@ export class CRM {
           expires,
         ],
       );
-      if (returning) await tx.query('UPDATE opportunities SET needs_review=true WHERE id=$1', [id]);
+      if (returning || prospect.review)
+        await tx.query('UPDATE opportunities SET needs_review=true WHERE id=$1', [id]);
+      const prospectOwner = !returning && !prospect.review ? prospect.ownerId : undefined;
+      const assignedOwner = manualOwner ?? prospectOwner;
+      if (assignedOwner)
+        await tx.query(
+          "UPDATE opportunities SET state='CLAIMED',owner_id=$2,claimed_at=$3 WHERE id=$1",
+          [id, assignedOwner, now],
+        );
+      await finishProspect(tx, prospect, input.identity, id, prospectOwner ?? null, now);
       if (attendant)
         await tx.query('UPDATE distribution_settings SET last_position=$1 WHERE id=1', [
           attendant.queue_position,
@@ -362,23 +391,42 @@ export class CRM {
         fingerprint,
       ]);
       await recordMetaAttribution(tx, id, externalId, input.meta_attribution, now);
+      if (prospectOwner || prospect.review)
+        await this.audit(
+          tx,
+          id,
+          null,
+          'prospect.routed',
+          prospectOwner
+            ? 'Resposta vinculada à reserva de prospecção do consultor.'
+            : 'Identificação da prospecção pendente. Revisão da gestão necessária.',
+          { owner_id: prospectOwner ?? null },
+        );
       await this.audit(
         tx,
         id,
         actor,
         'lead.created',
-        attendant
-          ? `Distribuído para ${attendant.name}. Reserva de ${settings.timeout_minutes} minutos.`
-          : returning
-            ? 'Contato retornou após encerramento. Aguardando revisão da gestão.'
-            : 'Aguardando distribuição: não há atendente habilitada.',
+        manualOwner
+          ? 'Lead cadastrado manualmente e vinculado ao consultor responsável, sem rodízio.'
+          : prospectOwner
+            ? 'Lead vinculado ao consultor pela reserva de prospecção.'
+            : prospect.review
+              ? 'Aguardando identificação da prospecção e revisão da gestão.'
+              : attendant
+                ? `Distribuído para ${attendant.name}. Reserva de ${settings.timeout_minutes} minutos.`
+                : returning
+                  ? 'Contato retornou após encerramento. Aguardando revisão da gestão.'
+                  : 'Aguardando distribuição: não há atendente habilitada.',
         attendant
           ? {
               reserved_to: attendant.id,
               queue_weight: attendant.queue_weight,
               total_active_weight: selection!.totalWeight,
             }
-          : {},
+          : manualOwner
+            ? { owner_id: manualOwner }
+            : {},
       );
       return { id, duplicate: false };
     });

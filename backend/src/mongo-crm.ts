@@ -1,5 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { enqueuePushEvent } from './push-store.js';
+import { assertManualLeadAccess } from './manual-leads.js';
+import {
+  decideProspect,
+  finishProspect,
+  transferProspects,
+  type ProspectRouting,
+} from './instagram-prospects.js';
 import { deleteLeadData, wasDeleted, type DeleteLeadInput } from './lead-deletion.js';
 import { MongoStore, MongoTx, mongoUser } from './mongo-store.js';
 import {
@@ -205,6 +212,7 @@ export class MongoOperations {
     externalId: string,
     actor: string | null,
     authenticatedUser?: User,
+    prospectRouting?: ProspectRouting,
   ) {
     const fingerprint = digest({
       name: input.name,
@@ -218,7 +226,8 @@ export class MongoOperations {
       is_demo: input.is_demo ?? false,
     });
     return this.db.atomic(async (tx) => {
-      if (authenticatedUser) await this.actor(tx, authenticatedUser);
+      const currentActor = authenticatedUser ? await this.actor(tx, authenticatedUser) : undefined;
+      const manualOwner = currentActor?.role === 'attendant' ? currentActor.id : undefined;
       if (await wasDeleted(tx, externalId))
         throw new DomainError(
           'EVENT_DELETED',
@@ -229,6 +238,11 @@ export class MongoOperations {
       if (prior) {
         if (prior.fingerprint !== fingerprint)
           throw new DomainError('IDEMPOTENCY_CONFLICT', 'Evento reutilizado com outros dados.');
+        if (manualOwner)
+          assertManualLeadAccess(
+            manualOwner,
+            await tx.one<Opportunity>('opportunities', { id: prior.opportunity_id }),
+          );
         return { id: prior.opportunity_id as string, duplicate: true };
       }
       const now = await this.now(tx);
@@ -269,7 +283,9 @@ export class MongoOperations {
               external_user_id: input.identity.external_user_id,
             },
             $set: {
-              ...(input.identity.username ? { username: input.identity.username } : {}),
+              ...(prospectRouting?.username || input.identity.username
+                ? { username: prospectRouting?.username ?? input.identity.username }
+                : {}),
               ...(input.identity.display_name ? { display_name: input.identity.display_name } : {}),
               last_seen_at: now,
             },
@@ -280,7 +296,10 @@ export class MongoOperations {
         contact_id: contact.id,
         open: true,
       });
+      const prospect = await decideProspect(tx, input.identity, prospectRouting, now);
       if (existing) {
+        if (manualOwner) assertManualLeadAccess(manualOwner, existing);
+        await finishProspect(tx, prospect, input.identity, existing.id, existing.owner_id, now);
         await tx.update('opportunities', { id: existing.id }, { $set: { last_message_at: now } });
         await tx.insert('inbound_events', {
           external_id: externalId,
@@ -306,9 +325,15 @@ export class MongoOperations {
         return { id: existing.id, duplicate: true };
       }
       const returning = !!(await tx.count('opportunities', { contact_id: contact.id }));
+      if (manualOwner && returning) assertManualLeadAccess(manualOwner, null);
       const settings = (await tx.one('distribution_settings', { id: 1 }))!;
-      const selection = returning ? undefined : await this.next(tx, settings.last_position);
+      const selection =
+        returning || manualOwner || prospect.ownerId || prospect.review
+          ? undefined
+          : await this.next(tx, settings.last_position);
       const next = selection?.selected;
+      const prospectOwner = !returning && !prospect.review ? prospect.ownerId : undefined;
+      const assignedOwner = manualOwner ?? prospectOwner;
       const id = randomUUID();
       await tx.insert('opportunities', {
         id,
@@ -320,14 +345,14 @@ export class MongoOperations {
         source_evidence: input.is_demo
           ? 'Cenário fictício de demonstração'
           : (input.source_evidence ?? 'Informada manualmente; sem vínculo verificado com anúncio'),
-        state: next ? 'RESERVED' : 'PENDING',
+        state: assignedOwner ? 'CLAIMED' : next ? 'RESERVED' : 'PENDING',
         reserved_to: next?.id ?? null,
-        owner_id: null,
+        owner_id: assignedOwner ?? null,
         created_at: now,
         expires_at: next ? new Date(now.getTime() + settings.timeout_minutes * 60_000) : null,
         last_message_at: now,
-        claimed_at: null,
-        needs_review: returning,
+        claimed_at: assignedOwner ? now : null,
+        needs_review: returning || prospect.review === true,
         open: true,
         next_action: '',
         stage: 'NEW_LEAD',
@@ -343,6 +368,7 @@ export class MongoOperations {
         contract_status: null,
         version: 1,
       });
+      await finishProspect(tx, prospect, input.identity, id, prospectOwner ?? null, now);
       if (next)
         await tx.update(
           'distribution_settings',
@@ -363,23 +389,42 @@ export class MongoOperations {
           ...input.meta_attribution,
           received_at: now,
         });
+      if (prospectOwner || prospect.review)
+        await this.audit(
+          tx,
+          id,
+          null,
+          'prospect.routed',
+          prospectOwner
+            ? 'Resposta vinculada à reserva de prospecção do consultor.'
+            : 'Identificação da prospecção pendente. Revisão da gestão necessária.',
+          { owner_id: prospectOwner ?? null },
+        );
       await this.audit(
         tx,
         id,
         actor,
         'lead.created',
-        next
-          ? `Distribuído para ${next.name}. Reserva de ${settings.timeout_minutes} minutos.`
-          : returning
-            ? 'Contato retornou após encerramento. Aguardando revisão da gestão.'
-            : 'Aguardando distribuição: não há atendente habilitada.',
+        manualOwner
+          ? 'Lead cadastrado manualmente e vinculado ao consultor responsável, sem rodízio.'
+          : prospectOwner
+            ? 'Lead vinculado ao consultor pela reserva de prospecção.'
+            : prospect.review
+              ? 'Aguardando identificação da prospecção e revisão da gestão.'
+              : next
+                ? `Distribuído para ${next.name}. Reserva de ${settings.timeout_minutes} minutos.`
+                : returning
+                  ? 'Contato retornou após encerramento. Aguardando revisão da gestão.'
+                  : 'Aguardando distribuição: não há atendente habilitada.',
         next
           ? {
               reserved_to: next.id,
               queue_weight: next.queue_weight,
               total_active_weight: selection!.totalWeight,
             }
-          : {},
+          : manualOwner
+            ? { owner_id: manualOwner }
+            : {},
       );
       return { id, duplicate: false };
     });
@@ -995,6 +1040,7 @@ export class MongoOperations {
     });
   }
   private async assign(tx: MongoTx, row: Opportunity, target: User, actor: User, reason: string) {
+    await transferProspects(tx, row.id, target.id, await this.now(tx));
     await tx.update(
       'opportunities',
       { id: row.id },
@@ -1154,6 +1200,7 @@ export class MongoOperations {
         await tx.remove('operation_receipts', { actor_id: id });
         await tx.remove('push_records', { kind: 'subscription', 'data.userId': id });
         await tx.remove('message_shortcuts', { user_id: id });
+        await tx.remove('instagram_prospects', { owner_id: id });
         await tx.remove('users', { id });
         const settings = (await tx.one('distribution_settings', { id: 1 }))!;
         const remaining = await tx.many<QueueUser>(

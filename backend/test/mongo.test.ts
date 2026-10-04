@@ -27,6 +27,9 @@ import { checkPrivateReplyRecovery } from './private-reply-recovery-checks.js';
 import { checkEncodedRoutes } from './security-checks.js';
 import { checkAgenda } from './agenda-checks.js';
 import { checkLeadLists } from './lead-list-checks.js';
+import { checkProspects } from './prospect-checks.js';
+import { checkManualLeads } from './manual-lead-checks.js';
+import { prospectRegressions } from './prospect-regression-checks.js';
 import {
   checkDeletePermissions,
   checkDeleteCleanup,
@@ -52,6 +55,16 @@ const metaMarketingTestConfig: MetaMarketingConfig = {
   graphApiVersion: 'v26.0',
 };
 let password_hash: string;
+for (const [name, check] of prospectRegressions)
+  test(`${name} (Mongo)`, async () => {
+    await check(db, manager, users);
+  });
+test('Instagram profile reservations, routing, recovery and permissions (Mongo)', async () => {
+  await checkProspects(db, manager, users);
+});
+test('Manual leads: consultant ownership, referral, replay, conflicts and permissions (Mongo)', async () => {
+  await checkManualLeads(db, manager, users);
+});
 before(
   async () => {
     // A real, isolated mongod replica set: tests never use an Atlas URI or a live database.

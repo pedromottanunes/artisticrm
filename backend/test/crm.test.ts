@@ -530,7 +530,7 @@ test('HTTP exige sessão, protege origem e restringe ações de gestão', async 
           payload: input(),
         })
       ).statusCode,
-      403,
+      400, // Manual creation is allowed, but still requires an idempotency key.
     );
     assert.equal(
       (await app.inject({ url: '/api/v1/integrations/status', headers })).statusCode,

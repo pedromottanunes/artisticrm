@@ -14,6 +14,7 @@ interface Comment {
   created_at: string;
   version: number;
   comment_count: number;
+  can_claim?: boolean;
 }
 interface Result {
   configured: boolean;
@@ -216,18 +217,18 @@ export function CommentPool({
                   <div className="comment-actions">
                     <button
                       className="button outline compact"
-                      disabled={!!busy}
+                      disabled={!!busy || comment.can_claim === false}
                       onClick={() => void act(comment, 'ignore')}
                     >
                       Ignorar
                     </button>
                     <button
                       className="button gold compact"
-                      disabled={!!busy}
+                      disabled={!!busy || comment.can_claim === false}
                       onClick={() => void act(comment, 'claim')}
                     >
                       <MessageCircle size={16} />
-                      {busy === comment.id ? 'Aguarde…' : 'Assumir e conversar'}
+                      {comment.can_claim === false ? 'Perfil reservado' : busy === comment.id ? 'Aguarde…' : 'Assumir e conversar'}
                     </button>
                   </div>
                 )}

@@ -25,6 +25,7 @@ import { tokenHash, verifyPassword } from './auth.js';
 import { loginSchema, passwordSchema } from './credentials.js';
 import { registerPush, type PushConfig, type PushSender } from './push.js';
 import { registerShortcuts } from './shortcuts.js';
+import { InstagramProspects, prospectSchema } from './instagram-prospects.js';
 import { DomainError, requireManager, stages, type User } from './types.js';
 
 declare module 'fastify' {
@@ -349,7 +350,6 @@ export async function buildApp(
     crm.detail(request.user, idParams.parse(request.params).id),
   );
   app.post('/api/v1/opportunities', async (request, reply) => {
-    requireManager(request.user);
     const input = leadSchema.parse(request.body);
     const key = z.string().min(8).max(100).parse(request.headers['idempotency-key']);
     const result = await crm.ingest(
@@ -359,6 +359,25 @@ export async function buildApp(
       request.user,
     );
     return reply.status(result.duplicate ? 200 : 201).send(result);
+  });
+  const prospects = new InstagramProspects(db, options.instagram?.accountId);
+  app.post('/api/v1/instagram/prospects', async (request, reply) => {
+    const result = await prospects.create(request.user, prospectSchema.parse(request.body));
+    return reply.status(result.duplicate ? 200 : 201).send(result);
+  });
+  app.get('/api/v1/instagram/prospects', async (request) => {
+    const query = z
+      .object({ before: z.string().max(80).optional() })
+      .strict()
+      .parse(request.query);
+    return prospects.list(request.user, query.before);
+  });
+  app.post('/api/v1/instagram/prospects/:id/cancel', async (request) => {
+    const { expected_version } = z
+      .object({ expected_version: z.number().int().positive() })
+      .strict()
+      .parse(request.body);
+    return prospects.cancel(request.user, idParams.parse(request.params).id, expected_version);
   });
   app.post('/api/v1/opportunities/:id/claim', async (request) => {
     const { id } = idParams.parse(request.params);
