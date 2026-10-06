@@ -21,6 +21,7 @@ export default defineConfig({
       DATABASE_URL: '',
       NODE_ENV: 'development',
       WHATSAPP_ENABLED: 'false',
+      META_MARKETING_ENABLED: 'false',
       PUSH_ENABLED: 'false',
     },
   },

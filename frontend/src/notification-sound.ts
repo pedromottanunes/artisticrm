@@ -1,4 +1,4 @@
-// A short, distinct three-pulse alert. Web Audio requires a user gesture; this
+// A short, high/low four-pulse danger alert. Web Audio requires a user gesture; this
 // only runs in an open, visible CRM. Background push sound belongs to the OS.
 let audio: AudioContext | undefined;
 let lastPlayed = 0;
@@ -46,16 +46,16 @@ export function playNotificationSound() {
   if (Date.now() - lastPlayed < 1100) return true;
   try {
     const start = audio.currentTime;
-    for (const [index, frequency] of [880, 1175, 880].entries()) {
+    for (const [index, frequency] of [880, 660, 880, 660].entries()) {
       const oscillator = audio.createOscillator();
       const gain = audio.createGain();
-      const at = start + index * 0.32;
-      oscillator.type = 'sine';
+      const at = start + index * 0.22;
+      oscillator.type = 'square';
       oscillator.frequency.value = frequency;
       gain.gain.setValueAtTime(0, at);
-      gain.gain.linearRampToValueAtTime(0.22, at + 0.015);
-      gain.gain.setValueAtTime(0.22, at + 0.16);
-      gain.gain.linearRampToValueAtTime(0, at + 0.25);
+      gain.gain.linearRampToValueAtTime(0.38, at + 0.01);
+      gain.gain.setValueAtTime(0.38, at + 0.14);
+      gain.gain.linearRampToValueAtTime(0, at + 0.21);
       oscillator.connect(gain);
       gain.connect(audio.destination);
       oscillator.onended = () => {
@@ -63,7 +63,7 @@ export function playNotificationSound() {
         gain.disconnect();
       };
       oscillator.start(at);
-      oscillator.stop(at + 0.26);
+      oscillator.stop(at + 0.22);
     }
     lastPlayed = Date.now();
     return true;

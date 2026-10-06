@@ -102,6 +102,7 @@ export async function deleteLeadData(
     await tx.remove('conversation_reads', { conversation_id: { $in: conversationIds } });
     await tx.remove('messages', { conversation_id: { $in: conversationIds } });
     await tx.remove('conversations', { opportunity_id: id });
+    await tx.remove('lead_notification_mutes', { opportunity_id: id });
     for (const collection of [
       'appointments',
       'audit_events',

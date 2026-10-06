@@ -1,0 +1,270 @@
+/* Outside the mobile breakpoint, the original form and toolbar are unchanged. */
+.lead-mobile-toolbar,
+.lead-mobile-tab-label {
+  display: none;
+}
+.lead-form-scroll {
+  display: contents;
+}
+
+@media (max-width: 760px), (max-width: 1024px) and (pointer: coarse) {
+  .modal.lead-detail-modal[open] {
+    position: fixed;
+    inset: var(--lead-viewport-top, 0px) 0 auto;
+    width: 100%;
+    max-width: 100%;
+    height: var(--lead-viewport-height, 100dvh);
+    max-height: var(--lead-viewport-height, 100dvh);
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    padding-top: env(safe-area-inset-top, 0px);
+    overflow: hidden;
+  }
+  .lead-detail-modal .lead-mobile-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    min-height: 52px;
+    padding: 4px 12px;
+    background: #fff;
+    z-index: 5;
+    border-bottom: 1px solid var(--line);
+  }
+  .lead-mobile-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 16px;
+  }
+  .lead-keyboard-title,
+  .lead-keyboard-save {
+    display: none;
+  }
+  .lead-mobile-menu {
+    flex-shrink: 0;
+  }
+  .lead-mobile-menu > summary {
+    display: grid;
+    place-items: center;
+    min-width: 44px;
+    min-height: 44px;
+    cursor: pointer;
+    list-style: none;
+  }
+  .lead-mobile-menu > summary::-webkit-details-marker {
+    display: none;
+  }
+  .lead-mobile-menu-panel {
+    position: absolute;
+    top: calc(env(safe-area-inset-top, 0px) + 54px);
+    right: 12px;
+    width: min(280px, calc(100vw - 24px));
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: 0 8px 28px #18364b26;
+  }
+  .lead-mobile-menu-panel button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 48px;
+    padding: 10px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .lead-mobile-menu-panel button:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .lead-detail-modal > .modal-heading {
+    position: static;
+    flex-shrink: 0;
+    padding: 10px 16px 6px;
+    border: 0;
+  }
+  .lead-detail-modal > .modal-heading > .icon-button {
+    display: none;
+  }
+  .lead-detail-modal .modal-heading-content {
+    width: 100%;
+    gap: 10px;
+  }
+  .lead-detail-modal .modal-heading-content > div {
+    flex: 1;
+  }
+  .lead-detail-modal .modal-title-line {
+    display: block;
+  }
+  .lead-detail-modal .modal-heading h2 {
+    font-size: 17px;
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .lead-detail-modal .lead-profile-avatar {
+    flex-basis: 34px;
+    width: 34px;
+    height: 34px;
+  }
+  .lead-detail-modal .lead-instagram-link {
+    margin-top: 3px;
+    font-size: 12px;
+  }
+  .lead-detail-modal .detail-summary {
+    flex-shrink: 0;
+    gap: 8px;
+    padding: 4px 16px 8px;
+    flex-wrap: wrap;
+    font-size: 11px;
+  }
+  .lead-detail-modal .detail-summary .badge {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    font-size: 11px;
+  }
+  .lead-detail-modal .detail-summary .source {
+    font-size: 11px;
+  }
+  .lead-detail-modal .detail-tabs {
+    flex-shrink: 0;
+    gap: 16px;
+    padding: 0 16px;
+    scrollbar-width: none;
+  }
+  .lead-detail-modal .detail-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .lead-detail-modal .detail-tabs > button {
+    font-size: 13px;
+    min-height: 44px;
+    padding: 8px 0;
+  }
+  .lead-detail-modal .tab-step,
+  .lead-detail-modal .lead-desktop-tab-label {
+    display: none;
+  }
+  .lead-detail-modal .lead-mobile-tab-label {
+    display: inline;
+  }
+  .lead-detail-modal.is-registration > form {
+    overflow: hidden;
+  }
+  .lead-detail-modal .lead-form-scroll {
+    display: block;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scroll-padding: 12px;
+  }
+  .lead-detail-modal.is-registration > form > .form-error {
+    flex-shrink: 0;
+    max-height: 25%;
+    overflow-y: auto;
+    margin: 8px 16px;
+    font-size: 13px;
+  }
+  .lead-detail-modal .commercial-form {
+    padding: 16px;
+    gap: 24px;
+  }
+  .lead-detail-modal .commercial-panel {
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+  .lead-detail-modal .commercial-lead-data > .commercial-section-heading {
+    display: none;
+  }
+  .lead-detail-modal .commercial-fields {
+    margin-top: 0;
+    gap: 14px;
+  }
+  .lead-detail-modal .commercial-form label,
+  .lead-detail-modal .lead-phone-field > label {
+    font-size: 14px;
+  }
+  .lead-detail-modal .commercial-form input,
+  .lead-detail-modal .commercial-form select,
+  .lead-detail-modal .commercial-form textarea {
+    min-height: 46px;
+    font-size: 16px;
+    padding: 10px 12px;
+  }
+  .lead-detail-modal .commercial-actions {
+    position: static;
+    display: flex;
+    flex-shrink: 0;
+    padding: 10px 16px max(10px, env(safe-area-inset-bottom, 0px));
+    gap: 0;
+    min-height: 0;
+    border-top: 1px solid var(--line);
+  }
+  .lead-detail-modal .commercial-action-group {
+    display: contents;
+  }
+  .lead-detail-modal .commercial-actions .lead-secondary-action {
+    display: none;
+  }
+  .lead-detail-modal .commercial-actions .lead-primary-save {
+    width: 100%;
+    min-height: 46px;
+    background: var(--gold);
+    border-color: var(--gold);
+    color: #fff;
+    font-size: 15px;
+  }
+  .lead-detail-modal .meta-attributions {
+    margin: 0 16px 16px;
+  }
+  .lead-detail-modal .meta-attributions > header {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding: 12px;
+  }
+  .lead-detail-modal .meta-attribution {
+    padding: 12px;
+  }
+  .lead-detail-modal .detail-evidence {
+    padding: 0 16px 16px;
+  }
+  .lead-detail-modal[data-keyboard-open='true'] > .modal-heading,
+  .lead-detail-modal[data-keyboard-open='true'] > .detail-summary,
+  .lead-detail-modal[data-keyboard-open='true'] > .detail-tabs,
+  .lead-detail-modal[data-keyboard-open='true'] .lead-normal-title,
+  .lead-detail-modal[data-keyboard-open='true'] .lead-mobile-menu,
+  .lead-detail-modal.is-registration[data-keyboard-open='true'] .commercial-actions {
+    display: none;
+  }
+  .lead-detail-modal[data-keyboard-open='true'] .lead-keyboard-title {
+    display: inline;
+  }
+  .lead-detail-modal[data-keyboard-open='true'] .lead-keyboard-save {
+    display: block;
+    min-height: 44px;
+    padding: 8px;
+    background: transparent;
+    border: 0;
+    color: #94611d;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .lead-keyboard-save:disabled {
+    opacity: 0.5;
+  }
+}

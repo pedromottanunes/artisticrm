@@ -46,6 +46,8 @@ Abra **http://127.0.0.1:5173**. Escolha Cadu para gestão ou uma atendente para 
 ## O que já funciona
 
 - Login por sessão, logout, autorização de gestão/atendimento e proteção dos telefones no bolsão.
+- Sessões persistem no banco durante deploys/reinícios, mantendo o mesmo domínio e banco. Prazo de 30 dias com cookie HttpOnly/Secure em produção. Sessões antigas ainda válidas são estendidas no próximo acesso; sessões expiradas/revogadas não são recuperadas. Logout, desativação e redefinição de senha continuam revogando o acesso. Indisponibilidade temporária do servidor mostra reconexão, não um falso logout.
+- O prazo persistido da sessão é renovado no máximo uma vez por dia; o cookie é reenviado nas respostas autenticadas com o prazo restante, sem gravação extra no banco, para recuperar respostas perdidas. Uma renovação concorrente vencida não reenvia o prazo antigo.
 - Gestão: indicadores calculados da base, pesquisa e filtro de leads, ficha editável, funil, agenda e configuração do rodízio.
 - Atendimento: meus leads, bolsão, aceite no servidor e abertura externa do WhatsApp para contatos não fictícios.
 - Instagram Direct: webhook assinado, inbox durável, identidade sem telefone, conversa interna, resposta exclusiva da responsável e visão de auditoria da gestão.
@@ -206,7 +208,7 @@ Meta Ads e Google Ads são integrações de relatórios distintas dos canais de 
 - Tempo de aceite não deve ser rotulado como tempo de primeira resposta.
 - Receita contratada e valores recebidos são indicadores diferentes.
 - Custo por lead e ROAS usam bases e regras de atribuição explícitas, incluindo a data de aquisição.
-- Não presumir origem orgânica quando faltar rastreamento.
+- Por decisão comercial, entradas do Instagram sem referência de anúncio recebem o rótulo Orgânica; isso não comprova ausência de influência de publicidade. As regras de medição e ativação estão em [INSTAGRAM.md](INSTAGRAM.md#marketing-api-e-métricas).
 - Não enviar conversões médicas às plataformas automaticamente; relatórios internos são independentes dessa eventual exportação.
 
 ## Referências já verificadas na conversa

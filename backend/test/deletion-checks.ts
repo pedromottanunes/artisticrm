@@ -6,6 +6,7 @@ import type { User } from '../src/types.js';
 import { buildApp } from '../src/app.js';
 import { WhatsAppCentral } from '../src/whatsapp.js';
 import { putPush, getPush } from '../src/push-store.js';
+import { setLeadNotificationMuted } from '../src/lead-notification-mutes.js';
 
 type Ops = Operations | MongoOperations;
 const input = (phone = '5548999901234') => ({
@@ -209,6 +210,7 @@ export async function checkDeleteCleanup(ops: Ops, manager: User, users: User[],
     kind: 'subscription',
     data: { userId: owner.id },
   });
+  await setLeadNotificationMuted(ops.db, owner.id, id, true);
   const current = await ops.detail(manager, id);
   const key = randomUUID();
   await ops.deleteLead(manager, id, confirmation(current.version), key);
@@ -225,6 +227,7 @@ export async function checkDeleteCleanup(ops: Ops, manager: User, users: User[],
     'claims',
     'operation_receipts',
     'push_records',
+    'lead_notification_mutes',
   ]) {
     const values = await rows(ops, table);
     assert.ok(!JSON.stringify(values).includes(id), `No deleted opportunity ID in ${table}`);

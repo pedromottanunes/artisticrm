@@ -20,6 +20,7 @@ import {
   type PushRecord,
   type PushTx,
 } from './push-store.js';
+import { isLeadNotificationMuted } from './lead-notification-mutes.js';
 
 export interface PushConfig {
   publicKey: string;
@@ -259,6 +260,7 @@ export class PushService {
       if (!manager && lead.state !== 'POOL' && target !== user.id) return null;
       if (!['POOL', 'RESERVED', 'CLAIMED', 'PENDING', 'CANCELLED'].includes(lead.state))
         return null;
+      if (!manager && (await isLeadNotificationMuted(tx, user.id, lead.id))) return null;
     } else if (movement) {
       // Preserve each completed business action. A later action must not erase
       // an earlier notification that was already committed to the audit trail.

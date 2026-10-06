@@ -139,6 +139,26 @@ label small,
   color: var(--light-ink);
 }
 
+.consultant-queue-position {
+  border-color: #cde8e2;
+  color: #167d72;
+  background: #edf9f6;
+}
+
+.consultant-queue-position i {
+  background: var(--light-teal);
+}
+
+.consultant-queue-position.paused {
+  border-color: #dbe3e8;
+  color: #748897;
+  background: #f3f6f8;
+}
+
+.consultant-queue-position.paused i {
+  background: #91a1ad;
+}
+
 .sync-status,
 .sync-status i {
   color: #167d72;

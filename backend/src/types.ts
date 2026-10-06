@@ -14,6 +14,7 @@ export interface User {
   must_change_password: boolean;
 }
 export interface Opportunity {
+  acquisition?: import('./meta-acquisition.js').Acquisition | null;
   id: string;
   contact_id: string;
   name: string;

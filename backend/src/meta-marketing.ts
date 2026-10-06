@@ -1,18 +1,32 @@
 import { z } from 'zod';
 import type { Database } from './db.js';
-import type { MongoStore } from './mongo-store.js';
-import { reportPeriod } from './reports.js';
+import { MongoTx, type MongoStore } from './mongo-store.js';
 import { DomainError } from './types.js';
+import { MarketingStore } from './meta-marketing-store.js';
+import {
+  MarketingClient,
+  MarketingError,
+  configurationFingerprint,
+} from './meta-marketing-client.js';
+import { syncInsights } from './meta-marketing-insights.js';
+import { enrichMarketingAd } from './meta-marketing-ads.js';
+import {
+  cachedAds,
+  marketingDate,
+  marketingPeriod,
+  marketingReport,
+  marketingLeads,
+  shiftedDate,
+} from './meta-marketing-reports.js';
 
 export interface MetaMarketingConfig {
   accessToken: string;
   adAccountId: string;
   graphApiVersion: string;
   timeZone?: string;
+  instagramAccountId?: string;
 }
-
 export type MetaMarketingFetch = typeof fetch;
-
 export function metaMarketingConfig(env: NodeJS.ProcessEnv): MetaMarketingConfig | undefined {
   if (env.META_MARKETING_ENABLED !== 'true') return undefined;
   const parsed = z
@@ -24,552 +38,385 @@ export function metaMarketingConfig(env: NodeJS.ProcessEnv): MetaMarketingConfig
         .string()
         .min(3)
         .max(100)
-        .default('America/Sao_Paulo')
+        .optional()
         .refine((value) => {
           try {
-            formatDate(new Date(0), value);
+            marketingDate(new Date(0), value);
             return true;
           } catch {
             return false;
           }
         }),
+      instagramAccountId: z.string().regex(/^\d+$/).optional(),
     })
     .safeParse({
       accessToken: env.META_MARKETING_ACCESS_TOKEN,
       adAccountId: env.META_AD_ACCOUNT_ID,
       graphApiVersion: env.META_GRAPH_VERSION,
-      timeZone: env.META_AD_TIMEZONE,
+      timeZone: env.META_AD_TIMEZONE || undefined,
+      instagramAccountId: env.INSTAGRAM_ACCOUNT_ID || undefined,
     });
   if (!parsed.success) throw new Error('Configuração da Marketing API incompleta ou inválida.');
   return parsed.data;
 }
 
-const actionSchema = z.object({
-  action_type: z.string().max(200),
-  value: z.string().max(100),
-});
-
-const insightSchema = z.object({
-  date_start: z.string().date(),
-  date_stop: z.string().date(),
-  account_id: z.string().max(100),
-  account_name: z.string().max(500).default(''),
-  account_currency: z.string().max(10).default(''),
-  campaign_id: z.string().max(100),
-  campaign_name: z.string().max(500).default(''),
-  adset_id: z.string().max(100),
-  adset_name: z.string().max(500).default(''),
-  ad_id: z.string().max(100),
-  ad_name: z.string().max(500).default(''),
-  spend: z
-    .string()
-    .regex(/^\d+(?:\.\d+)?$/)
-    .default('0'),
-  impressions: z.string().regex(/^\d+$/).default('0'),
-  reach: z.string().regex(/^\d+$/).default('0'),
-  clicks: z.string().regex(/^\d+$/).default('0'),
-  actions: z.array(actionSchema).max(500).default([]),
-});
-
-const insightsResponseSchema = z.object({
-  data: z.array(insightSchema).max(500),
-  paging: z
-    .object({
-      cursors: z.object({ after: z.string().max(2048).optional() }).optional(),
-      next: z.string().max(16_384).optional(),
-    })
-    .optional(),
-});
-
-// Small clinic workloads must not consume the entire web process while syncing ads.
-// Reject incomplete/oversized results before replacing any previously synced rows.
-const syncLimits = {
-  pages: 20,
-  rows: 10_000,
-  pageBytes: 2 * 1024 * 1024,
-  totalBytes: 8 * 1024 * 1024,
-};
-async function readInsightPage(response: Response) {
-  if (!response.body) throw new Error('INVALID_META_RESPONSE');
-  const reader = response.body.getReader();
-  let size = 0;
-  const chunks: Uint8Array[] = [];
-  try {
-    for (;;) {
-      const part = await reader.read();
-      if (part.done) break;
-      size += part.value.byteLength;
-      if (size > syncLimits.pageBytes) throw new Error('META_SYNC_LIMIT');
-      chunks.push(part.value);
-    }
-    return { value: JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown, size };
-  } finally {
-    await reader.cancel().catch(() => {});
-  }
-}
-
-function formatDate(date: Date, timeZone = 'America/Sao_Paulo') {
-  try {
-    const parts = Object.fromEntries(
-      new Intl.DateTimeFormat('en-US', {
-        timeZone,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-      })
-        .formatToParts(date)
-        .filter((part) => part.type !== 'literal')
-        .map((part) => [part.type, part.value]),
-    );
-    return `${parts.year}-${parts.month}-${parts.day}`;
-  } catch {
-    throw new Error('INVALID_META_TIMEZONE');
-  }
-}
-
-function startOfRange(today: Date, days: number, timeZone?: string) {
-  const localToday = formatDate(today, timeZone);
-  const [year, month, day] = localToday.split('-').map(Number);
-  return new Date(Date.UTC(year, month - 1, day - days + 1, 12)).toISOString().slice(0, 10);
-}
-
-function toNumber(value: unknown) {
-  const number = Number(value ?? 0);
-  return Number.isFinite(number) ? number : 0;
-}
-
 export class MetaMarketing {
+  readonly store: MarketingStore;
   private syncing?: Promise<{ rows_synced: number }>;
-
   constructor(
     private db: Database | MongoStore,
     private config?: MetaMarketingConfig,
     private request: MetaMarketingFetch = fetch,
     private clock: () => Date = () => new Date(),
-  ) {}
-
-  private async setSyncState(
-    state: 'syncing' | 'idle' | 'error',
-    values: { started?: Date; completed?: Date; error?: string | null; rows?: number } = {},
   ) {
-    const config = this.config!;
-    if (this.db.kind === 'mongo')
-      await this.db.collection('meta_marketing_sync_state').updateOne(
-        { account_id: config.adAccountId },
-        {
-          $set: {
-            state,
-            ...(values.started ? { last_started_at: values.started } : {}),
-            ...(values.completed ? { last_completed_at: values.completed } : {}),
-            ...(values.error !== undefined ? { last_error: values.error } : {}),
-            ...(values.rows !== undefined ? { rows_synced: values.rows } : {}),
-          },
-          $setOnInsert: { account_id: config.adAccountId },
-        },
-        { upsert: true },
-      );
-    else
-      await this.db.query(
-        `INSERT INTO meta_marketing_sync_state(
-           account_id,state,last_started_at,last_completed_at,last_error,rows_synced
-         ) VALUES ($1,$2,$3,$4,$5,$6)
-         ON CONFLICT (account_id) DO UPDATE SET
-           state=EXCLUDED.state,
-           last_started_at=COALESCE(EXCLUDED.last_started_at,meta_marketing_sync_state.last_started_at),
-           last_completed_at=COALESCE(EXCLUDED.last_completed_at,meta_marketing_sync_state.last_completed_at),
-           last_error=EXCLUDED.last_error,
-           rows_synced=CASE WHEN $7::boolean THEN EXCLUDED.rows_synced ELSE meta_marketing_sync_state.rows_synced END`,
-        [
-          config.adAccountId,
-          state,
-          values.started ?? null,
-          values.completed ?? null,
-          values.error ?? null,
-          values.rows ?? 0,
-          values.rows !== undefined,
-        ],
-      );
+    this.store = new MarketingStore(db, config?.adAccountId ?? 'disabled');
   }
 
-  private async persist(rows: z.infer<typeof insightSchema>[], since: string, until: string) {
-    const config = this.config!;
-    if (this.db.kind === 'mongo')
-      return this.db.atomic(async (tx) => {
-        const updatedAt = await tx.now();
-        await tx.collection('meta_marketing_daily_insights').deleteMany(
+  private async syncState(
+    state: 'syncing' | 'idle' | 'error',
+    lease: string,
+    values: { started?: Date; completed?: Date; error?: string | null; rows?: number } = {},
+  ) {
+    await this.store.transaction(async (tx) => {
+      await this.store.assertLease(tx, lease, this.clock());
+      if (tx instanceof MongoTx)
+        await tx.collection('meta_marketing_sync_state').updateOne(
+          { account_id: this.store.accountId },
           {
-            account_id: config.adAccountId,
-            date_start: { $gte: since, $lte: until },
-          },
-          { session: tx.session },
-        );
-        const last = rows.at(-1);
-        if (last) {
-          await tx.collection('meta_marketing_accounts').updateOne(
-            { account_id: config.adAccountId },
-            {
-              $set: {
-                account_name: last.account_name,
-                currency: last.account_currency,
-                status: 'active',
-                updated_at: updatedAt,
-              },
-              $setOnInsert: { account_id: config.adAccountId, timezone_name: '' },
+            $set: {
+              state,
+              ...(values.started ? { last_started_at: values.started } : {}),
+              ...(values.completed ? { last_completed_at: values.completed } : {}),
+              ...(values.error !== undefined ? { last_error: values.error } : {}),
+              ...(values.rows !== undefined ? { rows_synced: values.rows } : {}),
             },
-            { upsert: true, session: tx.session },
-          );
-        }
-        for (let offset = 0; offset < rows.length; offset += 500) {
-          await tx.collection('meta_marketing_daily_insights').bulkWrite(
-            rows.slice(offset, offset + 500).map((row) => ({
-              updateOne: {
-                filter: {
-                  account_id: config.adAccountId,
-                  date_start: row.date_start,
-                  ad_id: row.ad_id,
-                },
-                update: {
-                  $set: {
-                    date_stop: row.date_stop,
-                    campaign_id: row.campaign_id,
-                    campaign_name: row.campaign_name,
-                    adset_id: row.adset_id,
-                    adset_name: row.adset_name,
-                    ad_name: row.ad_name,
-                    currency: row.account_currency,
-                    spend: Number(row.spend),
-                    impressions: Number(row.impressions),
-                    reach: Number(row.reach),
-                    clicks: Number(row.clicks),
-                    actions: row.actions,
-                    updated_at: updatedAt,
-                  },
-                },
-                upsert: true,
-              },
-            })),
-            { ordered: true, session: tx.session },
-          );
-        }
-      });
-
-    return this.db.transaction(async (tx) => {
-      await tx.query(
-        `DELETE FROM meta_marketing_daily_insights
-         WHERE account_id=$1 AND date_start BETWEEN $2::date AND $3::date`,
-        [config.adAccountId, since, until],
-      );
-      const last = rows.at(-1);
-      if (last) {
-        await tx.query(
-          `INSERT INTO meta_marketing_accounts(account_id,account_name,currency,status)
-           VALUES ($1,$2,$3,'active')
-           ON CONFLICT (account_id) DO UPDATE SET account_name=EXCLUDED.account_name,
-             currency=EXCLUDED.currency,status='active',updated_at=clock_timestamp()`,
-          [config.adAccountId, last.account_name, last.account_currency],
+          },
+          { upsert: true, session: tx.session },
         );
-      }
-      for (let offset = 0; offset < rows.length; offset += 500) {
-        const batch = rows.slice(offset, offset + 500);
+      else
         await tx.query(
-          `INSERT INTO meta_marketing_daily_insights(
-             account_id,date_start,date_stop,campaign_id,campaign_name,adset_id,adset_name,
-             ad_id,ad_name,currency,spend,impressions,reach,clicks,actions
-           ) SELECT $1,r.date_start,r.date_stop,r.campaign_id,r.campaign_name,r.adset_id,r.adset_name,
-               r.ad_id,r.ad_name,r.account_currency,r.spend,r.impressions,r.reach,r.clicks,r.actions
-             FROM jsonb_to_recordset($2::jsonb) AS r(
-               date_start date,date_stop date,campaign_id text,campaign_name text,adset_id text,adset_name text,
-               ad_id text,ad_name text,account_currency text,spend numeric,impressions bigint,reach bigint,clicks bigint,actions jsonb)
-           ON CONFLICT (account_id,date_start,ad_id) DO UPDATE SET
-             date_stop=EXCLUDED.date_stop,campaign_id=EXCLUDED.campaign_id,
-             campaign_name=EXCLUDED.campaign_name,adset_id=EXCLUDED.adset_id,
-             adset_name=EXCLUDED.adset_name,ad_name=EXCLUDED.ad_name,
-             currency=EXCLUDED.currency,spend=EXCLUDED.spend,impressions=EXCLUDED.impressions,
-             reach=EXCLUDED.reach,clicks=EXCLUDED.clicks,actions=EXCLUDED.actions,
-             updated_at=clock_timestamp()`,
-          [config.adAccountId, JSON.stringify(batch)],
+          `INSERT INTO meta_marketing_sync_state(account_id,state,last_started_at,last_completed_at,last_error,rows_synced)
+      VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT(account_id) DO UPDATE SET state=EXCLUDED.state,
+      last_started_at=COALESCE(EXCLUDED.last_started_at,meta_marketing_sync_state.last_started_at),
+      last_completed_at=COALESCE(EXCLUDED.last_completed_at,meta_marketing_sync_state.last_completed_at),last_error=EXCLUDED.last_error,
+      rows_synced=CASE WHEN $7::boolean THEN EXCLUDED.rows_synced ELSE meta_marketing_sync_state.rows_synced END`,
+          [
+            this.store.accountId,
+            state,
+            values.started ?? null,
+            values.completed ?? null,
+            values.error ?? null,
+            values.rows ?? 0,
+            values.rows !== undefined,
+          ],
         );
-      }
     });
   }
 
-  private async performSync(days: number) {
-    const config = this.config;
-    if (!config)
+  private async exclusive(
+    work: (client: MarketingClient, lease: string) => Promise<{ rows_synced: number }>,
+  ) {
+    if (!this.config)
       throw new DomainError('META_MARKETING_DISABLED', 'Marketing API não configurada.', 503);
-    const started = this.clock();
-    await this.setSyncState('syncing', { started, error: null });
-    const since = startOfRange(started, days, config.timeZone);
-    const until = formatDate(started, config.timeZone);
-    const fields = [
-      'date_start',
-      'date_stop',
-      'account_id',
-      'account_name',
-      'account_currency',
-      'campaign_id',
-      'campaign_name',
-      'adset_id',
-      'adset_name',
-      'ad_id',
-      'ad_name',
-      'spend',
-      'impressions',
-      'reach',
-      'clicks',
-      'actions',
-    ].join(',');
-    const all = new Map<string, z.infer<typeof insightSchema>>();
-    const cursors = new Set<string>();
-    let bytes = 0;
-    let complete = false;
-    let after: string | undefined;
+    const config = this.config;
+    const lease = await this.store.claim(this.clock());
+    if (!lease) return { rows_synced: 0 };
     try {
-      for (let page = 0; page < syncLimits.pages; page++) {
-        const params = new URLSearchParams({
-          fields,
-          level: 'ad',
-          time_increment: '1',
-          limit: '500',
-          time_range: JSON.stringify({ since, until }),
-        });
-        if (after) params.set('after', after);
-        const response = await this.request(
-          `https://graph.facebook.com/${config.graphApiVersion}/${config.adAccountId}/insights?${params}`,
-          {
-            headers: { Authorization: `Bearer ${config.accessToken}` },
-            redirect: 'error',
-            signal: AbortSignal.timeout(30_000),
-          },
-        );
-        if (!response.ok) {
-          await response.body?.cancel().catch(() => {});
-          throw new Error(`META_HTTP_${response.status}`);
-        }
-        const body = await readInsightPage(response);
-        bytes += body.size;
-        if (bytes > syncLimits.totalBytes) throw new Error('META_SYNC_LIMIT');
-        const parsed = insightsResponseSchema.safeParse(body.value);
-        if (!parsed.success) throw new Error('INVALID_META_RESPONSE');
-        for (const row of parsed.data.data) {
-          if (
-            row.account_id !== config.adAccountId.replace(/^act_/, '') ||
-            row.date_start < since ||
-            row.date_start > until
-          )
-            throw new Error('INVALID_META_RESPONSE');
-          all.set(`${row.date_start}:${row.ad_id}`, row);
-        }
-        if (all.size > syncLimits.rows) throw new Error('META_SYNC_LIMIT');
-        const next = parsed.data.paging?.cursors?.after;
-        // Cursors can exist on the last page. Only paging.next signals more data;
-        // rebuild the request ourselves instead of following a credential-bearing URL.
-        if (!parsed.data.paging?.next) {
-          complete = true;
-          break;
-        }
-        if (!next) throw new Error('INVALID_META_RESPONSE');
-        if (cursors.has(next)) throw new Error('META_PAGINATION_CYCLE');
-        cursors.add(next);
-        after = next;
-      }
-      if (!complete) throw new Error('META_SYNC_LIMIT');
-      await this.persist([...all.values()], since, until);
-      await this.setSyncState('idle', {
-        completed: this.clock(),
-        error: null,
-        rows: all.size,
-      });
-      return { rows_synced: all.size };
+      const control = await this.store.control();
+      if (control.blocked_config === configurationFingerprint(config))
+        throw new MarketingError('META_AUTH_REQUIRED');
+      if (Date.parse(control.pause_until ?? '') > this.clock().getTime())
+        throw new MarketingError('META_PAUSED');
+      return await work(
+        new MarketingClient(this.store, config, this.request, lease, this.clock),
+        lease,
+      );
     } catch (error) {
-      const code =
-        error instanceof Error && /^META_HTTP_\d+$/.test(error.message)
-          ? error.message
-          : 'SYNC_FAILED';
-      await this.setSyncState('error', { error: code });
+      const code = error instanceof MarketingError ? error.code : 'SYNC_FAILED';
+      const failures = ((await this.store.control()).failures ?? 0) + 1;
+      await this.store
+        .patch(
+          {
+            last_error: code,
+            ...([
+              'META_OBJECT_UNAVAILABLE',
+              'META_REQUEST_REJECTED',
+              'META_OPTIONAL_PERMISSION',
+            ].includes(code)
+              ? { pause_until: new Date(this.clock().getTime() + 86_400_000).toISOString() }
+              : {}),
+            ...([
+              'META_NETWORK_ERROR',
+              'META_TEMPORARY_ERROR',
+              'SYNC_FAILED',
+              'INVALID_META_RESPONSE',
+              'META_SYNC_LIMIT',
+              'META_PAGINATION_CYCLE',
+              'META_TIMEZONE_MISMATCH',
+            ].includes(code)
+              ? {
+                  pause_until: new Date(
+                    this.clock().getTime() +
+                      Math.min(3_600_000, 60_000 * 5 ** Math.min(failures - 1, 3)),
+                  ).toISOString(),
+                  failures,
+                }
+              : {}),
+          },
+          lease,
+        )
+        .catch(() => {});
+      await this.syncState('error', lease, { error: code }).catch(() => {});
       throw new DomainError(
         'META_MARKETING_SYNC_FAILED',
-        'Não foi possível sincronizar os dados da Meta. O atendimento continua disponível.',
+        code === 'META_AUTH_REQUIRED'
+          ? 'A conexão da Marketing API precisa de autorização. O chat continua disponível.'
+          : 'A sincronização de anúncios foi adiada. Os últimos dados salvos e o chat continuam disponíveis.',
         502,
       );
+    } finally {
+      await this.store.release(lease);
     }
   }
 
+  // Used by the scheduler and integration checks, never by a GET or an inbound message.
   async sync(days = 7) {
-    if (!this.syncing) {
-      this.syncing = this.performSync(days).finally(() => {
+    z.number().int().min(1).max(31).parse(days);
+    if (!this.syncing)
+      this.syncing = this.exclusive(async (client, lease) => {
+        const today = marketingDate(this.clock(), this.config?.timeZone);
+        await this.syncState('syncing', lease, { started: this.clock(), error: null });
+        const result = await syncInsights(
+          this.store,
+          client,
+          lease,
+          shiftedDate(today, 1 - days),
+          today,
+          this.clock(),
+        );
+        await this.syncState('idle', lease, {
+          completed: this.clock(),
+          rows: result.rows_synced,
+          error: null,
+        });
+        return result;
+      }).finally(() => {
         this.syncing = undefined;
       });
+    return this.syncing;
+  }
+
+  async requestSync(input: { days?: number; from?: string; to?: string }) {
+    if (!this.config)
+      throw new DomainError('META_MARKETING_DISABLED', 'Marketing API não configurada.', 503);
+    const now = this.clock();
+    const control = await this.store.control();
+    if (Date.parse(control.last_manual_at ?? '') > now.getTime() - 300_000)
+      return { queued: true, already_requested: true };
+    const to = input.to ?? marketingDate(now, control.timezone || this.config.timeZone);
+    const from = input.from ?? shiftedDate(to, 1 - (input.days ?? 7));
+    marketingPeriod(from, to, control.timezone || this.config.timeZone || 'America/Sao_Paulo', now);
+    const queued = await this.store.request(
+      {
+        requested_at: now.toISOString(),
+        requested_from: from,
+        requested_to: to,
+        last_manual_at: now.toISOString(),
+        ...(control.blocked_config
+          ? { blocked_config: '', account_checked_at: '', creative_retry_at: '' }
+          : {}),
+      },
+      now,
+    );
+    return { queued: true, already_requested: !queued };
+  }
+
+  async run() {
+    if (!this.config) return { rows_synced: 0 };
+    if (this.syncing) return this.syncing;
+    const config = this.config;
+    // A paused worker checks one small document; it doesn't keep writing status/leases.
+    const saved = await this.store.control();
+    if (
+      saved.blocked_config === configurationFingerprint(config) ||
+      Date.parse(saved.pause_until ?? '') > this.clock().getTime() ||
+      ((saved.budget_used ?? 0) >= 120 &&
+        Date.parse(saved.budget_until ?? '') > this.clock().getTime())
+    ) {
+      throw new DomainError(
+        'META_MARKETING_SYNC_FAILED',
+        'Sincronização aguardando o prazo de retomada ou autorização. O chat continua disponível.',
+        502,
+      );
     }
+    if (this.syncing) return this.syncing;
+    this.syncing = this.exclusive(async (client, lease) => {
+      let control = await this.store.control();
+      const now = this.clock();
+      if (
+        !control.account_checked_at ||
+        Date.parse(control.account_checked_at) <= now.getTime() - 86_400_000
+      ) {
+        const account = await client.get(config.adAccountId, {
+          fields: 'id,currency,timezone_name',
+        });
+        const parsed = z
+          .object({
+            id: z.string(),
+            currency: z.string().regex(/^[A-Z]{3}$/),
+            timezone_name: z.string().max(100),
+          })
+          .safeParse(account.value);
+        if (!parsed.success || parsed.data.id !== config.adAccountId)
+          throw new MarketingError('INVALID_META_RESPONSE');
+        try {
+          marketingDate(now, parsed.data.timezone_name);
+        } catch {
+          throw new MarketingError('INVALID_META_RESPONSE');
+        }
+        if (config.timeZone && config.timeZone !== parsed.data.timezone_name)
+          throw new MarketingError('META_TIMEZONE_MISMATCH');
+        await this.store.patch(
+          {
+            currency: parsed.data.currency,
+            timezone: parsed.data.timezone_name,
+            account_checked_at: now.toISOString(),
+            blocked_config: '',
+          },
+          lease,
+        );
+        control = await this.store.control();
+      }
+      await this.store.backfill(now, lease);
+      for (const job of await this.store.dueAds(now, config.instagramAccountId)) {
+        try {
+          await enrichMarketingAd(this.store, client, job.ad_id, lease, this.clock());
+          await this.store.finishAd(job.ad_id, this.clock(), null, job.attempts, lease);
+        } catch (error) {
+          const code = error instanceof MarketingError ? error.code : 'ENRICHMENT_FAILED';
+          await this.store.finishAd(job.ad_id, this.clock(), code, job.attempts, lease);
+          if (
+            ![
+              'META_OBJECT_UNAVAILABLE',
+              'META_REQUEST_REJECTED',
+              'META_OPTIONAL_PERMISSION',
+            ].includes(code)
+          )
+            throw error;
+        }
+      }
+      let result = { rows_synced: 0 };
+      const today = marketingDate(now, control.timezone || config.timeZone);
+      const weekDue =
+        !control.last_week_sync || Date.parse(control.last_week_sync) <= now.getTime() - 86_400_000;
+      const monthDue =
+        !control.last_month_sync ||
+        Date.parse(control.last_month_sync) <= now.getTime() - 7 * 86_400_000;
+      if (control.requested_from || !(Date.parse(control.next_sync_at ?? '') > now.getTime())) {
+        const requested = Boolean(control.requested_from);
+        const from =
+          control.requested_from || shiftedDate(today, monthDue ? -30 : weekDue ? -6 : -1);
+        const target = control.requested_to || today;
+        const to = shiftedDate(from, 6) < target ? shiftedDate(from, 6) : target;
+        await this.syncState('syncing', lease, { started: now, error: null });
+        result = await syncInsights(this.store, client, lease, from, to, this.clock());
+        const more = to < target;
+        await this.store.advance(
+          {
+            requested_from: more ? shiftedDate(to, 1) : '',
+            requested_to: more ? target : '',
+            next_sync_at: new Date(now.getTime() + (more ? 60_000 : 3_600_000)).toISOString(),
+            ...(!requested && monthDue
+              ? { last_month_sync: now.toISOString(), last_week_sync: now.toISOString() }
+              : !requested && weekDue
+                ? { last_week_sync: now.toISOString() }
+                : {}),
+            last_error: '',
+            failures: 0,
+          },
+          lease,
+          control.requested_at,
+        );
+        await this.syncState('idle', lease, {
+          completed: this.clock(),
+          rows: result.rows_synced,
+          error: null,
+        });
+      }
+      return result;
+    }).finally(() => {
+      this.syncing = undefined;
+    });
     return this.syncing;
   }
 
   async status() {
-    const config = this.config;
-    if (!config)
-      return {
-        configured: false,
-        state: 'disabled',
-        last_started_at: null,
-        last_completed_at: null,
-        last_error: null,
-        rows_synced: 0,
-      };
     const state =
       this.db.kind === 'mongo'
-        ? await this.db.one('meta_marketing_sync_state', { account_id: config.adAccountId })
+        ? await this.db.one('meta_marketing_sync_state', { account_id: this.store.accountId })
         : (
             await this.db.query('SELECT * FROM meta_marketing_sync_state WHERE account_id=$1', [
-              config.adAccountId,
+              this.store.accountId,
             ])
           ).rows[0];
+    const control = await this.store.control();
     return {
-      configured: true,
-      account_id: config.adAccountId,
-      graph_api_version: config.graphApiVersion,
-      state: state?.state ?? 'idle',
+      configured: Boolean(this.config),
+      state: !this.config ? 'disabled' : (state?.state ?? 'idle'),
+      account_id: this.config?.adAccountId,
+      graph_api_version: this.config?.graphApiVersion,
       last_started_at: state?.last_started_at ?? null,
       last_completed_at: state?.last_completed_at ?? null,
-      last_error: state?.last_error ?? null,
+      last_error: control.last_error || state?.last_error || null,
       rows_synced: state?.rows_synced ?? 0,
+      queued: Boolean(control.requested_from),
+      next_sync_at: control.next_sync_at ?? null,
+      paused_until: control.pause_until ?? null,
+      timezone: control.timezone ?? null,
     };
   }
 
-  async report(fromInput: string, toInput: string) {
-    const { from, to, start, end } = reportPeriod({ from: fromInput, to: toInput }, this.clock());
-    const insights = !this.config
-      ? []
-      : this.db.kind === 'mongo'
-        ? await this.db.many<Record<string, unknown>>('meta_marketing_daily_insights', {
-            account_id: this.config.adAccountId,
-            date_start: { $gte: from, $lte: to },
-          })
-        : (
-            await this.db.query<Record<string, unknown>>(
-              `SELECT * FROM meta_marketing_daily_insights
-               WHERE account_id=$1 AND date_start BETWEEN $2::date AND $3::date`,
-              [this.config.adAccountId, from, to],
-            )
-          ).rows;
-    const instagramLeads =
-      this.db.kind === 'mongo'
-        ? await this.db.many<{ id: string }>('opportunities', {
-            channel: 'instagram',
-            created_at: { $gte: start, $lt: end },
-          })
-        : (
-            await this.db.query<{ id: string }>(
-              `SELECT id FROM opportunities
-               WHERE channel='instagram' AND created_at >= $1::timestamptz
-                 AND created_at < $2::timestamptz`,
-              [start, end],
-            )
-          ).rows;
-    const instagramLeadIds = instagramLeads.map((lead) => lead.id);
-    const attributions =
-      this.db.kind === 'mongo'
-        ? instagramLeadIds.length
-          ? await this.db.many<{
-              opportunity_id: string;
-              source_id: string;
-              received_at: string | Date;
-            }>('lead_attributions', {
-              opportunity_id: { $in: instagramLeadIds },
-              channel: 'instagram',
-              source_type: 'ad',
-              source_id: { $type: 'string' },
-            })
-          : []
-        : (
-            await this.db.query<{
-              opportunity_id: string;
-              source_id: string;
-              received_at: string | Date;
-            }>(
-              `SELECT a.opportunity_id,a.source_id,a.received_at FROM lead_attributions a
-               JOIN opportunities o ON o.id=a.opportunity_id
-               WHERE a.channel='instagram' AND a.source_type='ad' AND a.source_id IS NOT NULL
-                 AND o.channel='instagram' AND o.created_at >= $1::timestamptz
-                 AND o.created_at < $2::timestamptz`,
-              [start, end],
-            )
-          ).rows;
-    const acquisitionAttributions = new Map<string, (typeof attributions)[number]>();
-    for (const attribution of attributions) {
-      const current = acquisitionAttributions.get(attribution.opportunity_id);
-      if (
-        !current ||
-        new Date(attribution.received_at).getTime() < new Date(current.received_at).getTime()
-      )
-        acquisitionAttributions.set(attribution.opportunity_id, attribution);
-    }
-    const leadsByAd = new Map<string, Set<string>>();
-    for (const attribution of acquisitionAttributions.values()) {
-      if (!leadsByAd.has(attribution.source_id)) leadsByAd.set(attribution.source_id, new Set());
-      leadsByAd.get(attribution.source_id)!.add(attribution.opportunity_id);
-    }
-    const campaigns = new Map<
-      string,
-      {
-        campaign_id: string;
-        campaign_name: string;
-        currency: string;
-        spend: number;
-        impressions: number;
-        reach: number;
-        clicks: number;
-        leads: Set<string>;
-      }
-    >();
-    for (const row of insights) {
-      const campaignId = String(row.campaign_id);
-      const current = campaigns.get(campaignId) ?? {
-        campaign_id: campaignId,
-        campaign_name: String(row.campaign_name ?? ''),
-        currency: String(row.currency ?? ''),
-        spend: 0,
-        impressions: 0,
-        reach: 0,
-        clicks: 0,
-        leads: new Set<string>(),
-      };
-      current.spend += toNumber(row.spend);
-      current.impressions += toNumber(row.impressions);
-      current.reach += toNumber(row.reach);
-      current.clicks += toNumber(row.clicks);
-      for (const lead of leadsByAd.get(String(row.ad_id)) ?? []) current.leads.add(lead);
-      campaigns.set(campaignId, current);
-    }
-    const rows = [...campaigns.values()]
-      .map((campaign) => ({
-        campaign_id: campaign.campaign_id,
-        campaign_name: campaign.campaign_name,
-        currency: campaign.currency,
-        spend: campaign.spend,
-        impressions: campaign.impressions,
-        reach: campaign.reach,
-        clicks: campaign.clicks,
-        attributed_leads: campaign.leads.size,
-        cpl: campaign.leads.size ? campaign.spend / campaign.leads.size : null,
-      }))
-      .sort((a, b) => b.spend - a.spend);
-    const allLeads = new Set(acquisitionAttributions.keys());
-    const matchedLeads = new Set(rows.flatMap((row) => [...campaigns.get(row.campaign_id)!.leads]));
-    const spend = rows.reduce((total, row) => total + row.spend, 0);
-    const currencies = new Set(rows.map((row) => row.currency).filter(Boolean));
-    const status = await this.status();
+  async report(from: string, to: string, page = 1, focusAd?: string) {
+    const result = await marketingReport(
+      this.store,
+      this.config,
+      from,
+      to,
+      this.clock(),
+      page,
+      focusAd,
+    );
+    result.last_sync = (await this.status()).last_completed_at as string | Date | null;
+    return result;
+  }
+
+  async names(ids: string[]) {
+    if (!this.config) return [];
+    return cachedAds(this.store, ids);
+  }
+
+  async leads(from: string, to: string, adId: string, after?: string) {
+    return marketingLeads(this.store, this.config, from, to, adId, after, this.clock());
+  }
+
+  async performance(
+    acquisition?: { kind: string; ad_id: string | null; occurred_at: string } | null,
+  ) {
+    if (!acquisition?.ad_id || acquisition.kind !== 'paid')
+      return { period: null, coverage_complete: false, performance: null };
+    const control = await this.store.control();
+    const tz = control.timezone || this.config?.timeZone || 'America/Sao_Paulo';
+    const day = marketingDate(new Date(acquisition.occurred_at), tz);
+    const from = day.slice(0, 7) + '-01';
+    const [year, month] = day.split('-').map(Number);
+    const monthEnd = new Date(Date.UTC(year, month, 0, 12)).toISOString().slice(0, 10);
+    const today = marketingDate(this.clock(), tz);
+    const to = monthEnd < today ? monthEnd : today;
+    const report = await this.report(from, to, 1, acquisition.ad_id);
     return {
-      period: { from, to },
-      currency: currencies.size === 1 ? [...currencies][0] : currencies.size ? 'MIXED' : null,
-      spend,
-      instagram_leads: instagramLeads.length,
-      identified_paid_leads: allLeads.size,
-      matched_attributed_leads: matchedLeads.size,
-      unmatched_attributed_leads: Math.max(0, allLeads.size - matchedLeads.size),
-      unattributed_or_organic_leads: Math.max(0, instagramLeads.length - allLeads.size),
-      cpl: matchedLeads.size && currencies.size <= 1 ? spend / matchedLeads.size : null,
-      campaigns: rows,
-      last_sync: status.last_completed_at,
+      period: report.period,
+      coverage_complete: report.coverage_complete,
+      performance: report.ads[0] ?? null,
     };
   }
 }
@@ -586,14 +433,14 @@ export function registerMetaMarketing(
   const tick = () => {
     if (!active)
       active = marketing
-        .sync(7)
+        .run()
         .catch(() => undefined)
         .finally(() => {
           active = undefined;
         });
   };
   const startup = config && runWorker ? setTimeout(tick, 10_000) : undefined;
-  const timer = config && runWorker ? setInterval(tick, 30 * 60_000) : undefined;
+  const timer = config && runWorker ? setInterval(tick, 60_000) : undefined;
   startup?.unref();
   timer?.unref();
   return {

@@ -27,9 +27,12 @@ import { checkPrivateReplyRecovery } from './private-reply-recovery-checks.js';
 import { checkEncodedRoutes } from './security-checks.js';
 import { checkAgenda } from './agenda-checks.js';
 import { checkLeadLists } from './lead-list-checks.js';
+import { checkPersistentSessions } from './session-checks.js';
 import { checkProspects } from './prospect-checks.js';
 import { checkManualLeads } from './manual-lead-checks.js';
+import { checkMarketingOrigins } from './marketing-origin-checks.js';
 import { prospectRegressions } from './prospect-regression-checks.js';
+import { checkPersonalQueueStatus } from './queue-status-checks.js';
 import {
   checkDeletePermissions,
   checkDeleteCleanup,
@@ -55,6 +58,11 @@ const metaMarketingTestConfig: MetaMarketingConfig = {
   graphApiVersion: 'v26.0',
 };
 let password_hash: string;
+test('sessões persistentes: deploy, renovação, concorrência e revogação (Mongo)', () =>
+  checkPersistentSessions(db, users[0].email, password));
+test('origem, catálogo textual, funil, limites persistidos e retomada (Mongo)', async () => {
+  await checkMarketingOrigins(db);
+});
 for (const [name, check] of prospectRegressions)
   test(`${name} (Mongo)`, async () => {
     await check(db, manager, users);
@@ -122,6 +130,9 @@ test('comment pool: atomic ownership, private replies, incoming Direct and delet
   await checkComments(ops, users, manager);
 });
 const lead = (n = 1) => ops.ingest(input(n), `event-${n}`, manager.id);
+
+test('personal queue rank is weighted, private and pause-aware (MongoDB)', () =>
+  checkPersonalQueueStatus(db, manager, users));
 
 test('Mongo: encoded API paths preserve authentication, CSRF and roles', () =>
   checkEncodedRoutes(db, password, users[0].email));
@@ -778,6 +789,188 @@ test('Mongo: migração classifica leads antigos como novos sem desfazer decisã
   assert.equal((await row(classified.id)).stage, 'CONSULTATION_NOT_SCHEDULED');
   assert.equal((await row(classified.id)).consultation_status, 'NOT_SCHEDULED');
 });
+for (const attendance of ['ATTENDED', 'NO_SHOW'] as const)
+  test(`Mongo: reinício preserva comparecimento ${attendance} e venda após consulta cancelada`, async () => {
+    await initializeMongo(db);
+    const { id } = await lead();
+    const consultant = users[0];
+    await ops.claim(consultant, id, 'reservation', 1, key());
+    const starts_at = '2026-09-10T13:00:00Z';
+    const appointment = await ops.schedule(consultant, id, {
+      expected_version: 2,
+      starts_at,
+      unit: 'Teste',
+    });
+    await ops.changeAppointment(
+      consultant,
+      appointment.id,
+      {
+        expected_version: 1,
+        status: 'cancelled',
+        starts_at,
+        unit: 'Teste',
+        reason: 'Cancelamento',
+      },
+      key(),
+    );
+    now = new Date('2026-09-10T14:00:00Z');
+    await ops.update(consultant, id, {
+      ...lose,
+      version: (await row(id)).version,
+      stage: 'FOLLOW_UP',
+      attendance,
+      next_action: 'Informação salva pelo consultor.',
+    });
+    await ops.recordSale(
+      consultant,
+      id,
+      {
+        expected_version: (await row(id)).version,
+        name: 'Paciente registrado',
+        phone: input().phone,
+        residence_city: 'Criciúma',
+        consultant: consultant.name,
+        total_value_cents: 1_200_000,
+        down_payment_cents: 100_000,
+        hair_grade_classification: 'grau 3',
+        has_pack: true,
+        unit: 'Teste',
+        procedure_date: '2026-10-20',
+        contract_status: 'signed',
+      },
+      key(),
+    );
+    const snapshot = async () => ({
+      lead: await row(id),
+      contacts: await db.many('contacts', {}, { id: 1 }),
+      appointments: await db.many('appointments', {}, { id: 1 }),
+      history: await db.many('audit_events', {}, { id: 1 }),
+      users: await db.many('users', {}, { id: 1 }),
+    });
+    const saved = await snapshot();
+    assert.equal(saved.lead.consultation_status, attendance);
+    assert.equal(saved.lead.owner_id, consultant.id);
+    for (let restart = 0; restart < 2; restart++) {
+      await initializeMongo(db);
+      await bootstrapMongo(db);
+      assert.deepEqual(await snapshot(), saved);
+    }
+  });
+
+test('Mongo: reinício preserva nova consulta anterior à consulta cancelada', async () => {
+  const { id } = await lead();
+  await ops.claim(users[0], id, 'reservation', 1, key());
+  const starts_at = '2026-09-20T13:00:00Z';
+  const old = await ops.schedule(users[0], id, {
+    expected_version: 2,
+    starts_at,
+    unit: 'Teste',
+  });
+  await ops.changeAppointment(
+    users[0],
+    old.id,
+    { expected_version: 1, status: 'cancelled', starts_at, unit: 'Teste', reason: 'Antecipação' },
+    key(),
+  );
+  const active = await ops.schedule(users[0], id, {
+    expected_version: (await row(id)).version,
+    starts_at: '2026-09-15T13:00:00Z',
+    unit: 'Teste',
+  });
+  const saved = await row(id);
+  assert.equal(saved.consultation_status, 'SCHEDULED');
+  for (let restart = 0; restart < 2; restart++) {
+    await initializeMongo(db);
+    assert.deepEqual(await row(id), saved);
+    assert.equal((await db.one('appointments', { id: active.id }))!.status, 'scheduled');
+    assert.equal((await db.one('appointments', { id: old.id }))!.status, 'cancelled');
+  }
+});
+
+test('Mongo: migração recupera apenas status ausentes e prioriza consulta ativa', async () => {
+  const cases = [
+    { status: 'scheduled', expected: 'SCHEDULED' },
+    { status: 'attended', expected: 'ATTENDED' },
+    { status: 'no_show', expected: 'NO_SHOW' },
+    { status: 'cancelled', expected: 'CANCELLED' },
+    { status: 'completed', expected: 'ATTENDED' },
+    { status: null, expected: 'NOT_SCHEDULED' },
+  ];
+  const expected = new Map<string, string>();
+  for (const [index, item] of cases.entries()) {
+    const { id } = await lead(100 + index);
+    expected.set(id, item.expected);
+    await db.update(
+      'opportunities',
+      { id },
+      { $set: { stage: 'FOLLOW_UP' }, $unset: { consultation_status: '' } },
+    );
+    if (item.status)
+      await db.insert('appointments', {
+        id: key(),
+        opportunity_id: id,
+        status: item.status,
+        starts_at: new Date('2026-09-15T13:00:00Z'),
+        version: 1,
+      });
+    if (item.status === 'scheduled')
+      await db.insert('appointments', {
+        id: key(),
+        opportunity_id: id,
+        status: 'cancelled',
+        starts_at: new Date('2026-09-20T13:00:00Z'),
+        version: 1,
+      });
+  }
+  for (let restart = 0; restart < 2; restart++) {
+    await initializeMongo(db);
+    for (const [id, status] of expected) {
+      const lead = await row(id);
+      assert.equal(lead.consultation_status, status);
+      assert.equal(lead.stage, 'FOLLOW_UP');
+      assert.equal(lead.version, 1);
+    }
+  }
+});
+
+test('Mongo: migração não sobrescreve salvamento concorrente de um registro legado', async (t) => {
+  const { id } = await lead();
+  await ops.claim(users[0], id, 'reservation', 1, key());
+  await db.update(
+    'opportunities',
+    { id },
+    {
+      $set: { stage: 'CONSULTATION_NOT_SCHEDULED' },
+      $unset: { consultation_status: '' },
+    },
+  );
+  const collection = db.collection.bind(db);
+  let saved: Awaited<ReturnType<typeof row>> | undefined;
+  t.mock.method(db, 'collection', (name: string) => {
+    const target = collection(name);
+    if (name === 'opportunities') {
+      const updateOne = target.updateOne.bind(target);
+      target.updateOne = async (filter, update, options) => {
+        if (filter.id === id && filter.consultation_status?.$exists === false && !saved) {
+          await ops.update(users[0], id, {
+            ...lose,
+            version: (await row(id)).version,
+            stage: 'FOLLOW_UP',
+            attendance: 'ATTENDED',
+            next_action: 'Salvo enquanto o novo servidor inicializava.',
+          });
+          saved = await row(id);
+        }
+        return updateOne(filter, update, options);
+      };
+    }
+    return target;
+  });
+  await initializeMongo(db);
+  assert.ok(saved, 'O teste deve salvar após a leitura e antes da escrita da migração.');
+  assert.deepEqual(await row(id), saved);
+});
+
 test('Mongo: migração renomeia origem não identificada para orgânica', async () => {
   const existing = await lead(94);
   await db.update(
@@ -1233,7 +1426,7 @@ test('Mongo: Marketing API persiste insights e cruza somente evidência explíci
   assert.equal(report.spend, 12.5);
   assert.equal(report.instagram_leads, 1);
   assert.equal(report.matched_attributed_leads, 1);
-  assert.equal(report.cpl, 12.5);
+  assert.equal(report.cpl, null); // Never assign account-wide spend to an unverified destination.
   const emptyMarketing = new MetaMarketing(
     db,
     metaMarketingTestConfig,

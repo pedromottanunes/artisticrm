@@ -10,6 +10,7 @@ import { enqueuePushEvent } from './push-store.js';
 import { InstagramComments, commentChangeSchema, type CommentEvent } from './instagram-comments.js';
 import { MediaProxy, trustedMediaUrl } from './media-proxy.js';
 import { InstagramProspects, type ProspectRouting } from './instagram-prospects.js';
+import { mutedOpportunityIds, setLeadNotificationMuted } from './lead-notification-mutes.js';
 
 class ProspectProfileRetry extends Error {
   constructor(readonly retryAt: number) {
@@ -214,7 +215,7 @@ function metaAttribution(referral: Referral | undefined): MetaAttributionInput |
   const explicitlyAnAd =
     referral.source_type?.toLowerCase() === 'ad' ||
     referral.source?.toUpperCase() === 'ADS' ||
-    Boolean(referral.ad_id);
+    Boolean(referral.ad_id ?? referral.ads_context_data?.ad_id);
   if (!explicitlyAnAd || !sourceId) return;
   const mediaUrl =
     present(referral.ads_context_data?.photo_url) ?? present(referral.ads_context_data?.video_url);
@@ -299,6 +300,7 @@ function normalizeEvent(
         ? 'Webhook do Instagram assinado com referência de anúncio enviada pela Meta.'
         : 'Entrada confirmada pelo Instagram Direct; nenhuma referência de anúncio foi fornecida.',
       meta_attribution: attribution,
+      ...(input.timestamp ? { source_event_at: eventDate(input.timestamp).toISOString() } : {}),
       identity: {
         provider: 'instagram',
         account_id: config.accountId,
@@ -1343,6 +1345,14 @@ export class InstagramCentral {
         user.id,
         conversations.map((conversation) => String(conversation.id)),
       );
+      const muted =
+        user.role === 'attendant'
+          ? await mutedOpportunityIds(
+              db,
+              user.id,
+              conversations.map((conversation) => String(conversation.opportunity_id)),
+            )
+          : new Set<string>();
       return {
         configured: true,
         conversations: conversations.map((conversation, index) => {
@@ -1358,6 +1368,7 @@ export class InstagramCentral {
             reserved_to: conversation.reserved_to,
             last_message_at: conversation.last_message_at,
             unread: unread.has(String(conversation.id)),
+            notifications_muted: muted.has(String(conversation.opportunity_id)),
             messaging_mode: mode,
             can_send:
               conversation.state === 'CLAIMED' &&
@@ -1419,6 +1430,14 @@ export class InstagramCentral {
       user.id,
       rows.map((row) => row.conversation_id),
     );
+    const muted =
+      user.role === 'attendant'
+        ? await mutedOpportunityIds(
+            db,
+            user.id,
+            rows.map((row) => row.id),
+          )
+        : new Set<string>();
     return {
       configured: true,
       conversations: rows.map((row, index) => {
@@ -1434,6 +1453,7 @@ export class InstagramCentral {
           reserved_to: row.reserved_to,
           last_message_at: row.conversation_last_message_at,
           unread: unread.has(row.conversation_id),
+          notifications_muted: muted.has(row.id),
           messaging_mode: mode,
           can_send:
             row.state === 'CLAIMED' &&
@@ -1538,6 +1558,39 @@ export class InstagramCentral {
     ).rows;
     for (const row of rows) unread.add(row.conversation_id);
     return unread;
+  }
+
+  async setNotificationsMuted(user: User, conversationId: string, muted: boolean) {
+    if (user.role !== 'attendant')
+      throw new DomainError(
+        'FORBIDDEN',
+        'Somente o consultor responsável pode silenciar este lead.',
+        403,
+      );
+    const context = await this.context(user, conversationId);
+    const db = this.crm.db;
+    if (db.kind === 'mongo')
+      await db.atomic(async (tx) => {
+        const lead = await tx.one<{ owner_id: string | null }>('opportunities', {
+          id: context.opportunity_id,
+        });
+        if (!lead || lead.owner_id !== user.id)
+          throw new DomainError('FORBIDDEN', 'Este lead não está mais vinculado a você.', 403);
+        await setLeadNotificationMuted(tx, user.id, context.opportunity_id, muted);
+      });
+    else
+      await db.transaction(async (tx) => {
+        const lead = (
+          await tx.query<{ owner_id: string | null }>(
+            'SELECT owner_id FROM opportunities WHERE id=$1 FOR UPDATE',
+            [context.opportunity_id],
+          )
+        ).rows[0];
+        if (!lead || lead.owner_id !== user.id)
+          throw new DomainError('FORBIDDEN', 'Este lead não está mais vinculado a você.', 403);
+        await setLeadNotificationMuted(tx, user.id, context.opportunity_id, muted);
+      });
+    return { notifications_muted: muted };
   }
 
   async messages(user: User, conversationId: string, afterMessageId?: string) {

@@ -4,6 +4,7 @@ import { openDatabase, migrate, type Database } from '../src/db.js';
 import { CRM } from '../src/crm.js';
 import { seedDemo, DEMO_PASSWORD } from '../src/seed.js';
 import { buildApp } from '../src/app.js';
+import { checkMarketingOrigins } from './marketing-origin-checks.js';
 import {
   MetaMarketing,
   metaMarketingConfig,
@@ -75,12 +76,16 @@ before(async () => {
 
 beforeEach(async () => {
   await db.query(
-    'TRUNCATE meta_marketing_daily_insights,meta_marketing_accounts,meta_marketing_sync_state,conversation_reads,messages,instagram_webhook_inbox,conversations,contact_identities,channel_accounts,push_records,whatsapp_inbox,claims,appointments,lead_attributions,inbound_events,audit_events,opportunities,contacts,sessions',
+    'TRUNCATE meta_marketing_daily_insights,meta_marketing_accounts,meta_marketing_sync_state,meta_marketing_ad_jobs,meta_marketing_ads,meta_marketing_ad_versions,meta_marketing_daily_coverage,meta_marketing_control,lead_notification_mutes,conversation_reads,messages,instagram_webhook_inbox,conversations,contact_identities,channel_accounts,push_records,whatsapp_inbox,claims,appointments,lead_attributions,inbound_events,audit_events,opportunities,contacts,sessions',
   );
   await db.query('UPDATE distribution_settings SET last_position=0,timeout_minutes=10');
 });
 
 after(async () => db.close());
+
+test('origem, catálogo textual, funil, limites persistidos e retomada (SQL)', async () => {
+  await checkMarketingOrigins(db);
+});
 
 test('Marketing API fica desligada por padrão e configuração parcial falha fechada', () => {
   assert.equal(metaMarketingConfig({}), undefined);
@@ -111,6 +116,7 @@ test('sync respects final-page cursors, deduplicates rows and never follows next
 test('sync failures keep previous data: cycles, too many pages, oversized bodies and wrong accounts', async () => {
   await new MetaMarketing(db, config, paginatedFetch([]), () => now).sync();
   for (const failure of ['cycle', 'pages', 'size', 'account', 'http'] as const) {
+    await db.query('TRUNCATE meta_marketing_control');
     let calls = 0;
     const marketing = new MetaMarketing(
       db,
@@ -234,7 +240,7 @@ test('relatório separa leads associados, não associados e orgânicos sem inven
   assert.equal(report.matched_attributed_leads, 1);
   assert.equal(report.unmatched_attributed_leads, 1);
   assert.equal(report.unattributed_or_organic_leads, 1);
-  assert.equal(report.cpl, 35);
+  assert.equal(report.cpl, null); // Destination has not been verified by the ad catalogue yet.
   assert.equal(
     report.campaigns.find((row) => row.campaign_id === 'campaign-1')?.attributed_leads,
     1,
@@ -270,6 +276,23 @@ test('rotas de Marketing API são exclusivas da gestão', async () => {
     };
     const manager = await login('cadu@demo.artisti.local');
     const attendant = await login('vanessa@demo.artisti.local');
+    for (const url of [
+      '/api/v1/reports/meta-ads?from=2026-09-23&to=2026-09-23',
+      '/api/v1/reports/meta-ads/leads?from=2026-09-23&to=2026-09-23&ad_id=111',
+      '/api/v1/opportunities/10000000-0000-4000-8000-000000000001/acquisition-performance',
+    ])
+      assert.equal((await app.inject({ url, headers: attendant })).statusCode, 403);
+    assert.equal(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/v1/meta-marketing/sync',
+          headers: attendant,
+          payload: {},
+        })
+      ).statusCode,
+      403,
+    );
     assert.equal(
       (await app.inject({ url: '/api/v1/meta-marketing/status', headers: attendant })).statusCode,
       403,
@@ -280,7 +303,7 @@ test('rotas de Marketing API são exclusivas da gestão', async () => {
       headers: manager,
       payload: { days: 7 },
     });
-    assert.equal(synced.statusCode, 200);
+    assert.equal(synced.statusCode, 202);
     const report = await app.inject({
       url: '/api/v1/reports/meta-ads?from=2026-09-23&to=2026-09-23',
       headers: manager,

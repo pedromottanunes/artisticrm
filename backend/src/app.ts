@@ -22,11 +22,13 @@ import type { MongoStore } from './mongo-store.js';
 import { distributionBoard, distributionQuery } from './distribution.js';
 import { reportsOverview, reportsQuery } from './reports.js';
 import { tokenHash, verifyPassword } from './auth.js';
+import { renewSession, sessionExpiry, sessionCookieOptions } from './sessions.js';
 import { loginSchema, passwordSchema } from './credentials.js';
 import { registerPush, type PushConfig, type PushSender } from './push.js';
 import { registerShortcuts } from './shortcuts.js';
 import { InstagramProspects, prospectSchema } from './instagram-prospects.js';
 import { DomainError, requireManager, stages, type User } from './types.js';
+import { personalQueueStatus } from './queue-status.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -96,7 +98,13 @@ export async function buildApp(
       : new Operations(db, options.clock);
   const metaMarketingRuntime = registerMetaMarketing(
     db,
-    options.metaMarketing,
+    options.metaMarketing
+      ? {
+          ...options.metaMarketing,
+          instagramAccountId:
+            options.metaMarketing.instagramAccountId ?? options.instagram?.accountId,
+        }
+      : undefined,
     options.reconcile !== false,
     options.metaMarketingFetch,
     options.clock,
@@ -143,11 +151,13 @@ export async function buildApp(
     if (apiPath === '/api/v1/auth/login' || apiPath === '/api/health') return;
     const token = request.cookies.artisti_session;
     if (!token) throw new DomainError('UNAUTHENTICATED', 'Entre para continuar.', 401);
+    const hash = tokenHash(token);
+    const sessionNow = await crm.now();
     const session =
       db.kind === 'mongo'
         ? await db.one('sessions', {
-            token_hash: tokenHash(token),
-            expires_at: { $gt: await crm.now() },
+            token_hash: hash,
+            expires_at: { $gt: sessionNow },
           })
         : null;
     const mongoUser =
@@ -158,18 +168,24 @@ export async function buildApp(
             auth_version: session.auth_version,
           })
         : null;
+    const sqlSession =
+      db.kind !== 'mongo'
+        ? (
+            await db.query<User & { session_expires_at: Date }>(
+              `SELECT s.expires_at AS session_expires_at,u.id,u.name,u.email,u.role,u.active,u.queue_enabled,u.queue_position,u.queue_weight,u.color,u.version,u.auth_version,u.must_change_password FROM sessions s
+      JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>$2 AND u.active AND s.auth_version=u.auth_version`,
+              [hash, sessionNow],
+            )
+          ).rows[0]
+        : undefined;
     const user =
       db.kind === 'mongo'
         ? mongoUser
           ? publicUser(mongoUser)
           : undefined
-        : (
-            await db.query<User>(
-              `SELECT u.id,u.name,u.email,u.role,u.active,u.queue_enabled,u.queue_position,u.queue_weight,u.color,u.version,u.auth_version,u.must_change_password FROM sessions s
-      JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>$2 AND u.active AND s.auth_version=u.auth_version`,
-              [tokenHash(token), await crm.now()],
-            )
-          ).rows[0];
+        : sqlSession
+          ? publicUser(sqlSession)
+          : undefined;
     if (!user)
       throw new DomainError('UNAUTHENTICATED', 'Sua sessão expirou. Entre novamente.', 401);
     request.user = user;
@@ -184,6 +200,25 @@ export async function buildApp(
         'Altere sua senha antes de acessar os dados.',
         403,
       );
+    if (!['/api/v1/auth/logout', '/api/v1/auth/password'].includes(apiPath)) {
+      const expiresAt = await renewSession(
+        db,
+        hash,
+        user,
+        new Date(session?.expires_at ?? sqlSession!.session_expires_at),
+        sessionNow,
+      );
+      if (expiresAt) {
+        // Repair a missed cookie response without a DB write or extending the
+        // browser cookie beyond the remaining lifetime validated by the server.
+        const maxAge = Math.max(0, Math.floor((expiresAt.getTime() - sessionNow.getTime()) / 1000));
+        reply.setCookie(
+          'artisti_session',
+          token,
+          sessionCookieOptions(!!options.production, maxAge),
+        );
+      }
+    }
   });
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError)
@@ -223,7 +258,7 @@ export async function buildApp(
   });
   app.post(
     '/api/v1/auth/login',
-    { config: { rateLimit: { max: 12, timeWindow: '1 minute' } } },
+    { config: { rateLimit: { max: options.rateLimitMax ?? 12, timeWindow: '1 minute' } } },
     async (request, reply) => {
       const input = z
         .object({
@@ -266,9 +301,7 @@ export async function buildApp(
           await tx.insert('sessions', {
             token_hash: tokenHash(token),
             user_id: user.id,
-            expires_at: new Date(
-              (options.clock ? options.clock() : await tx.now()).getTime() + 8 * 3_600_000,
-            ),
+            expires_at: sessionExpiry(options.clock ? options.clock() : await tx.now()),
             auth_version: user.auth_version,
           });
         });
@@ -286,17 +319,11 @@ export async function buildApp(
           await tx.query('INSERT INTO sessions VALUES ($1,$2,$3,$4)', [
             tokenHash(token),
             user.id,
-            new Date((await new Operations(db, options.clock).now(tx)).getTime() + 8 * 3_600_000),
+            sessionExpiry(await new Operations(db, options.clock).now(tx)),
             user.auth_version,
           ]);
         });
-      reply.setCookie('artisti_session', token, {
-        path: '/',
-        httpOnly: true,
-        sameSite: 'strict',
-        secure: !!options.production,
-        maxAge: 8 * 3600,
-      });
+      reply.setCookie('artisti_session', token, sessionCookieOptions(!!options.production));
       return { ok: true };
     },
   );
@@ -334,6 +361,7 @@ export async function buildApp(
   app.get('/api/v1/lead-lists', async (request) =>
     leadListsPage(db, request.user, leadListsQuery.parse(request.query)),
   );
+  app.get('/api/v1/queue/me', async (request) => personalQueueStatus(db, request.user));
   app.get('/api/v1/distribution/board', async (request) => {
     requireManager(request.user);
     const query = distributionQuery.parse(request.query);
@@ -346,9 +374,21 @@ export async function buildApp(
     await crm.expire();
     return reportsOverview(db, request.user, query, () => crm.now());
   });
-  app.get('/api/v1/opportunities/:id', async (request) =>
-    crm.detail(request.user, idParams.parse(request.params).id),
-  );
+  app.get('/api/v1/opportunities/:id', async (request) => {
+    const detail = await crm.detail(request.user, idParams.parse(request.params).id);
+    const ids = detail.can_edit
+      ? [detail.acquisition?.ad_id, ...detail.attributions.map((a) => a.source_id)].filter(
+          (id): id is string => typeof id === 'string' && !!id,
+        )
+      : [];
+    const ads = await metaMarketingRuntime.marketing.names(ids).catch(() => []);
+    return { ...detail, marketing_ads: ads };
+  });
+  app.get('/api/v1/opportunities/:id/acquisition-performance', async (request) => {
+    requireManager(request.user);
+    const detail = await crm.detail(request.user, idParams.parse(request.params).id);
+    return metaMarketingRuntime.marketing.performance(detail.acquisition);
+  });
   app.post('/api/v1/opportunities', async (request, reply) => {
     const input = leadSchema.parse(request.body);
     const key = z.string().min(8).max(100).parse(request.headers['idempotency-key']);
@@ -679,21 +719,43 @@ export async function buildApp(
     requireManager(request.user);
     return metaMarketingRuntime.marketing.status();
   });
-  app.post('/api/v1/meta-marketing/sync', async (request) => {
+  app.post('/api/v1/meta-marketing/sync', async (request, reply) => {
     requireManager(request.user);
     const input = z
-      .object({ days: z.number().int().min(1).max(31).default(7) })
+      .object({
+        days: z.number().int().min(1).max(31).default(7),
+        from: z.string().date().optional(),
+        to: z.string().date().optional(),
+      })
       .strict()
+      .refine((value) => Boolean(value.from) === Boolean(value.to), 'Informe as duas datas.')
       .parse(request.body ?? {});
-    return metaMarketingRuntime.marketing.sync(input.days);
+    return reply.status(202).send(await metaMarketingRuntime.marketing.requestSync(input));
   });
   app.get('/api/v1/reports/meta-ads', async (request) => {
     requireManager(request.user);
     const query = z
-      .object({ from: z.string().date(), to: z.string().date() })
+      .object({
+        from: z.string().date(),
+        to: z.string().date(),
+        page: z.coerce.number().int().min(1).max(20).default(1),
+      })
       .strict()
       .parse(request.query);
-    return metaMarketingRuntime.marketing.report(query.from, query.to);
+    return metaMarketingRuntime.marketing.report(query.from, query.to, query.page);
+  });
+  app.get('/api/v1/reports/meta-ads/leads', async (request) => {
+    requireManager(request.user);
+    const query = z
+      .object({
+        from: z.string().date(),
+        to: z.string().date(),
+        ad_id: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/),
+        after: z.string().uuid().optional(),
+      })
+      .strict()
+      .parse(request.query);
+    return metaMarketingRuntime.marketing.leads(query.from, query.to, query.ad_id, query.after);
   });
   app.get('/api/v1/conversations', async (request) => {
     const query = z
@@ -781,6 +843,14 @@ export async function buildApp(
       request.user,
       idParams.parse(request.params).id,
       input.last_message_id,
+    );
+  });
+  app.put('/api/v1/conversations/:id/notifications', async (request) => {
+    const input = z.object({ muted: z.boolean() }).strict().parse(request.body);
+    return instagram.setNotificationsMuted(
+      request.user,
+      idParams.parse(request.params).id,
+      input.muted,
     );
   });
   app.post('/api/v1/conversations/:id/messages', async (request) => {

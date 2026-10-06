@@ -13,6 +13,7 @@ import type { User, Opportunity } from '../src/types.js';
 import { checkDistribution } from './distribution-checks.js';
 import { checkPush } from './push-checks.js';
 import { checkReports } from './report-checks.js';
+import { checkPersonalQueueStatus } from './queue-status-checks.js';
 
 let db: Database;
 let crm: CRM;
@@ -49,7 +50,7 @@ after(async () => {
 });
 beforeEach(async () => {
   await db.query(
-    'TRUNCATE conversation_reads,messages,instagram_webhook_inbox,conversations,contact_identities,channel_accounts,push_records,whatsapp_inbox,claims,appointments,lead_attributions,inbound_events,audit_events,opportunities,contacts,sessions',
+    'TRUNCATE lead_notification_mutes,conversation_reads,messages,instagram_webhook_inbox,conversations,contact_identities,channel_accounts,push_records,whatsapp_inbox,claims,appointments,lead_attributions,inbound_events,audit_events,opportunities,contacts,sessions',
   );
   await db.query('UPDATE distribution_settings SET last_position=0,timeout_minutes=10,version=1');
   await db.query(
@@ -69,6 +70,9 @@ const get = async (id: string) =>
   (await db.query<Opportunity>('SELECT * FROM opportunities WHERE id=$1', [id])).rows[0];
 const count = async (table: string) =>
   Number((await db.query<{ count: string }>(`SELECT count(*) FROM ${table}`)).rows[0].count);
+
+test('personal queue rank is weighted, private and pause-aware (SQL)', () =>
+  checkPersonalQueueStatus(db, manager, users));
 
 test('painel de distribuição: paginação acima de 500 leads, filtros, prazos e acesso', async () => {
   await checkDistribution(

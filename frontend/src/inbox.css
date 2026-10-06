@@ -43,6 +43,23 @@
   white-space: nowrap;
 }
 
+.thread-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.thread-notification-button {
+  gap: 6px;
+}
+
+.thread-notification-button.muted {
+  border-color: #c9963e;
+  color: #8a611c;
+  background: #fff8e9;
+}
+
 .thread-back {
   display: none;
   flex: 0 0 auto;
@@ -90,7 +107,7 @@
 }
 
 .inbox-conversations > button.unread {
-  background: #eef9f7;
+  background: #0bd711;
 }
 
 .instagram-avatar {
@@ -544,6 +561,18 @@
     flex: 0 0 auto;
     justify-content: center;
     padding: 0;
+  }
+
+  .thread-notification-button {
+    width: 38px;
+    height: 38px;
+    flex: 0 0 auto;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .thread-notification-button > span {
+    display: none;
   }
 
   .thread-lead-button > span {

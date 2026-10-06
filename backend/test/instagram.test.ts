@@ -67,7 +67,7 @@ before(async () => {
 
 beforeEach(async () => {
   await db.query(
-    'TRUNCATE conversation_reads,messages,instagram_pending_referrals,instagram_webhook_inbox,conversations,contact_identities,channel_accounts,push_records,whatsapp_inbox,claims,appointments,lead_attributions,inbound_events,audit_events,opportunities,contacts,sessions',
+    'TRUNCATE lead_notification_mutes,conversation_reads,messages,instagram_pending_referrals,instagram_webhook_inbox,conversations,contact_identities,channel_accounts,push_records,whatsapp_inbox,claims,appointments,lead_attributions,inbound_events,audit_events,opportunities,contacts,sessions',
   );
   await db.query('UPDATE distribution_settings SET last_position=0,timeout_minutes=10');
   await db.query('UPDATE users SET queue_weight=1,queue_credit=0');
@@ -477,17 +477,31 @@ test('rotas autenticadas listam e leem conversa sem expor token', async () => {
   const body = raw(payload());
   await central.receive(body, signature(body));
   await central.drain();
+  const pending = (await central.list(manager, 'all')).conversations[0];
+  const pendingLead = await crm.detail(manager, String(pending.opportunity_id));
+  const responsible = attendants.find((user) => user.id === pendingLead.reserved_to)!;
+  await crm.claim(responsible, pendingLead.id, 'reservation', pendingLead.version, randomUUID());
   const { app } = await buildApp(db, { instagram: config, reconcile: false });
   try {
     const login = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/login',
       headers: { 'x-artisti-client': 'web' },
-      payload: { email: 'cadu@demo.artisti.local', password: DEMO_PASSWORD },
+      payload: { email: responsible.email, password: DEMO_PASSWORD },
     });
     const cookie = `artisti_session=${login.cookies[0].value}`;
     const mutationHeaders = { cookie, 'x-artisti-client': 'web' };
-    const status = await app.inject({ url: '/api/v1/instagram/status', headers: { cookie } });
+    const managerLogin = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: { 'x-artisti-client': 'web' },
+      payload: { email: manager.email, password: DEMO_PASSWORD },
+    });
+    const managerCookie = `artisti_session=${managerLogin.cookies[0].value}`;
+    const status = await app.inject({
+      url: '/api/v1/instagram/status',
+      headers: { cookie: managerCookie },
+    });
     assert.equal(status.statusCode, 200);
     assert.ok(!status.body.includes(config.accessToken));
     assert.ok(!status.body.includes(config.appSecret));
@@ -495,7 +509,36 @@ test('rotas autenticadas listam e leem conversa sem expor token', async () => {
     assert.equal(list.statusCode, 200);
     assert.equal(list.json().conversations.length, 1);
     assert.equal(list.json().conversations[0].unread, true);
+    assert.equal(list.json().conversations[0].notifications_muted, false);
     const conversationId = list.json().conversations[0].id;
+    const mute = await app.inject({
+      method: 'PUT',
+      url: `/api/v1/conversations/${conversationId}/notifications`,
+      headers: mutationHeaders,
+      payload: { muted: true },
+    });
+    assert.equal(mute.statusCode, 200, mute.body);
+    assert.equal(mute.json().notifications_muted, true);
+    assert.equal(
+      (await app.inject({ url: '/api/v1/conversations', headers: { cookie } })).json()
+        .conversations[0].notifications_muted,
+      true,
+    );
+    const managerMute = await app.inject({
+      method: 'PUT',
+      url: `/api/v1/conversations/${conversationId}/notifications`,
+      headers: { cookie: managerCookie, 'x-artisti-client': 'web' },
+      payload: { muted: true },
+    });
+    assert.equal(managerMute.statusCode, 403);
+    const unmute = await app.inject({
+      method: 'PUT',
+      url: `/api/v1/conversations/${conversationId}/notifications`,
+      headers: mutationHeaders,
+      payload: { muted: false },
+    });
+    assert.equal(unmute.statusCode, 200, unmute.body);
+    assert.equal(unmute.json().notifications_muted, false);
     const history = await app.inject({
       url: `/api/v1/conversations/${conversationId}/messages`,
       headers: { cookie },

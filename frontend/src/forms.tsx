@@ -25,6 +25,8 @@ import {
 import { Transfer, AppointmentEditor } from './operations';
 import { Modal, Source, Badge, dateLabel } from './components';
 import { InstagramProspectForm } from './instagram-prospects';
+import { LeadMarketing } from './lead-marketing';
+import { LeadMobileHeader } from './lead-mobile-header';
 
 export function LeadForm(props: {
   isManager: boolean;
@@ -249,6 +251,7 @@ export function LeadDetail({
     }
   };
   const formRef = useRef<HTMLFormElement>(null);
+  const formId = useId();
   const save = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (saving) return;
@@ -396,7 +399,25 @@ export function LeadDetail({
         if (!deleting.current) onClose();
       }}
       wide
-      className="lead-detail-modal"
+      className={`lead-detail-modal${tab === 'cadastro' ? ' is-registration' : ''}`}
+      mobileHeading={
+        <LeadMobileHeader
+          name={detail.name}
+          formId={formId}
+          editable={tab === 'cadastro' && detail.can_edit}
+          canConverse={!isManager && detail.state === 'CLAIMED'}
+          connected={connected}
+          saving={saving || deleting.current}
+          hasSale={Boolean(detail.sale_completed_at)}
+          copied={copied}
+          onClose={() => {
+            if (!deleting.current) onClose();
+          }}
+          onConversation={onWhatsApp}
+          onCopy={() => void copySale()}
+          onSale={() => void recordSale()}
+        />
+      }
     >
       <div className="detail-summary">
         <Badge state={detail.state} />
@@ -437,7 +458,10 @@ export function LeadDetail({
             key={item.id}
           >
             {item.step && <span className="tab-step">{item.step}</span>}
-            <span>{item.label}</span>
+            <span className="lead-desktop-tab-label">{item.label}</span>
+            <span className="lead-mobile-tab-label">
+              {item.id === 'cadastro' ? 'Cadastro' : item.id === 'agendar' ? 'Agenda' : item.label}
+            </span>
           </button>
         ))}
       </div>
@@ -499,262 +523,215 @@ export function LeadDetail({
         </form>
       )}
       {tab === 'cadastro' && (
-        <form ref={formRef} onSubmit={save} key={detail.id + ':' + detail.version}>
-          <fieldset className="modal-body commercial-form" disabled={!detail.can_edit || saving}>
-            <section className="commercial-panel commercial-lead-data">
-              <div className="commercial-section-heading">
-                <div>
-                  <span>DADOS DO LEAD</span>
-                  <h3>Cadastro e atendimento</h3>
+        <form id={formId} ref={formRef} onSubmit={save} key={detail.id + ':' + detail.version}>
+          <div className="lead-form-scroll">
+            <fieldset className="modal-body commercial-form" disabled={!detail.can_edit || saving}>
+              <section className="commercial-panel commercial-lead-data">
+                <div className="commercial-section-heading">
+                  <div>
+                    <span>DADOS DO LEAD</span>
+                    <h3>Cadastro e atendimento</h3>
+                  </div>
                 </div>
-              </div>
-              <div className="commercial-fields">
-                <label>
-                  Nome
-                  <input
-                    name="name"
-                    defaultValue={detail.name}
-                    required
-                    minLength={2}
-                    maxLength={160}
+                <div className="commercial-fields">
+                  <label>
+                    Nome
+                    <input
+                      name="name"
+                      defaultValue={detail.name}
+                      required
+                      minLength={2}
+                      maxLength={160}
+                    />
+                  </label>
+                  <LeadPhoneField
+                    initialPhone={detail.phone ?? ''}
+                    canOpen={!isManager && detail.state === 'CLAIMED' && detail.can_edit && !saving}
+                    isDemo={detail.is_demo}
                   />
-                </label>
-                <LeadPhoneField
-                  initialPhone={detail.phone ?? ''}
-                  canOpen={!isManager && detail.state === 'CLAIMED' && detail.can_edit && !saving}
-                  isDemo={detail.is_demo}
-                />
-                <label>
-                  Cidade de residência
-                  <input
-                    name="residence_city"
-                    defaultValue={detail.residence_city ?? ''}
-                    minLength={2}
-                    maxLength={160}
-                    placeholder="Ex.: Criciúma"
-                    required
-                  />
-                </label>
-                <label>
-                  Cidade onde opera / unidade
-                  <input
-                    name="unit"
-                    defaultValue={detail.unit}
-                    minLength={2}
-                    maxLength={160}
-                    required
-                  />
-                </label>
-                <label>
-                  Qualificação
-                  <select
-                    name="stage"
-                    value={selectedStage}
-                    onChange={(event) => setSelectedStage(event.target.value)}
-                  >
-                    {Object.entries(stages).map(([key, label]) => (
-                      <option
-                        disabled={
-                          (detail.stage === 'DECLINED' && key !== 'DECLINED') ||
-                          (isClosedStage(detail.stage) && !isClosedStage(key))
-                        }
-                        key={key}
-                        value={key}
-                      >
-                        {label}
+                  <label>
+                    Cidade de residência
+                    <input
+                      name="residence_city"
+                      defaultValue={detail.residence_city ?? ''}
+                      minLength={2}
+                      maxLength={160}
+                      placeholder="Ex.: Criciúma"
+                      required
+                    />
+                  </label>
+                  <label>
+                    Cidade onde opera / unidade
+                    <input
+                      name="unit"
+                      defaultValue={detail.unit}
+                      minLength={2}
+                      maxLength={160}
+                      required
+                    />
+                  </label>
+                  <label>
+                    Qualificação
+                    <select
+                      name="stage"
+                      value={selectedStage}
+                      onChange={(event) => setSelectedStage(event.target.value)}
+                    >
+                      {Object.entries(stages).map(([key, label]) => (
+                        <option
+                          disabled={
+                            (detail.stage === 'DECLINED' && key !== 'DECLINED') ||
+                            (isClosedStage(detail.stage) && !isClosedStage(key))
+                          }
+                          key={key}
+                          value={key}
+                        >
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Compareceu?
+                    <select
+                      name="attendance"
+                      value={selectedAttendance}
+                      disabled={Boolean(attendanceAppointment) || attendancePending}
+                      onChange={(event) => {
+                        const attendance = event.target.value;
+                        setSelectedAttendance(attendance);
+                        if (
+                          attendance &&
+                          (selectedStage === 'NEW_LEAD' ||
+                            selectedStage === 'CONSULTATION_NOT_SCHEDULED')
+                        )
+                          setSelectedStage('FOLLOW_UP');
+                      }}
+                    >
+                      <option value="">
+                        {attendancePending ? 'Disponível após o horário' : 'Não informado'}
                       </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Compareceu?
-                  <select
-                    name="attendance"
-                    value={selectedAttendance}
-                    disabled={Boolean(attendanceAppointment) || attendancePending}
-                    onChange={(event) => {
-                      const attendance = event.target.value;
-                      setSelectedAttendance(attendance);
-                      if (
-                        attendance &&
-                        (selectedStage === 'NEW_LEAD' ||
-                          selectedStage === 'CONSULTATION_NOT_SCHEDULED')
-                      )
-                        setSelectedStage('FOLLOW_UP');
-                    }}
-                  >
-                    <option value="">
-                      {attendancePending ? 'Disponível após o horário' : 'Não informado'}
-                    </option>
-                    <option value="ATTENDED">Sim</option>
-                    <option value="NO_SHOW">Não</option>
-                  </select>
-                  {attendanceAppointment && (
-                    <small>Confirmação vinculada à consulta registrada.</small>
-                  )}
-                </label>
-                <label className="commercial-next-action">
-                  Próxima ação
-                  <textarea
-                    name="next_action"
-                    defaultValue={detail.next_action}
-                    maxLength={1000}
-                    placeholder="Qual é o próximo passo deste atendimento?"
-                    rows={4}
-                  />
-                </label>
-                <input type="hidden" name="interest" value={detail.interest} />
-              </div>
-            </section>
-
-            <section className="commercial-panel commercial-closing">
-              <div className="commercial-section-heading">
-                <div>
-                  <span>FECHAMENTO</span>
-                  <h3>
-                    {detail.sale_completed_at ? 'Dados da venda' : 'Registrar venda concluída'}
-                  </h3>
-                </div>
-                {detail.sale_completed_at ? <strong>Venda registrada</strong> : null}
-              </div>
-              <div className="commercial-fields">
-                <label>
-                  Quem fez a venda
-                  <input
-                    value={detail.sale_seller_name || 'Preenchido automaticamente ao registrar'}
-                    readOnly
-                  />
-                </label>
-                <label>
-                  Consultor
-                  <input
-                    name="consultant"
-                    defaultValue={detail.consultant}
-                    minLength={2}
-                    maxLength={160}
-                    required
-                  />
-                </label>
-                <label>
-                  Valor total
-                  <input
-                    name="total_value"
-                    inputMode="decimal"
-                    defaultValue={currencyInput(detail.total_value_cents)}
-                    placeholder="15.000,00"
-                    required
-                  />
-                </label>
-                <label>
-                  Valor da entrada
-                  <input
-                    name="down_payment"
-                    inputMode="decimal"
-                    defaultValue={currencyInput(detail.down_payment_cents)}
-                    placeholder="1.500,00"
-                    required
-                  />
-                </label>
-                <label>
-                  Grau e classificação A
-                  <input
-                    name="hair_grade_classification"
-                    defaultValue={detail.hair_grade_classification}
-                    maxLength={160}
-                    placeholder="Ex.: grau 3 A1"
-                    required
-                  />
-                </label>
-                <label>
-                  Teve pack?
-                  <select
-                    name="has_pack"
-                    defaultValue={detail.has_pack === true ? 'true' : 'false'}
-                  >
-                    <option value="false">Não</option>
-                    <option value="true">Sim</option>
-                  </select>
-                </label>
-                <label>
-                  Data da cirurgia
-                  <input
-                    name="procedure_date"
-                    type="date"
-                    defaultValue={detail.procedure_date?.slice(0, 10) ?? ''}
-                    required={selectedStage === 'CLOSED_WITH_DATE'}
-                  />
-                </label>
-                <label>
-                  Assinou contrato?
-                  <select
-                    name="contract_status"
-                    defaultValue={detail.contract_status ?? 'awaiting'}
-                  >
-                    <option value="awaiting">Aguardando</option>
-                    <option value="signed">Sim</option>
-                    <option value="not_signed">Não</option>
-                  </select>
-                </label>
-              </div>
-            </section>
-          </fieldset>
-          <div className="detail-evidence">
-            <LinkEvidence />
-            <p>
-              <strong>Evidência de origem</strong>
-              {detail.source_evidence}
-            </p>
-          </div>
-          {!!detail.attributions.length && (
-            <section className="meta-attributions" aria-label="Origens de anúncios da Meta">
-              <header>
-                <div>
-                  <span>ORIGEM DO ANÚNCIO</span>
-                  <h3>Referência recebida pela Meta</h3>
-                </div>
-                <span className="verified-origin">
-                  <ShieldCheck size={14} /> Verificada
-                </span>
-              </header>
-              {detail.attributions.map((attribution, index) => {
-                const sourceUrl = safeHttpUrl(attribution.source_url);
-                return (
-                  <article className="meta-attribution" key={attribution.id}>
-                    <div className="meta-attribution-title">
-                      <strong>{attribution.headline || 'Anúncio da Meta'}</strong>
-                      <span>
-                        {index === 0 ? 'Mais recente' : dateLabel(attribution.received_at, true)}
-                      </span>
-                    </div>
-                    {attribution.body && <p>{attribution.body}</p>}
-                    <dl>
-                      {attribution.source_id && (
-                        <div>
-                          <dt>ID do anúncio</dt>
-                          <dd>{attribution.source_id}</dd>
-                        </div>
-                      )}
-                      <div>
-                        <dt>Recebido em</dt>
-                        <dd>{dateLabel(attribution.received_at, true)}</dd>
-                      </div>
-                      {attribution.media_type && (
-                        <div>
-                          <dt>Formato</dt>
-                          <dd>{attribution.media_type}</dd>
-                        </div>
-                      )}
-                    </dl>
-                    {sourceUrl && (
-                      <a href={sourceUrl} target="_blank" rel="noreferrer">
-                        Abrir referência do anúncio <ArrowRight size={14} />
-                      </a>
+                      <option value="ATTENDED">Sim</option>
+                      <option value="NO_SHOW">Não</option>
+                    </select>
+                    {attendanceAppointment && (
+                      <small>Confirmação vinculada à consulta registrada.</small>
                     )}
-                  </article>
-                );
-              })}
-            </section>
-          )}
+                  </label>
+                  <label className="commercial-next-action">
+                    Próxima ação
+                    <textarea
+                      name="next_action"
+                      defaultValue={detail.next_action}
+                      maxLength={1000}
+                      placeholder="Qual é o próximo passo deste atendimento?"
+                      rows={4}
+                    />
+                  </label>
+                  <input type="hidden" name="interest" value={detail.interest} />
+                </div>
+              </section>
+
+              <section className="commercial-panel commercial-closing">
+                <div className="commercial-section-heading">
+                  <div>
+                    <span>FECHAMENTO</span>
+                    <h3>
+                      {detail.sale_completed_at ? 'Dados da venda' : 'Registrar venda concluída'}
+                    </h3>
+                  </div>
+                  {detail.sale_completed_at ? <strong>Venda registrada</strong> : null}
+                </div>
+                <div className="commercial-fields">
+                  <label>
+                    Quem fez a venda
+                    <input
+                      value={detail.sale_seller_name || 'Preenchido automaticamente ao registrar'}
+                      readOnly
+                    />
+                  </label>
+                  <label>
+                    Consultor
+                    <input
+                      name="consultant"
+                      defaultValue={detail.consultant}
+                      minLength={2}
+                      maxLength={160}
+                      required
+                    />
+                  </label>
+                  <label>
+                    Valor total
+                    <input
+                      name="total_value"
+                      inputMode="decimal"
+                      defaultValue={currencyInput(detail.total_value_cents)}
+                      placeholder="15.000,00"
+                      required
+                    />
+                  </label>
+                  <label>
+                    Valor da entrada
+                    <input
+                      name="down_payment"
+                      inputMode="decimal"
+                      defaultValue={currencyInput(detail.down_payment_cents)}
+                      placeholder="1.500,00"
+                      required
+                    />
+                  </label>
+                  <label>
+                    Grau e classificação A
+                    <input
+                      name="hair_grade_classification"
+                      defaultValue={detail.hair_grade_classification}
+                      maxLength={160}
+                      placeholder="Ex.: grau 3 A1"
+                      required
+                    />
+                  </label>
+                  <label>
+                    Teve pack?
+                    <select
+                      name="has_pack"
+                      defaultValue={detail.has_pack === true ? 'true' : 'false'}
+                    >
+                      <option value="false">Não</option>
+                      <option value="true">Sim</option>
+                    </select>
+                  </label>
+                  <label>
+                    Data da cirurgia
+                    <input
+                      name="procedure_date"
+                      type="date"
+                      defaultValue={detail.procedure_date?.slice(0, 10) ?? ''}
+                      required={selectedStage === 'CLOSED_WITH_DATE'}
+                    />
+                  </label>
+                  <label>
+                    Assinou contrato?
+                    <select
+                      name="contract_status"
+                      defaultValue={detail.contract_status ?? 'awaiting'}
+                    >
+                      <option value="awaiting">Aguardando</option>
+                      <option value="signed">Sim</option>
+                      <option value="not_signed">Não</option>
+                    </select>
+                  </label>
+                </div>
+              </section>
+            </fieldset>
+            <div className="detail-evidence">
+              <LinkEvidence />
+              <p>
+                <strong>Evidência de origem</strong>
+                {detail.source_evidence}
+              </p>
+            </div>
+            <LeadMarketing key={detail.id} detail={detail} isManager={isManager} />
+          </div>
           {error && (
             <p className="form-error in-modal" role="alert">
               {error}
@@ -763,7 +740,7 @@ export function LeadDetail({
           <div className="modal-actions commercial-actions">
             {!isManager && detail.state === 'CLAIMED' && detail.can_edit && (
               <button
-                className="button outline"
+                className="button outline lead-secondary-action"
                 type="button"
                 disabled={!connected}
                 onClick={onWhatsApp}
@@ -775,7 +752,7 @@ export function LeadDetail({
             {detail.can_edit ? (
               <div className="commercial-action-group">
                 <button
-                  className="button outline"
+                  className="button outline lead-secondary-action"
                   type="button"
                   disabled={!detail.sale_completed_at || saving}
                   onClick={() => void copySale()}
@@ -783,12 +760,16 @@ export function LeadDetail({
                   <Copy size={16} />
                   {copied ? 'Copiado!' : 'Copiar para WhatsApp'}
                 </button>
-                <button className="button outline" disabled={!connected || saving} formNoValidate>
+                <button
+                  className="button outline lead-primary-save"
+                  disabled={!connected || saving}
+                  formNoValidate
+                >
                   <Save size={16} />
                   {saving ? 'Salvando…' : 'Salvar cadastro'}
                 </button>
                 <button
-                  className="button gold"
+                  className="button gold lead-secondary-action"
                   type="button"
                   disabled={!connected || saving}
                   onClick={() => void recordSale()}
@@ -1042,16 +1023,6 @@ function saleText(detail: Detail) {
   ].join('\n');
 }
 const LinkEvidence = () => <ShieldCheck size={18} />;
-
-function safeHttpUrl(value?: string | null) {
-  if (!value) return;
-  try {
-    const url = new URL(value);
-    return ['http:', 'https:'].includes(url.protocol) ? url.toString() : undefined;
-  } catch {
-    return;
-  }
-}
 
 export function QueueSettings({
   data,

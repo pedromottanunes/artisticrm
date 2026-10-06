@@ -14,6 +14,7 @@ import {
 } from './types.js';
 import { lockActor } from './access.js';
 import { assertManualLeadAccess } from './manual-leads.js';
+import { acquisitionFor, queueInboundMarketingAd } from './meta-acquisition.js';
 import { enqueuePushEvent } from './push-store.js';
 import { wasDeleted } from './lead-deletion.js';
 import { decideProspect, finishProspect, type ProspectRouting } from './instagram-prospects.js';
@@ -44,6 +45,7 @@ export interface LeadInput {
   source: string;
   source_evidence?: string;
   meta_attribution?: MetaAttributionInput;
+  source_event_at?: string;
   identity?: ChannelIdentityInput;
   is_demo?: boolean;
 }
@@ -327,6 +329,7 @@ export class CRM {
           fingerprint,
         ]);
         await recordMetaAttribution(tx, existing.id, externalId, input.meta_attribution, now);
+        await queueInboundMarketingAd(tx, input, now);
         await this.audit(
           tx,
           existing.id,
@@ -391,6 +394,11 @@ export class CRM {
         fingerprint,
       ]);
       await recordMetaAttribution(tx, id, externalId, input.meta_attribution, now);
+      await tx.query('UPDATE opportunities SET acquisition=$2::jsonb WHERE id=$1', [
+        id,
+        JSON.stringify(acquisitionFor(input, externalId, now)),
+      ]);
+      await queueInboundMarketingAd(tx, input, now);
       if (prospectOwner || prospect.review)
         await this.audit(
           tx,
@@ -641,12 +649,19 @@ export class CRM {
           await this.db.query(
             `SELECT id,provider,channel,source_type,source_id,source_url,headline,body,
               media_type,image_url,video_url,thumbnail_url,received_at
-             FROM lead_attributions WHERE opportunity_id=$1 ORDER BY received_at DESC,id DESC`,
+             FROM lead_attributions WHERE opportunity_id=$1 ORDER BY received_at DESC,id DESC LIMIT 21`,
             [id],
           )
         ).rows
       : [];
-    return { ...this.sanitize(row, user), history, appointments, attributions, can_edit: canEdit };
+    return {
+      ...this.sanitize(row, user),
+      history,
+      appointments,
+      attributions: attributions.slice(0, 20),
+      attributions_has_more: attributions.length > 20,
+      can_edit: canEdit,
+    };
   }
   async update(
     user: User,

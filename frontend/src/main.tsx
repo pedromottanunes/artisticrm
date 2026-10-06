@@ -19,6 +19,7 @@ import './clinical-light.css';
 import './comment-pool.css';
 import './lead-lists.css';
 import './public-legal.css';
+import './lead-mobile.css';
 import { registerDeviceWorker } from './pwa';
 import { PublicLegalPage, type PublicLegalPageName } from './public-legal';
 

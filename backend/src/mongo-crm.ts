@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { enqueuePushEvent } from './push-store.js';
 import { assertManualLeadAccess } from './manual-leads.js';
+import { acquisitionFor, queueInboundMarketingAd } from './meta-acquisition.js';
 import {
   decideProspect,
   finishProspect,
@@ -322,6 +323,7 @@ export class MongoOperations {
           'lead.repeated',
           'Nova entrada vinculada ao contato existente. Responsável preservado.',
         );
+        await queueInboundMarketingAd(tx, input, now);
         return { id: existing.id, duplicate: true };
       }
       const returning = !!(await tx.count('opportunities', { contact_id: contact.id }));
@@ -337,6 +339,7 @@ export class MongoOperations {
       const id = randomUUID();
       await tx.insert('opportunities', {
         id,
+        acquisition: acquisitionFor(input, externalId, now),
         contact_id: contact.id,
         interest: input.interest,
         unit: input.unit,
@@ -400,6 +403,7 @@ export class MongoOperations {
             : 'Identificação da prospecção pendente. Revisão da gestão necessária.',
           { owner_id: prospectOwner ?? null },
         );
+      await queueInboundMarketingAd(tx, input, now);
       await this.audit(
         tx,
         id,
@@ -699,7 +703,12 @@ export class MongoOperations {
         : [];
       const attributions = canEdit
         ? (
-            await tx.many('lead_attributions', { opportunity_id: id }, { received_at: -1, id: -1 })
+            await tx.many(
+              'lead_attributions',
+              { opportunity_id: id },
+              { received_at: -1, id: -1 },
+              21,
+            )
           ).map(
             ({
               id,
@@ -736,7 +745,8 @@ export class MongoOperations {
         ...(await this.enrich(tx, row, user)),
         history,
         appointments,
-        attributions,
+        attributions: attributions.slice(0, 20),
+        attributions_has_more: attributions.length > 20,
         can_edit: canEdit,
       };
     }, true);
@@ -1201,6 +1211,7 @@ export class MongoOperations {
         await tx.remove('push_records', { kind: 'subscription', 'data.userId': id });
         await tx.remove('message_shortcuts', { user_id: id });
         await tx.remove('instagram_prospects', { owner_id: id });
+        await tx.remove('lead_notification_mutes', { user_id: id });
         await tx.remove('users', { id });
         const settings = (await tx.one('distribution_settings', { id: 1 }))!;
         const remaining = await tx.many<QueueUser>(

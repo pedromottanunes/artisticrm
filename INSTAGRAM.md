@@ -16,13 +16,53 @@ O Instagram é um conector adicional. Ativá-lo não desliga, substitui ou alter
 - acompanhamento gerencial e status técnico sem expor segredos;
 - evidência de anúncio preservada apenas quando o webhook fornece um ID explícito.
 
-Estão implementados também a sincronização opcional de gastos da Marketing API e o relatório por campanha, usando credencial separada com `ads_read`. Ainda não estão implementados envio de mídia e OAuth multiempresa. O ambiente atual usa uma conta profissional e uma conta de anúncios configuradas por variáveis privadas.
+Estão implementados também o catálogo textual dos anúncios, a sincronização opcional de gastos da Marketing API e o relatório por anúncio, usando credencial separada com `ads_read`. Ainda não estão implementados envio de mídia e OAuth multiempresa. O ambiente atual usa uma conta profissional e uma conta de anúncios configuradas por variáveis privadas.
 
 ## Marketing API e métricas
 
-Configure `META_MARKETING_ENABLED=true`, `META_MARKETING_ACCESS_TOKEN`, `META_AD_ACCOUNT_ID=act_...`, `META_AD_TIMEZONE=America/Sao_Paulo` e `META_GRAPH_VERSION`. O servidor sincroniza insights diários no nível de anúncio a cada 30 minutos e a gestão também pode solicitar atualização manual. Uma falha nessa sincronização não interrompe webhooks, distribuição ou chat.
+O recurso fica desligado sem `META_MARKETING_ENABLED=true`. Capturar referências de anúncios não depende dessa ativação. Nomes e custos precisam do token autorizado e da conta de anúncios; não basta ter a API do Instagram conectada.
 
-O painel cruza o `ad_id` recebido como evidência no Direct com os anúncios sincronizados. Exibe separadamente leads associados, evidências ainda não encontradas nos insights e entradas orgânicas/sem atribuição. O CPL só é calculado com leads efetivamente associados; o CRM não escolhe campanha por horário ou aproximação.
+O primeiro evento que cria a oportunidade determina sua origem. Uma referência explícita do webhook registra o `ad_id`; na ausência dela, a entrada do Instagram recebe **Orgânica**, por decisão comercial. Esse rótulo não comprova ausência de influência de publicidade. Indicação e outras origens manuais permanecem preservadas. Uma interação paga posterior não troca a origem inicial nem o consultor.
+
+A ficha mostra nome do anúncio, campanha, conjunto, texto de referência e link da publicação quando disponível, sem miniatura. São metadados consultados na data indicada: o nome do anúncio não é necessariamente o título do post, e o link não comprova a variação exata que cada pessoa viu. As 20 referências recentes e a origem inicial ficam visíveis; referências anteriores permanecem no banco.
+
+Na gestão, o relatório mostra investimento, leads, agendamentos, comparecimentos e vendas registradas por anúncio. O número de leads abre uma lista paginada com acesso às fichas. Custos médios só aparecem quando todos os dias foram consultados e o anúncio foi identificado com destino exclusivo Instagram Direct. Anúncios de outros destinos continuam com investimento separado. Agendamentos e vendas são contagens distintas de oportunidades, não de mensagens; resultados são o estado atual dos leads adquiridos no período. Valor de venda desconhecido não é zero; valores registrados não são pagamentos recebidos. O custo médio do anúncio não é um custo individual comprovado do lead.
+
+As telas leem o banco, não a Meta. Uma falha de marketing não interrompe webhooks, distribuição ou chat. Somente a gestão pode ler investimento/desempenho e solicitar sincronização; consultores recebem os nomes apenas nas fichas autorizadas.
+
+### Limites e retomada
+
+- Um ciclo por conta, protegido por posse temporária persistida no banco; no máximo cinco anúncios e 20 chamadas por ciclo, com orçamento compartilhado de 120 chamadas por hora.
+- Conta, nomes e criativos reaproveitados por 24 horas; anúncios sem atividade conhecida há mais de 32 dias deixam de ser renovados até nova referência/consulta de histórico.
+- Custos: hoje e ontem a cada hora; sete dias diariamente; 31 dias semanalmente. Histórico dividido em janelas de até sete dias, com progresso persistido. A primeira carga pode levar vários ciclos.
+- Botão manual apenas agenda o período selecionado, de até 31 dias; intervalo mínimo de cinco minutos. Não ignora bloqueios da Meta.
+- Leituras limitadas a 30 segundos por chamada, 90 segundos por ciclo, 2 MiB por resposta e 8 MiB por ciclo. Nenhuma resposta parcial substitui o último intervalo completo.
+- Respostas de limitação e indicadores de uso alto suspendem novas consultas; token inválido suspende até reautorização/configuração corrigida. Erros transitórios têm espera crescente, preservada após reiniciar o Render.
+- Relatório com até 31 dias e 50 anúncios por página; limite de 1.000 anúncios com aviso de resultado incompleto. Lista de leads por anúncio usa cursor de 50 registros. Transações analíticas não utilizam a trava da distribuição.
+- Apenas IDs, textos, links e números no MongoDB. Sem imagens, vídeos, previews ou cópias de conversas na integração de marketing. Nenhuma criação/edição de anúncio e nenhum envio de dados de pacientes à Marketing API.
+
+### Ativação após publicar o código
+
+1. Confirme qual é a conta de anúncios da clínica e quem administra esse ativo no negócio da Meta. O ID de anúncios é diferente do ID do Instagram e do aplicativo.
+2. No aplicativo/negócio autorizado, confira o acesso à Marketing API e à conta de anúncios. Use um token apropriado para Marketing com `ads_read` e permissão sobre esse ativo. O nível de acesso/análise exigido depende da configuração do aplicativo e de quem possui o ativo; confirme no painel antes de ativar. Não substitua o token do Instagram.
+3. Em **Render → serviço do CRM → Environment**, prepare estas variáveis privadas. Os valores entre `<...>` são campos a preencher, não credenciais prontas:
+
+   ```text
+   META_MARKETING_ENABLED=false
+   META_MARKETING_ACCESS_TOKEN=<token autorizado com ads_read>
+   META_AD_ACCOUNT_ID=act_<ID numérico da conta de anúncios>
+   ```
+
+4. Mantenha a `META_GRAPH_VERSION` já validada na integração. Não altere a versão compartilhada só para ativar marketing. `META_AD_TIMEZONE` é opcional: se omitida, o CRM lê o fuso da conta; se declarada, precisa coincidir com ele. Não use variáveis `VITE_` para tokens.
+5. Depois de confirmar acesso, altere apenas `META_MARKETING_ENABLED` para `true`, salve e aguarde o deploy. Nenhuma alteração no webhook, no login ou nas variáveis `INSTAGRAM_*` é necessária para esse recurso.
+6. Entre como master em **Relatórios**. Aguarde a sincronização e confira um anúncio conhecido. Em caso de falta de autorização, corrija a permissão/token no backend e solicite a sincronização novamente, respeitando o intervalo do botão. Não insista em tentativas repetidas.
+7. Homologue a associação com uma mensagem de teste originada de um anúncio conhecido: confira o ID/nome, responsável, ficha e lista do relatório. Compare investimento com a mesma conta, datas, moeda e fuso no Gerenciador da Meta. Testes automatizados não substituem essa conferência na conta real.
+
+Para interromper a integração opcional, use `META_MARKETING_ENABLED=false`. Os dados já salvos permanecem; o atendimento do Instagram não depende desse recurso. O plano Free do Render pode suspender também essas rotinas enquanto o serviço dorme.
+
+Os registros antigos podem ter referências e nomes recuperados, mas não serão convertidos em aquisições pagas pela primeira referência encontrada: isso poderia atribuir uma venda ao anúncio errado. A medição de origem inicial vale para oportunidades criadas após a implantação; legados sem essa projeção ficam no grupo Orgânica do relatório. Não use o CPL histórico anterior à implantação como medida completa.
+
+Referências: [Marketing API oficial e permissões](https://www.postman.com/meta/facebook-marketing-api/collection/0zr4mes/facebook-marketing-api-mapi), [campos do anúncio no SDK oficial](https://github.com/facebook/facebook-python-business-sdk/blob/main/facebook_business/adobjects/ad.py), [campos do criativo no SDK oficial](https://github.com/facebook/facebook-python-business-sdk/blob/main/facebook_business/adobjects/adcreative.py).
 
 ## Variáveis
 

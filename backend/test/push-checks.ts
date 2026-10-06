@@ -13,6 +13,7 @@ import {
 import type { CRM } from '../src/crm.js';
 import type { MongoOperations } from '../src/mongo-crm.js';
 import type { User } from '../src/types.js';
+import { setLeadNotificationMuted } from '../src/lead-notification-mutes.js';
 
 export async function checkPush(
   db: PushDb,
@@ -238,6 +239,49 @@ export async function checkPush(
     );
     await push.tick();
     assert.equal(delivered.length, messagesBefore + 6, 'processed messages are not alerted twice');
+    // Muting is per attendant: management still receives the alert, while queued
+    // retries and future messages for the responsible consultant stay silent.
+    const responsibleId = reserved.reserved_to!;
+    failure = 503;
+    await inPushTransaction(db, (tx) =>
+      enqueuePushEvent(tx, 'message-before-mute', second.id, 'message.received', clock()),
+    );
+    await push.tick();
+    failure = 0;
+    await inPushTransaction(db, (tx) =>
+      setLeadNotificationMuted(tx, responsibleId, second.id, true),
+    );
+    advance(16000);
+    const retryBefore = delivered.length;
+    await push.tick();
+    assert.deepEqual(
+      delivered.slice(retryBefore).map((item) => item.message.userId),
+      [manager.id],
+      'muting removes the attendant retry without hiding the management alert',
+    );
+    const mutedBefore = delivered.length;
+    await inPushTransaction(db, (tx) =>
+      enqueuePushEvent(tx, 'message-while-muted', second.id, 'message.received', clock()),
+    );
+    await push.tick();
+    assert.deepEqual(
+      delivered.slice(mutedBefore).map((item) => item.message.userId),
+      [manager.id],
+      'new messages stay silent only for the consultant who muted the lead',
+    );
+    await inPushTransaction(db, (tx) =>
+      setLeadNotificationMuted(tx, responsibleId, second.id, false),
+    );
+    const reactivatedBefore = delivered.length;
+    await inPushTransaction(db, (tx) =>
+      enqueuePushEvent(tx, 'message-after-unmute', second.id, 'message.received', clock()),
+    );
+    await push.tick();
+    assert.deepEqual(
+      new Set(delivered.slice(reactivatedBefore).map((item) => item.message.userId)),
+      new Set([manager.id, responsibleId]),
+      'reactivating restores message alerts',
+    );
     // Closing a sale must not suppress the sale event, subsequent edits or messages.
     if (db.kind === 'mongo')
       await db.update(

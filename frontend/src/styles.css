@@ -272,6 +272,34 @@ em {
   font-weight: 600;
   color: #d3dbe4;
 }
+.consultant-queue-position {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid #8bc7ad2d;
+  border-radius: 999px;
+  color: #a8d2c1;
+  background: #8bc7ad0d;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+.consultant-queue-position i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #8bc7ad;
+}
+.consultant-queue-position.paused {
+  border-color: #7383972d;
+  color: #8b9aac;
+  background: #7383970d;
+}
+.consultant-queue-position.paused i {
+  background: #738397;
+}
 .topbar-right {
   display: flex;
   align-items: center;
@@ -1819,6 +1847,7 @@ fieldset.form-grid {
   color: #b3c0ce;
 }
 .meta-attributions {
+  flex-shrink: 0;
   margin: 0 28px 24px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1870,6 +1899,8 @@ fieldset.form-grid {
 }
 .meta-attribution-title strong {
   font-size: 15px;
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 .meta-attribution-title span {
   color: #8196a9;
@@ -1894,6 +1925,7 @@ fieldset.form-grid {
 }
 .meta-attribution dl div {
   min-width: 120px;
+  max-width: 100%;
 }
 .meta-attribution dt {
   color: #70879a;
@@ -1914,6 +1946,38 @@ fieldset.form-grid {
   margin-top: 14px;
   color: var(--gold);
   font-size: 13px;
+}
+.meta-attributions summary {
+  cursor: pointer;
+  padding: 16px 18px;
+  border-top: 1px solid var(--line);
+  font-size: 14px;
+}
+.meta-attributions summary:focus-visible,
+.meta-lead-count:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: -2px;
+}
+.meta-attribution > small {
+  display: block;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.meta-lead-count {
+  min-width: 44px;
+  min-height: 44px;
+  color: var(--teal);
+  text-decoration: underline;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.marketing-lead-owner {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 5px;
 }
 .timeline-event {
   display: flex;

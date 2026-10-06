@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { X, ArrowUpRight, Inbox, Clock3 } from 'lucide-react';
 import { stateLabels, type Lead } from './api';
+import { observeLeadViewport } from './lead-mobile-viewport';
 
 export function IconButton({
   label,
@@ -57,6 +58,7 @@ export function Modal({
   leading,
   wide = false,
   className = '',
+  mobileHeading,
 }: {
   title: string;
   titleAccessory?: ReactNode;
@@ -66,6 +68,7 @@ export function Modal({
   leading?: ReactNode;
   wide?: boolean;
   className?: string;
+  mobileHeading?: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -87,7 +90,11 @@ export function Modal({
     window.visualViewport?.addEventListener('resize', resize);
     window.visualViewport?.addEventListener('scroll', resize);
     dialog.showModal();
+    const stopLeadViewport = dialog.classList.contains('lead-detail-modal')
+      ? observeLeadViewport(dialog)
+      : undefined;
     return () => {
+      stopLeadViewport?.();
       dialog.close();
       document.body.style.overflow = previous;
       window.visualViewport?.removeEventListener('resize', resize);
@@ -104,6 +111,7 @@ export function Modal({
       }}
       aria-label={title}
     >
+      {mobileHeading}
       <div className="modal-heading">
         <div className="modal-heading-content">
           {leading}

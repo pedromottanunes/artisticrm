@@ -82,7 +82,7 @@ test('an unread reply is distinct from selection and clears after opening the ch
   await expect(selected).toHaveClass(/active/);
   await expect(selected).not.toHaveClass(/unread/);
   await expect(unread).toHaveClass(/unread/);
-  await expect(unread).toHaveCSS('background-color', 'rgb(238, 249, 247)');
+  await expect(unread).toHaveCSS('background-color', 'rgb(11, 215, 17)');
   await expect(page.locator('.unread-indicator')).toHaveCount(0);
 
   await unread.click();

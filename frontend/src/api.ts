@@ -41,6 +41,11 @@ export interface MessageShortcut {
   updated_at: string;
 }
 export interface Lead {
+  acquisition?: {
+    kind: 'paid' | 'organic' | 'manual';
+    ad_id: string | null;
+    occurred_at: string;
+  } | null;
   needs_review: boolean;
   id: string;
   name: string;
@@ -76,10 +81,23 @@ export interface Lead {
   version: number;
 }
 export interface Detail extends Lead {
+  marketing_ads?: MarketingAd[];
   appointments: Appointment[];
   can_edit: boolean;
   history: { id: string; kind: string; description: string; created_at: string }[];
   attributions: MetaAttribution[];
+  attributions_has_more?: boolean;
+}
+export interface MarketingAd {
+  ad_id: string;
+  ad_name: string;
+  campaign_name: string;
+  adset_name: string;
+  post_url: string | null;
+  post_id: string | null;
+  reference_text?: string | null;
+  checked_at: string;
+  scope: string;
 }
 export interface MetaAttribution {
   id: string;
@@ -107,6 +125,7 @@ export interface ConversationSummary {
   reserved_to: string | null;
   last_message_at: string;
   unread: boolean;
+  notifications_muted: boolean;
   can_send: boolean;
   messaging_mode?: 'direct' | 'private_reply' | 'waiting_reply' | 'expired' | 'send_unconfirmed';
 }

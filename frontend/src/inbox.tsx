@@ -3,6 +3,8 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
+  Bell,
+  BellOff,
   Download,
   ExternalLink,
   FileQuestion,
@@ -452,6 +454,7 @@ export function InstagramInbox({
   const [thread, setThread] = useState<ThreadResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [notificationSaving, setNotificationSaving] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const draft = drafts[selectedId] ?? '';
   const [shortcutPickerOpen, setShortcutPickerOpen] = useState(false);
@@ -459,6 +462,7 @@ export function InstagramInbox({
   const [shortcuts, setShortcuts] = useState<MessageShortcut[]>([]);
   const pendingSends = useRef(new Map<string, string>());
   const sendingRef = useRef(false);
+  const notificationSavingRef = useRef(false);
   const mounted = useRef(true);
   const shortcutRequest = useRef<AbortController | null>(null);
   const selectedIdRef = useRef('');
@@ -690,7 +694,7 @@ export function InstagramInbox({
 
   const refresh = useCallback(
     async (quiet = false, forceThread = false) => {
-      if (!mounted.current) return;
+      if (!mounted.current || notificationSavingRef.current) return;
       if (quiet && (listRequest.current || Date.now() < retryAfter.current)) return;
       listRequest.current?.abort();
       const controller = new AbortController();
@@ -944,6 +948,61 @@ export function InstagramInbox({
     void sendText(draft, true);
   };
 
+  const selectedConversation = conversations.find((item) => item.id === selectedId);
+  const canControlNotifications =
+    user.role === 'attendant' && selectedConversation?.owner_id === user.id;
+  const toggleNotifications = async () => {
+    const conversation = conversations.find((item) => item.id === selectedIdRef.current);
+    if (
+      !conversation ||
+      user.role !== 'attendant' ||
+      conversation.owner_id !== user.id ||
+      notificationSavingRef.current ||
+      !connected
+    )
+      return;
+    const muted = !conversation.notifications_muted;
+    notificationSavingRef.current = true;
+    listRequest.current?.abort();
+    listRequest.current = null;
+    listSequence.current += 1;
+    setNotificationSaving(true);
+    try {
+      const result = await api<{ notifications_muted: boolean }>(
+        `/conversations/${encodeURIComponent(conversation.id)}/notifications`,
+        { method: 'PUT', body: JSON.stringify({ muted }) },
+      );
+      if (!mounted.current) return;
+      const update = (items: ConversationSummary[]) =>
+        items.map((item) =>
+          item.id === conversation.id
+            ? { ...item, notifications_muted: result.notifications_muted }
+            : item,
+        );
+      setConversations(update);
+      if (listCache.current)
+        listCache.current = {
+          ...listCache.current,
+          revision: undefined,
+          conversations: update(listCache.current.conversations),
+        };
+      onConnectionChange(true);
+      onNotice(
+        result.notifications_muted
+          ? 'Notificações deste lead silenciadas.'
+          : 'Notificações deste lead reativadas.',
+      );
+    } catch (error) {
+      if (mounted.current) handleError(error);
+    } finally {
+      notificationSavingRef.current = false;
+      if (mounted.current) {
+        setNotificationSaving(false);
+        void refresh(true);
+      }
+    }
+  };
+
   if (loading)
     return (
       <section className="instagram-inbox panel">
@@ -989,7 +1048,7 @@ export function InstagramInbox({
               key={conversation.id}
               className={`${selectedId === conversation.id ? 'active' : ''}${conversation.unread ? ' unread' : ''}`.trim()}
               onClick={() => select(conversation.id)}
-              aria-label={`${conversation.contact_name}${conversation.unread ? ', nova mensagem' : ''}`}
+              aria-label={`${conversation.contact_name}${conversation.unread ? ', nova mensagem' : ''}${conversation.notifications_muted ? ', notificações silenciadas' : ''}`}
             >
               <span className="instagram-avatar">
                 <MessageCircle size={18} />
@@ -1047,19 +1106,45 @@ export function InstagramInbox({
                 </button>
                 <div>
                   <span>ATENDIMENTO PELO CRM</span>
-                  <h2>
-                    {conversations.find((item) => item.id === selectedId)?.contact_name ??
-                      'Contato Instagram'}
-                  </h2>
+                  <h2>{selectedConversation?.contact_name ?? 'Contato Instagram'}</h2>
                 </div>
               </div>
-              <button
-                className="button outline compact thread-lead-button"
-                aria-label="Abrir ficha do lead"
-                onClick={() => onOpenLead(thread.opportunity_id)}
-              >
-                <span>Abrir ficha</span> <ArrowRight size={15} />
-              </button>
+              <div className="thread-actions">
+                {canControlNotifications && (
+                  <button
+                    type="button"
+                    className={`button outline compact thread-notification-button${selectedConversation?.notifications_muted ? ' muted' : ''}`}
+                    aria-label={
+                      selectedConversation?.notifications_muted
+                        ? 'Reativar notificações deste lead'
+                        : 'Silenciar notificações deste lead'
+                    }
+                    title={
+                      selectedConversation?.notifications_muted
+                        ? 'Reativar notificações'
+                        : 'Silenciar notificações'
+                    }
+                    disabled={!connected || notificationSaving}
+                    onClick={() => void toggleNotifications()}
+                  >
+                    {selectedConversation?.notifications_muted ? (
+                      <Bell size={15} />
+                    ) : (
+                      <BellOff size={15} />
+                    )}
+                    <span>
+                      {selectedConversation?.notifications_muted ? 'Ativar avisos' : 'Silenciar'}
+                    </span>
+                  </button>
+                )}
+                <button
+                  className="button outline compact thread-lead-button"
+                  aria-label="Abrir ficha do lead"
+                  onClick={() => onOpenLead(thread.opportunity_id)}
+                >
+                  <span>Abrir ficha</span> <ArrowRight size={15} />
+                </button>
+              </div>
             </header>
             <div ref={messageListRef} className="thread-messages" aria-live="polite">
               {thread.messages.map((message) => (

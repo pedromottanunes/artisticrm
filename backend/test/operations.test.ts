@@ -16,8 +16,11 @@ import { checkShortcuts } from './shortcut-checks.js';
 import { checkEncodedRoutes } from './security-checks.js';
 import { checkAgenda } from './agenda-checks.js';
 import { checkLeadLists } from './lead-list-checks.js';
+import { checkPersistentSessions } from './session-checks.js';
 
 let db: Database, ops: Operations, manager: User, users: User[];
+test('sessões persistentes: deploy, renovação, concorrência e revogação (SQL)', () =>
+  checkPersistentSessions(db, 'vanessa@demo.artisti.local', DEMO_PASSWORD));
 let now = new Date('2026-09-10T12:00:00Z');
 let admin: Database | undefined,
   schema = '';
@@ -36,7 +39,7 @@ before(async () => {
 });
 beforeEach(async () => {
   await db.query(
-    'TRUNCATE message_shortcuts,conversation_reads,messages,instagram_webhook_inbox,conversations,contact_identities,channel_accounts,deleted_inbound_events,push_records,whatsapp_inbox,operation_receipts,claims,appointments,lead_attributions,inbound_events,audit_events,opportunities,contacts,sessions',
+    'TRUNCATE lead_notification_mutes,message_shortcuts,conversation_reads,messages,instagram_webhook_inbox,conversations,contact_identities,channel_accounts,deleted_inbound_events,push_records,whatsapp_inbox,operation_receipts,claims,appointments,lead_attributions,inbound_events,audit_events,opportunities,contacts,sessions',
   );
   await db.query("DELETE FROM users WHERE email NOT LIKE '%@demo.artisti.local'");
   const { hashPassword } = await import('../src/auth.js');

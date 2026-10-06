@@ -176,37 +176,53 @@ export async function initializeMongo(db: MongoStore) {
   await db
     .collection('appointments')
     .updateMany({ status: 'completed' }, { $set: { status: 'attended' } });
-  await db
+  // Backfill only legacy records. Recomputing saved statuses on every startup
+  // overwrites consultant decisions and can mistake an old cancellation for
+  // a newer booking. Stream missing records instead of loading all appointments.
+  const legacyConsultations = db
     .collection('opportunities')
-    .updateMany(
-      { stage: 'CONSULTATION_NOT_SCHEDULED', consultation_status: { $exists: false } },
-      { $set: { stage: 'NEW_LEAD', consultation_status: 'UNDEFINED' } },
-    );
-  await db
-    .collection('opportunities')
-    .updateMany(
+    .find(
       { consultation_status: { $exists: false } },
-      { $set: { consultation_status: 'NOT_SCHEDULED' } },
+      { projection: { id: 1, stage: 1, version: 1 } },
     );
-  const consultationRows = await db
-    .collection('appointments')
-    .aggregate([
-      { $sort: { starts_at: -1, id: -1 } },
-      { $group: { _id: '$opportunity_id', status: { $first: '$status' } } },
-    ])
-    .toArray();
   const consultationStatus = {
     scheduled: 'SCHEDULED',
     attended: 'ATTENDED',
     no_show: 'NO_SHOW',
     cancelled: 'CANCELLED',
   } as const;
-  for (const row of consultationRows) {
-    const status = consultationStatus[row.status as keyof typeof consultationStatus];
-    if (status)
-      await db
-        .collection('opportunities')
-        .updateOne({ id: row._id }, { $set: { consultation_status: status } });
+  for await (const row of legacyConsultations) {
+    // A scheduled appointment is current even if a cancelled one had a later date.
+    const appointment =
+      (await db
+        .collection('appointments')
+        .findOne({ opportunity_id: row.id, status: 'scheduled' }, { projection: { status: 1 } })) ??
+      (await db
+        .collection('appointments')
+        .findOne(
+          { opportunity_id: row.id, status: { $in: ['attended', 'no_show', 'cancelled'] } },
+          { sort: { starts_at: -1, id: -1 }, projection: { status: 1 } },
+        ));
+    const stage = row.stage === 'CONSULTATION_NOT_SCHEDULED' ? 'NEW_LEAD' : row.stage;
+    const status = appointment
+      ? consultationStatus[appointment.status as keyof typeof consultationStatus]
+      : stage === 'NEW_LEAD'
+        ? 'UNDEFINED'
+        : 'NOT_SCHEDULED';
+    await db.collection('opportunities').updateOne(
+      {
+        id: row.id,
+        consultation_status: { $exists: false },
+        // A still-running instance may save this lead during a rolling deploy.
+        version: row.version === undefined ? { $exists: false } : row.version,
+      },
+      {
+        $set: {
+          consultation_status: status,
+          ...(stage === row.stage ? {} : { stage }),
+        },
+      },
+    );
   }
   await db.collection('opportunities').updateMany(
     { sale_completed_at: { $exists: false } },
@@ -332,6 +348,9 @@ export async function initializeMongo(db: MongoStore) {
   await db.collection('lead_attributions').createIndex({ id: 1 }, { unique: true });
   await db.collection('lead_attributions').createIndex({ external_id: 1 }, { unique: true });
   await db.collection('lead_attributions').createIndex({ opportunity_id: 1, received_at: -1 });
+  await db
+    .collection('lead_attributions')
+    .createIndex({ channel: 1, source_type: 1, source_id: 1 });
   await db.collection('inbound_events').createIndex({ external_id: 1 }, { unique: true });
   await db.collection('deleted_inbound_events').createIndex({ hash: 1 }, { unique: true });
   await db.collection('claims').createIndex({ user_id: 1, key: 1 }, { unique: true });
@@ -434,9 +453,32 @@ export async function initializeMongo(db: MongoStore) {
     .collection('meta_marketing_daily_insights')
     .createIndex({ campaign_id: 1, date_start: 1 });
   await db.collection('meta_marketing_sync_state').createIndex({ account_id: 1 }, { unique: true });
+  await db
+    .collection('meta_marketing_ads')
+    .createIndex({ account_id: 1, ad_id: 1 }, { unique: true });
+  await db
+    .collection('meta_marketing_ad_versions')
+    .createIndex({ account_id: 1, ad_id: 1, content_hash: 1 }, { unique: true });
+  await db.collection('meta_marketing_ad_jobs').createIndex({ ad_id: 1 }, { unique: true });
+  await db.collection('meta_marketing_ad_jobs').createIndex({ next_attempt_at: 1, ad_id: 1 });
+  await db.collection('meta_marketing_control').createIndex({ account_id: 1 }, { unique: true });
+  await db
+    .collection('meta_marketing_daily_coverage')
+    .createIndex({ account_id: 1, date_start: 1 }, { unique: true });
+  await db
+    .collection('meta_marketing_daily_insights')
+    .createIndex({ account_id: 1, ad_id: 1, date_start: 1 });
+  await db
+    .collection('opportunities')
+    .createIndex({ channel: 1, 'acquisition.occurred_at': 1, id: 1 });
+  await db.collection('opportunities').createIndex({ channel: 1, 'acquisition.ad_id': 1, id: 1 });
   await db.collection('push_records').createIndex({ id: 1 }, { unique: true });
   await db.collection('push_records').createIndex({ kind: 1, available_at: 1 });
   await db.collection('push_records').createIndex({ expires_at: 1 });
+  await db
+    .collection('lead_notification_mutes')
+    .createIndex({ user_id: 1, opportunity_id: 1 }, { unique: true });
+  await db.collection('lead_notification_mutes').createIndex({ opportunity_id: 1 });
   await db.collection('message_shortcuts').createIndex({ user_id: 1, created_at: -1, id: 1 });
   await db
     .collection('instagram_comments')

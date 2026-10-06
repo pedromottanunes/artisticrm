@@ -34,6 +34,7 @@ import { ManagerPipeline } from './manager-pipeline';
 import { ManagerReports } from './manager-reports';
 import { InstagramInbox } from './inbox';
 import { AttendantLeads } from './attendant-leads';
+import { QueuePosition } from './queue-position';
 import { Team, PasswordChange } from './operations';
 import { MobileNavigation } from './mobile-navigation';
 import { DevicePanel, disconnectPush, PushBinding } from './pwa';
@@ -140,6 +141,7 @@ export function App() {
       } catch (error) {
         if (epoch !== generation.current || sequence !== requestSeq.current) return;
         if (error instanceof ApiError && error.status === 401) {
+          setConnected(true); // Server answered: this is an actual expired/revoked session.
           generation.current++;
           detailSeq.current++;
           setData(null);
@@ -175,6 +177,22 @@ export function App() {
     void refresh();
     return () => refreshRequest.current?.controller.abort();
   }, [refresh]);
+  useEffect(() => {
+    if (connected) return;
+    // A deploy/network outage isn't a logout. Retry without caching credentials or
+    // opening overlapping requests; this also covers a fresh page load during deploy.
+    const retry = () => {
+      if (!document.hidden) void refresh(false);
+    };
+    const interval = window.setInterval(retry, 15_000);
+    window.addEventListener('online', retry);
+    document.addEventListener('visibilitychange', retry);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('online', retry);
+      document.removeEventListener('visibilitychange', retry);
+    };
+  }, [connected, refresh]);
   useEffect(() => {
     const changed = () => {
       setPage(readPage());
@@ -325,6 +343,7 @@ export function App() {
       setDetail(null);
       setWhatsappUrl('');
       claims.current.clear();
+      setConnected(true);
       setNotifications(false);
       setNewLead(false);
       setNotice('');
@@ -350,6 +369,18 @@ export function App() {
         <img src="/artisti-logo.webp" alt="Artisti Transplante Capilar" />
         <span className="loader" />
         <p>Preparando seu espaço de trabalho</p>
+      </div>
+    );
+  if (!data && !connected)
+    return (
+      <div className="boot" role="status">
+        <img src="/artisti-logo.webp" alt="Artisti Transplante Capilar" />
+        <WifiOff size={28} />
+        <p>Reconectando ao CRM</p>
+        <p>A conexão está temporariamente indisponível. Vamos tentar novamente automaticamente.</p>
+        <button className="button outline" onClick={() => void refresh(false)}>
+          Tentar novamente
+        </button>
       </div>
     );
   if (!data)
@@ -562,6 +593,7 @@ export function App() {
                 </span>
               )}
             </h1>
+            {!isManager && <QueuePosition onSessionExpired={refresh} />}
           </div>
           <div className="topbar-right">
             <button
