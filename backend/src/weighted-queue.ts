@@ -40,22 +40,27 @@ export function selectWeightedParticipant<T extends WeightedQueueParticipant>(
     (participant) =>
       participant.queue_position !== null &&
       Number.isInteger(participant.queue_weight) &&
-      participant.queue_weight >= 1,
+      participant.queue_weight >= 1 &&
+      participant.queue_weight <= 5,
   );
   if (!eligible.length) return;
 
   const totalWeight = eligible.reduce((sum, participant) => sum + participant.queue_weight, 0);
-  const credits = new Map(
-    eligible.map((participant) => [
-      participant.id,
-      participant.queue_credit + participant.queue_weight,
-    ]),
-  );
-  const highest = Math.max(...credits.values());
-  const selected = orderedAfter(eligible, lastPosition).find(
-    (participant) => credits.get(participant.id) === highest,
-  )!;
-  credits.set(selected.id, credits.get(selected.id)! - totalWeight);
+  // queue_credit stores how many consecutive reservations are still owed to the
+  // participant at lastPosition. Values are clamped so deployments made while the
+  // former smooth-weight algorithm was active cannot create an oversized block.
+  const credits = new Map(eligible.map((participant) => [participant.id, 0]));
+  const current = eligible.find((participant) => participant.queue_position === lastPosition);
+  const remaining = current
+    ? Math.min(Math.max(Math.trunc(current.queue_credit), 0), current.queue_weight - 1)
+    : 0;
+  if (current && remaining > 0) {
+    credits.set(current.id, remaining - 1);
+    return { selected: current, credits, totalWeight };
+  }
+
+  const selected = orderedAfter(eligible, lastPosition)[0];
+  credits.set(selected.id, selected.queue_weight - 1);
   return { selected, credits, totalWeight };
 }
 

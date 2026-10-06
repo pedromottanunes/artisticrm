@@ -10,35 +10,42 @@ async function login(page: Page, profile: string) {
   expect(result.ok()).toBe(true);
 }
 
-test('consultor vê somente sua posição atual da fila no celular', async ({ page }) => {
+test('consultor vê somente se é o próximo da fila no celular', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page, 'vanessa');
-  let status: { participating: boolean; rank: number | null } = {
+  let status: { participating: boolean; next: boolean } = {
     participating: true,
-    rank: 4,
+    next: false,
   };
+  let available = true;
   const payloads: Record<string, unknown>[] = [];
   await page.route('**/api/v1/queue/me', async (route) => {
     payloads.push({ ...status });
-    await route.fulfill({ json: status });
+    await route.fulfill(
+      available ? { json: status } : { status: 503, json: { message: 'Indisponível' } },
+    );
   });
 
   await page.goto('/#mine');
   const indicator = page.locator('.consultant-queue-position');
-  await expect(indicator).toHaveText('Você é a 4ª da fila');
+  await expect(indicator).toHaveText('Aguardando sua vez');
   const box = await indicator.boundingBox();
   expect(box).not.toBeNull();
   expect(box!.x).toBeGreaterThanOrEqual(0);
   expect(box!.x + box!.width).toBeLessThanOrEqual(390);
-  expect(Object.keys(payloads[0]).sort()).toEqual(['participating', 'rank']);
+  expect(Object.keys(payloads[0]).sort()).toEqual(['next', 'participating']);
 
-  status = { participating: true, rank: 1 };
+  status = { participating: true, next: true };
   await page.evaluate(() => window.dispatchEvent(new Event('online')));
   await expect(indicator).toHaveText('Você é a próxima da fila');
 
-  status = { participating: false, rank: null };
+  status = { participating: false, next: false };
   await page.evaluate(() => window.dispatchEvent(new Event('online')));
   await expect(indicator).toHaveText('Você está fora da fila');
+
+  available = false;
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await expect(indicator).toHaveCount(0);
 });
 
 test('gestão não recebe o indicador pessoal de consultor', async ({ page }) => {

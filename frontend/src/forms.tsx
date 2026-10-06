@@ -1045,7 +1045,7 @@ export function QueueSettings({
         member.id,
         {
           enabled: member.active && member.queue_enabled,
-          weight: (member.queue_weight ?? 1) as 1 | 2 | 3,
+          weight: (member.queue_weight ?? 1) as 1 | 2 | 3 | 4 | 5,
         },
       ]),
     ),
@@ -1127,14 +1127,16 @@ export function QueueSettings({
                       ...current,
                       [u.id]: {
                         ...(current[u.id] ?? { enabled: false }),
-                        weight: Number(event.target.value) as 1 | 2 | 3,
+                        weight: Number(event.target.value) as 1 | 2 | 3 | 4 | 5,
                       },
                     }))
                   }
                 >
-                  <option value={1}>1x — Normal</option>
-                  <option value={2}>2x — Prioridade</option>
-                  <option value={3}>3x — Prioridade alta</option>
+                  <option value={1}>1x — Um lead</option>
+                  <option value={2}>2x — Dois leads seguidos</option>
+                  <option value={3}>3x — Três leads seguidos</option>
+                  <option value={4}>4x — Quatro leads seguidos</option>
+                  <option value={5}>5x — Cinco leads seguidos</option>
                 </select>
               </label>
             </div>
@@ -1154,9 +1156,9 @@ export function QueueSettings({
             </div>
           </label>
           <p className="help-text">
-            O peso define quantas oportunidades cada atendente recebe proporcionalmente. Ele não
-            altera leads já distribuídos nem capturas do bolsão. Pausar uma atendente impede apenas
-            novas reservas automáticas.
+            O peso define quantos novos leads seguidos cada atendente recebe antes de o rodízio
+            avançar. Ele não altera leads já distribuídos nem capturas do bolsão. Pausar uma
+            atendente impede apenas novas reservas automáticas.
           </p>
           {error && (
             <p className="form-error" role="alert">

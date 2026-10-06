@@ -29,13 +29,18 @@ A ficha agora inclui `appointments`. `needs_review` identifica uma nova oportuni
 ### Rodízio ponderado
 
 `PATCH /distribution/settings` recebe `version`, `timeout_minutes` e participantes no formato
-`{ id, enabled, weight }`. `weight` aceita os inteiros `1`, `2` ou `3`; durante a compatibilidade
+`{ id, enabled, weight }`. `weight` aceita os inteiros de `1` a `5`; durante a compatibilidade
 com clientes anteriores, sua ausência preserva o peso já salvo. A gestão é a única função
 autorizada a alterar a configuração.
 
-Novas reservas usam rodízio ponderado suave. Peso `1` em toda a equipe preserva o rodízio
-sequencial anterior. Alterar participação ou peso reinicia somente os créditos internos da fila;
-reservas e atendimentos existentes não mudam. O peso não interfere na disputa de leads do bolsão.
+Novas reservas usam rodízio ponderado em blocos consecutivos: cada participante recebe a quantidade
+de novos leads indicada pelo peso antes de a fila avançar. Peso `1` em toda a equipe preserva o
+rodízio sequencial anterior. Alterar participação ou peso reinicia somente o progresso interno do
+bloco; reservas e atendimentos existentes não mudam. O peso não interfere na disputa de leads do
+bolsão.
+
+`GET /queue/me` é exclusivo do consultor e retorna apenas `{ participating, next }`. A posição
+numérica e a ordem dos demais participantes não fazem parte dessa resposta.
 
 - HTTPS, sessão autenticada validada pelo servidor, autorização por recurso e papel.
 - Identificadores opacos; datas ISO 8601 com fuso/UTC; valores monetários em centavos com moeda explícita.

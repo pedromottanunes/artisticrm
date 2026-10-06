@@ -5,6 +5,9 @@
   border-bottom: 1px solid var(--line, #d7e2e8);
 }
 .comment-pool-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   padding: 12px 18px;
   border: 0;
   border-bottom: 2px solid transparent;
@@ -12,6 +15,41 @@
   color: inherit;
   font: inherit;
   cursor: pointer;
+}
+.pool-alert-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: #d92d20 !important;
+  color: #fff !important;
+  box-shadow: 0 2px 6px rgba(157, 26, 20, 0.3);
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.nav-item {
+  position: relative;
+}
+.nav-item .pool-alert-badge {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  border: 2px solid #fff !important;
+}
+.mobile-nav-icon .pool-alert-badge {
+  position: absolute;
+  top: -7px;
+  left: 15px;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 4px;
+  border: 2px solid #fff !important;
 }
 .comment-pool-tabs button.active {
   border-bottom-color: #009e96;

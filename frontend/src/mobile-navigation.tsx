@@ -41,7 +41,9 @@ export function MobileNavigation<T extends string>({
           <span className="mobile-nav-icon">
             <Icon size={22} />
             {(id === 'pool' || id === 'distribution') && poolCount > 0 && (
-              <b aria-label={`${poolCount} no bolsão`}>{poolCount > 99 ? '99+' : poolCount}</b>
+              <b className="pool-alert-badge" aria-label={`${poolCount} no bolsão`}>
+                {poolCount > 99 ? '99+' : poolCount}
+              </b>
             )}
           </span>
           <span>{id === 'pipeline' ? 'Funil' : id === 'central' ? 'Central' : label}</span>

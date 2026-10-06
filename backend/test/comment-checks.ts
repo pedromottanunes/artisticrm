@@ -6,6 +6,7 @@ import type { CRM } from '../src/crm.js';
 import type { MongoOperations } from '../src/mongo-crm.js';
 import type { User } from '../src/types.js';
 import { deleteLeadData } from '../src/lead-deletion.js';
+import { attendantPoolCounts } from '../src/pool-counts.js';
 
 export async function checkComments(crm: CRM | MongoOperations, users: User[], manager: User) {
   const db = crm.db;
@@ -81,6 +82,23 @@ export async function checkComments(crm: CRM | MongoOperations, users: User[], m
     'Comments from same profile are grouped; own/live comments ignored',
   );
   assert.equal(list.comments[0].comment_count, 2);
+  const initialCounts = await attendantPoolCounts(db, users[0], config.accountId, new Date());
+  const pooledLeads =
+    db.kind === 'mongo'
+      ? await db.count('opportunities', { state: 'POOL' })
+      : Number(
+          (
+            await db.query<{ count: number }>(
+              "SELECT count(*)::integer AS count FROM opportunities WHERE state='POOL'",
+            )
+          ).rows[0].count,
+        );
+  assert.equal(initialCounts.leads, pooledLeads, 'The badge counts every normal pool lead');
+  assert.equal(initialCounts.comments, 1, 'The badge counts profiles, not repeated comments');
+  await assert.rejects(
+    attendantPoolCounts(db, manager, config.accountId, new Date()),
+    /somente para consultores/i,
+  );
   const item = list.comments[0];
   await assert.rejects(
     central.comments.claim(manager, item.id, item.version),
@@ -106,6 +124,11 @@ export async function checkComments(crm: CRM | MongoOperations, users: User[], m
     'Claim retry is idempotent',
   );
   assert.equal((await central.comments.list(loser)).comments.length, 0);
+  assert.equal(
+    (await attendantPoolCounts(db, loser, config.accountId, new Date())).comments,
+    0,
+    'Claimed profiles leave the comment-pool badge',
+  );
   let thread = await central.messages(winner, claimed.conversation_id);
   assert.equal(thread.messaging_mode, 'private_reply');
   assert.equal(thread.can_send, true);

@@ -297,8 +297,14 @@ em {
   color: #8b9aac;
   background: #7383970d;
 }
-.consultant-queue-position.paused i {
+.consultant-queue-position.paused i,
+.consultant-queue-position.waiting i {
   background: #738397;
+}
+.consultant-queue-position.waiting {
+  border-color: #7383972d;
+  color: #8b9aac;
+  background: #7383970d;
 }
 .topbar-right {
   display: flex;

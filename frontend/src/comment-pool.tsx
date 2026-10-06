@@ -26,10 +26,12 @@ export function CommentPool({
   user,
   onOpenChat,
   onSessionExpired,
+  onPoolChanged,
 }: {
   user: User;
   onOpenChat: (id: string) => void;
   onSessionExpired: () => Promise<void>;
+  onPoolChanged: () => Promise<void>;
 }) {
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState('');
@@ -112,8 +114,13 @@ export function CommentPool({
         },
       );
       if (!mounted.current) return;
-      if (action === 'claim') onOpenChat(response.opportunity_id);
-      else await load();
+      if (action === 'claim') {
+        void onPoolChanged();
+        onOpenChat(response.opportunity_id);
+      } else {
+        await load();
+        void onPoolChanged();
+      }
     } catch (err) {
       if (!mounted.current) return;
       if (err instanceof ApiError && err.status === 401) void onSessionExpired();
@@ -228,7 +235,11 @@ export function CommentPool({
                       onClick={() => void act(comment, 'claim')}
                     >
                       <MessageCircle size={16} />
-                      {comment.can_claim === false ? 'Perfil reservado' : busy === comment.id ? 'Aguarde…' : 'Assumir e conversar'}
+                      {comment.can_claim === false
+                        ? 'Perfil reservado'
+                        : busy === comment.id
+                          ? 'Aguarde…'
+                          : 'Assumir e conversar'}
                     </button>
                   </div>
                 )}

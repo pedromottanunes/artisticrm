@@ -131,7 +131,7 @@ test('comment pool: atomic ownership, private replies, incoming Direct and delet
 });
 const lead = (n = 1) => ops.ingest(input(n), `event-${n}`, manager.id);
 
-test('personal queue rank is weighted, private and pause-aware (MongoDB)', () =>
+test('personal queue status exposes only next, participating and pause state (MongoDB)', () =>
   checkPersonalQueueStatus(db, manager, users));
 
 test('Mongo: encoded API paths preserve authentication, CSRF and roles', () =>
@@ -304,7 +304,24 @@ test('Mongo: peso 2 distribui quatro de dez leads e persiste a configuração', 
       weight: index === 0 ? 2 : 1,
     })),
   });
-  for (let index = 201; index <= 210; index++) await lead(index);
+  const assigned = [];
+  for (let index = 201; index <= 210; index++)
+    assigned.push((await row((await lead(index)).id)).reserved_to);
+  assert.deepEqual(
+    assigned,
+    [
+      users[0],
+      users[0],
+      users[1],
+      users[2],
+      users[3],
+      users[0],
+      users[0],
+      users[1],
+      users[2],
+      users[3],
+    ].map((user) => user.id),
+  );
   const counts = await Promise.all(
     users.map((user) => db.count('opportunities', { reserved_to: user.id })),
   );

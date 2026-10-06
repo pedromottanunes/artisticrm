@@ -482,7 +482,9 @@ test('gestão móvel: status compacto e ficha pelo nome na central', async ({ pa
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole('heading', { name, exact: true })).toBeVisible();
-    await dialog.getByRole('button', { name: 'Fechar janela' }).click();
+    await dialog
+      .getByRole('button', { name: /^(Fechar janela|Voltar da ficha do lead)$/ })
+      .click();
   }
   await contact.focus();
   await page.keyboard.press('Enter');
@@ -912,7 +914,7 @@ test('atendimento móvel acessa bolsão e confirma aceite sem abrir contato fict
     true,
   );
   await mobileDialog.screenshot({ path: 'test-results/cadastro-comercial-mobile.png' });
-  await mobileDialog.getByRole('button', { name: 'Fechar janela' }).click();
+  await mobileDialog.getByRole('button', { name: 'Voltar da ficha do lead' }).click();
   const count = await page.locator('.attendant-lead').count();
   await page.getByRole('button', { name: 'Cartões', exact: true }).click();
   await expect(page.locator('.attendant-lead')).toHaveCount(count);
@@ -1254,12 +1256,12 @@ test('configuração preserva rascunho e mostra conflito dentro da janela', asyn
   await expect(dialog.getByLabel('Prazo para aceite')).toHaveValue('11');
   await expect(dialog.getByLabel(`Peso de ${firstAttendant.name} no rodízio`)).toHaveValue('1');
   await dialog.getByLabel('Prazo para aceite').fill('10');
-  await dialog.getByLabel(`Peso de ${firstAttendant.name} no rodízio`).selectOption('2');
+  await dialog.getByLabel(`Peso de ${firstAttendant.name} no rodízio`).selectOption('5');
   await dialog.getByRole('button', { name: 'Salvar configuração' }).click();
   await expect(dialog).not.toBeVisible();
   await expect(page.locator('.central-rule')).toContainText('10 min');
   await page.getByRole('button', { name: 'Rodízio', exact: true }).click();
-  await expect(dialog.getByLabel(`Peso de ${firstAttendant.name} no rodízio`)).toHaveValue('2');
+  await expect(dialog.getByLabel(`Peso de ${firstAttendant.name} no rodízio`)).toHaveValue('5');
   await dialog.getByLabel(`Peso de ${firstAttendant.name} no rodízio`).selectOption('1');
   await dialog.getByRole('button', { name: 'Salvar configuração' }).click();
   await expect(dialog).not.toBeVisible();

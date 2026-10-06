@@ -66,25 +66,30 @@ test('push worker: a nova versao assume o controle sem esperar o PWA ser fechado
   await worker.dispatch('install', {});
   assert.equal(worker.skipWaitingCalls(), 1);
 });
-test('push worker: system alert, single visible sound recipient and exact chat deep link', async () => {
+test('push worker: lead, pool and message use one custom foreground sound recipient', async () => {
   const worker = harness();
   const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-  for (const tag of ['message-1', 'message-2'])
+  for (const data of [
+    { page: 'mine', tag: 'new-lead', userId: 'user-a' },
+    { page: 'pool', tag: 'new-pool-item', userId: 'user-a' },
+    { page: 'inbox', opportunityId: id, tag: 'new-message', userId: 'user-a' },
+  ])
     await worker.dispatch('push', {
-      data: { json: () => ({ page: 'inbox', opportunityId: id, tag, userId: 'user-a' }) },
+      data: { json: () => data },
     });
-  assert.equal(worker.shown.length, 2);
-  assert.notEqual(worker.shown[0].tag, worker.shown[1].tag);
-  assert.equal(worker.shown[0].silent, false);
+  assert.equal(worker.shown.length, 3);
+  assert.equal(new Set(worker.shown.map((notice) => notice.tag)).size, 3);
+  assert.ok(worker.shown.every((notice) => notice.silent === true));
+  assert.ok(worker.shown.every((notice) => notice.vibrate === undefined));
   assert.equal(worker.shown[0].renotify, false, 'a transport retry must not alert again');
   assert.deepEqual(
     worker.notices.map((item) => item.i),
-    [1, 1],
+    [1, 1, 1],
     'focused window only',
   );
   assert.equal(worker.notices[0].data.userId, 'user-a');
   await worker.dispatch('notificationclick', {
-    notification: { close() {}, data: worker.shown[0].data },
+    notification: { close() {}, data: worker.shown[2].data },
   });
   assert.equal(worker.navigated[0], `https://crm.example.test/#inbox?lead=${id}`);
 });
@@ -101,6 +106,8 @@ test('push worker: hidden windows stay silent; malformed content still shows a n
     },
   });
   assert.equal(worker.shown.length, 1);
+  assert.equal(worker.shown[0].silent, false);
+  assert.deepEqual(Array.from(worker.shown[0].vibrate), [200, 100, 200]);
   assert.equal(worker.notices.length, 0);
   await worker.dispatch('notificationclick', {
     notification: { close() {}, data: { page: 'inbox', opportunityId: 'https://evil.test' } },

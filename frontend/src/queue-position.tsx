@@ -4,12 +4,12 @@ import { signalWithTimeout } from './abort';
 
 interface QueueStatus {
   participating: boolean;
-  rank: number | null;
+  next: boolean;
 }
 
 function label(status: QueueStatus) {
-  if (!status.participating || status.rank === null) return 'Você está fora da fila';
-  return status.rank === 1 ? 'Você é a próxima da fila' : `Você é a ${status.rank}ª da fila`;
+  if (!status.participating) return 'Você está fora da fila';
+  return status.next ? 'Você é a próxima da fila' : 'Aguardando sua vez';
 }
 
 export function QueuePosition({
@@ -35,13 +35,10 @@ export function QueuePosition({
         const result = await api<QueueStatus>('/queue/me', { signal: request.signal });
         if (!disposed && !request.signal.aborted) setStatus(result);
       } catch (error) {
-        if (
-          !disposed &&
-          !request.signal.aborted &&
-          error instanceof ApiError &&
-          error.status === 401
-        )
-          void onSessionExpired();
+        if (!disposed && !request.signal.aborted) {
+          if (error instanceof ApiError && error.status === 401) void onSessionExpired();
+          else setStatus(null);
+        }
       } finally {
         request.dispose();
         if (!disposed && current === sequence) timer = window.setTimeout(() => void load(), 10_000);
@@ -68,7 +65,9 @@ export function QueuePosition({
   if (!status) return null;
   return (
     <span
-      className={`consultant-queue-position${status.participating ? '' : ' paused'}`}
+      className={`consultant-queue-position${
+        !status.participating ? ' paused' : status.next ? '' : ' waiting'
+      }`}
       role="status"
       aria-label={label(status)}
     >

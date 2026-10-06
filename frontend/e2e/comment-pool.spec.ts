@@ -19,6 +19,9 @@ for (const width of [390, 1280]) {
     let sent = false;
     let posts = 0;
     const created = new Date().toISOString();
+    await page.route('**/api/v1/pool/counts', (route) =>
+      route.fulfill({ json: { leads: 2, comments: claimed ? 0 : 1 } }),
+    );
     await page.route('**/api/v1/instagram/comments**', async (route) => {
       if (route.request().method() === 'POST') {
         expect(route.request().postDataJSON()).toEqual({ expected_version: 1 });
@@ -102,6 +105,18 @@ for (const width of [390, 1280]) {
       });
     });
     await page.goto('/#pool');
+    await expect(
+      page.locator(
+        width < 720 ? '.mobile-nav-icon .pool-alert-badge' : '.nav-item .pool-alert-badge',
+      ),
+    ).toHaveText('3');
+    const poolTabs = page.getByRole('navigation', { name: 'Tipo de bolsão' });
+    await expect(
+      poolTabs.getByRole('button', { name: /^Leads/ }).locator('.pool-alert-badge'),
+    ).toHaveText('2');
+    await expect(
+      poolTabs.getByRole('button', { name: /^Comentários/ }).locator('.pool-alert-badge'),
+    ).toHaveText('1');
     await page
       .getByRole('navigation', { name: 'Tipo de bolsão' })
       .getByRole('button', { name: 'Comentários' })

@@ -30,9 +30,9 @@ test('rodízio ponderado com pesos iguais preserva a sequência circular anterio
   assert.deepEqual(sequence([1, 1, 1, 1], 8).result, ['1', '2', '3', '4', '1', '2', '3', '4']);
 });
 
-test('rodízio ponderado suave entrega a proporção 2:1:1:1 sem concentrar o favorecido', () => {
+test('rodízio ponderado entrega o peso em blocos consecutivos', () => {
   const { result } = sequence([2, 1, 1, 1], 10);
-  assert.deepEqual(result.slice(0, 5), ['1', '2', '3', '4', '1']);
+  assert.deepEqual(result, ['1', '1', '2', '3', '4', '1', '1', '2', '3', '4']);
   assert.deepEqual(
     result.reduce<Record<string, number>>((counts, id) => {
       counts[id] = (counts[id] ?? 0) + 1;
@@ -40,6 +40,60 @@ test('rodízio ponderado suave entrega a proporção 2:1:1:1 sem concentrar o fa
     }, {}),
     { '1': 4, '2': 2, '3': 2, '4': 2 },
   );
+});
+
+test('pesos de 1 a 5 repetem cada participante antes de avançar', () => {
+  assert.deepEqual(sequence([1, 2, 3, 4, 5], 15).result, [
+    '1',
+    '2',
+    '2',
+    '3',
+    '3',
+    '3',
+    '4',
+    '4',
+    '4',
+    '4',
+    '5',
+    '5',
+    '5',
+    '5',
+    '5',
+  ]);
+});
+
+test('bloco consecutivo continua após reconstruir o estado persistido', () => {
+  let participants: WeightedQueueParticipant[] = [
+    { id: '1', queue_position: 1, queue_weight: 2, queue_credit: 0 },
+    { id: '2', queue_position: 2, queue_weight: 1, queue_credit: 0 },
+  ];
+  const first = selectWeightedParticipant(participants, 0)!;
+  participants = participants.map((participant) => ({
+    ...participant,
+    queue_credit: first.credits.get(participant.id)!,
+  }));
+  const afterRestart = selectWeightedParticipant(participants, first.selected.queue_position!)!;
+  assert.equal(afterRestart.selected.id, '1');
+  participants = participants.map((participant) => ({
+    ...participant,
+    queue_credit: afterRestart.credits.get(participant.id)!,
+  }));
+  assert.equal(
+    selectWeightedParticipant(participants, afterRestart.selected.queue_position!)!.selected.id,
+    '2',
+  );
+});
+
+test('participante pausado no meio do bloco é ignorado imediatamente', () => {
+  const participants: WeightedQueueParticipant[] = [
+    { id: '1', queue_position: 1, queue_weight: 3, queue_credit: 2 },
+    { id: '2', queue_position: 2, queue_weight: 1, queue_credit: 0 },
+  ];
+  assert.equal(selectWeightedParticipant(participants.slice(1), 1)!.selected.id, '2');
+});
+
+test('participante único continua recebendo sem perder o limite do bloco', () => {
+  assert.deepEqual(sequence([5], 7).result, ['1', '1', '1', '1', '1', '1', '1']);
 });
 
 test('prévia da equipe não duplica atendente com peso maior', () => {

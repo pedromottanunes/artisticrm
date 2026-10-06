@@ -51,24 +51,26 @@ self.addEventListener('push', (event) => {
         /* A malformed push still shows a generic notice. */
       }
       const requestedPage = data.page === 'distribution' ? 'central' : data.page;
-      const page = ['mine', 'pool', 'comments', 'central', 'settings', 'inbox'].includes(requestedPage)
+      const page = ['mine', 'pool', 'comments', 'central', 'settings', 'inbox'].includes(
+        requestedPage,
+      )
         ? requestedPage
         : 'mine';
+      // A visible CRM can reproduce the custom alert through Web Audio. Silence
+      // the system notification in that case so the device's default sound does
+      // not cover it. Web Push still receives a user-visible notification.
+      const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      const visible = windows.filter((client) => client.visibilityState === 'visible');
+      const client = visible.find((item) => item.focused) || visible[0];
+      client?.postMessage({ type: 'artisti-push', userId: data.userId, tag: data.tag });
       await self.registration.showNotification(data.title || 'Artisti CRM', {
         body: data.body || 'Há uma atualização no CRM. Abra para consultar.',
         icon: '/icons/icon-192.png',
         tag: data.tag || 'artisti-update',
         renotify: false,
-        silent: false,
-        vibrate: [200, 100, 200],
+        ...(client ? { silent: true } : { silent: false, vibrate: [200, 100, 200] }),
         data: { page, opportunityId: data.opportunityId },
       });
-      // Notify exactly one visible window for the custom foreground sound.
-      // Always show the system notification too, as required for Web Push on iOS.
-      const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-      const visible = windows.filter((client) => client.visibilityState === 'visible');
-      const client = visible.find((item) => item.focused) || visible[0];
-      client?.postMessage({ type: 'artisti-push', userId: data.userId, tag: data.tag });
     })(),
   );
 });
@@ -80,7 +82,9 @@ self.addEventListener('notificationclick', (event) => {
         event.notification.data?.page === 'distribution'
           ? 'central'
           : event.notification.data?.page;
-      const page = ['mine', 'pool', 'comments', 'central', 'settings', 'inbox'].includes(requestedPage)
+      const page = ['mine', 'pool', 'comments', 'central', 'settings', 'inbox'].includes(
+        requestedPage,
+      )
         ? requestedPage
         : 'mine';
       const lead = event.notification.data?.opportunityId;

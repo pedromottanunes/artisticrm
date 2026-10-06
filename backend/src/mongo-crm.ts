@@ -920,8 +920,8 @@ export class MongoOperations {
             400,
           );
         const weight = participant.weight ?? target.queue_weight;
-        if (!Number.isInteger(weight) || weight < 1 || weight > 3)
-          throw new DomainError('INVALID_INPUT', 'O peso deve estar entre 1 e 3.', 400);
+        if (!Number.isInteger(weight) || weight < 1 || weight > 5)
+          throw new DomainError('INVALID_INPUT', 'O peso deve estar entre 1 e 5.', 400);
         return { target, enabled: participant.enabled && target.active, weight };
       });
       const queueChanged = configured.some(

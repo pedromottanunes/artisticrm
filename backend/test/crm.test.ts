@@ -71,7 +71,7 @@ const get = async (id: string) =>
 const count = async (table: string) =>
   Number((await db.query<{ count: string }>(`SELECT count(*) FROM ${table}`)).rows[0].count);
 
-test('personal queue rank is weighted, private and pause-aware (SQL)', () =>
+test('personal queue status exposes only next, participating and pause state (SQL)', () =>
   checkPersonalQueueStatus(db, manager, users));
 
 test('painel de distribuição: paginação acima de 500 leads, filtros, prazos e acesso', async () => {
@@ -135,7 +135,24 @@ test('peso 2 distribui quatro de dez leads sem alterar reservas existentes', asy
       weight: index === 0 ? 2 : 1,
     })),
   });
-  for (let index = 201; index <= 210; index++) await create(index, `weighted-${index}`);
+  const assigned = [];
+  for (let index = 201; index <= 210; index++)
+    assigned.push((await get((await create(index, `weighted-${index}`)).id)).reserved_to);
+  assert.deepEqual(
+    assigned,
+    [
+      users[0],
+      users[0],
+      users[1],
+      users[2],
+      users[3],
+      users[0],
+      users[0],
+      users[1],
+      users[2],
+      users[3],
+    ].map((user) => user.id),
+  );
   const counts = (
     await db.query<{ reserved_to: string; count: string }>(
       'SELECT reserved_to,count(*) FROM opportunities GROUP BY reserved_to',

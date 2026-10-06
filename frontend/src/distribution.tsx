@@ -32,6 +32,10 @@ type Row = Pick<
 >;
 interface Board {
   users: Snapshot['users'];
+  attendants: (Snapshot['users'][number] & {
+    queue_rank: number | null;
+    is_next: boolean;
+  })[];
   settings: Snapshot['settings'];
   rows: Row[];
   total: number;
@@ -188,14 +192,9 @@ export function Distribution({
   }, [query, revision, leadRevision]);
 
   const members = (board?.users ?? []).filter((u) => u.role === 'attendant');
-  const ordered = members
-    .filter((u) => u.active && u.queue_enabled)
-    .sort(
-      (a, b) =>
-        (a.queue_position! > board!.settings.last_position ? 0 : 1) -
-          (b.queue_position! > board!.settings.last_position ? 0 : 1) ||
-        a.queue_position! - b.queue_position!,
-    );
+  const ordered = (board?.attendants ?? [])
+    .filter((u) => u.active && u.queue_enabled && u.queue_rank !== null)
+    .sort((a, b) => a.queue_rank! - b.queue_rank!);
   const count = (key: string) =>
     board
       ? key === 'ALL'

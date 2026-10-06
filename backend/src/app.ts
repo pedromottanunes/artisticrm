@@ -29,6 +29,7 @@ import { registerShortcuts } from './shortcuts.js';
 import { InstagramProspects, prospectSchema } from './instagram-prospects.js';
 import { DomainError, requireManager, stages, type User } from './types.js';
 import { personalQueueStatus } from './queue-status.js';
+import { attendantPoolCounts } from './pool-counts.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -362,6 +363,9 @@ export async function buildApp(
     leadListsPage(db, request.user, leadListsQuery.parse(request.query)),
   );
   app.get('/api/v1/queue/me', async (request) => personalQueueStatus(db, request.user));
+  app.get('/api/v1/pool/counts', async (request) =>
+    attendantPoolCounts(db, request.user, options.instagram?.accountId, await crm.now()),
+  );
   app.get('/api/v1/distribution/board', async (request) => {
     requireManager(request.user);
     const query = distributionQuery.parse(request.query);
@@ -531,7 +535,7 @@ export async function buildApp(
             z.object({
               id: uuid,
               enabled: z.boolean(),
-              weight: z.number().int().min(1).max(3).optional(),
+              weight: z.number().int().min(1).max(5).optional(),
             }),
           )
           .max(30),

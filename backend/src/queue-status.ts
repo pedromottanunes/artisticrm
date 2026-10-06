@@ -10,7 +10,7 @@ type QueueStatusParticipant = WeightedQueueParticipant & {
 
 export interface PersonalQueueStatus {
   participating: boolean;
-  rank: number | null;
+  next: boolean;
 }
 
 function personalStatus(
@@ -22,8 +22,9 @@ function personalStatus(
     (participant) =>
       participant.active && participant.queue_enabled && participant.queue_position !== null,
   );
-  const rank = previewWeightedOrder(eligible, lastPosition).indexOf(userId);
-  return rank < 0 ? { participating: false, rank: null } : { participating: true, rank: rank + 1 };
+  const order = previewWeightedOrder(eligible, lastPosition);
+  const participating = order.includes(userId);
+  return { participating, next: participating && order[0] === userId };
 }
 
 export async function personalQueueStatus(
@@ -33,7 +34,7 @@ export async function personalQueueStatus(
   if (user.role !== 'attendant')
     throw new DomainError('FORBIDDEN', 'Posição disponível somente para consultores.', 403);
   if (!user.active || !user.queue_enabled || user.queue_position === null)
-    return { participating: false, rank: null };
+    return { participating: false, next: false };
 
   if (db.kind === 'mongo')
     return db.atomic(async (tx) => {

@@ -155,8 +155,15 @@ label small,
   background: #f3f6f8;
 }
 
-.consultant-queue-position.paused i {
+.consultant-queue-position.paused i,
+.consultant-queue-position.waiting i {
   background: #91a1ad;
+}
+
+.consultant-queue-position.waiting {
+  border-color: #dbe3e8;
+  color: #748897;
+  background: #f3f6f8;
 }
 
 .sync-status,

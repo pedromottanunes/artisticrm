@@ -109,6 +109,7 @@ export function App() {
   const [whatsappUrl, setWhatsappUrl] = useState('');
   const [inboxTargetId, setInboxTargetId] = useState(readInboxTarget);
   const [busyId, setBusyId] = useState('');
+  const [poolCounts, setPoolCounts] = useState({ leads: 0, comments: 0 });
   const [now, setNow] = useState(Date.now());
   const serverClock = useRef({ server: Date.now(), monotonic: performance.now() });
   const generation = useRef(0);
@@ -118,6 +119,7 @@ export function App() {
   const refreshRequest = useRef<
     { epoch: number; controller: AbortController; promise: Promise<void> } | undefined
   >(undefined);
+  const poolCountRequest = useRef<AbortController | null>(null);
   const refresh = useCallback(async (force = true) => {
     const epoch = generation.current;
     if (!force && refreshRequest.current?.epoch === epoch) return refreshRequest.current.promise;
@@ -160,6 +162,32 @@ export function App() {
     refreshRequest.current = { epoch, controller, promise };
     return promise;
   }, []);
+  const refreshPoolCounts = useCallback(
+    async (force = false) => {
+      if (data?.user.role !== 'attendant') return;
+      if (poolCountRequest.current) {
+        if (!force) return;
+        poolCountRequest.current.abort();
+        poolCountRequest.current = null;
+      }
+      const epoch = generation.current;
+      const controller = new AbortController();
+      poolCountRequest.current = controller;
+      const timeout = window.setTimeout(() => controller.abort(), 10_000);
+      try {
+        const counts = await api<{ leads: number; comments: number }>('/pool/counts', {
+          signal: controller.signal,
+        });
+        if (epoch === generation.current && !controller.signal.aborted) setPoolCounts(counts);
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) void refresh(false);
+      } finally {
+        window.clearTimeout(timeout);
+        if (poolCountRequest.current === controller) poolCountRequest.current = null;
+      }
+    },
+    [data?.user.id, data?.user.role, refresh],
+  );
   useEffect(() => {
     if (!detail || !data || data.user.role === 'manager') return;
     const current = data.opportunities.find((l) => l.id === detail.id);
@@ -177,6 +205,30 @@ export function App() {
     void refresh();
     return () => refreshRequest.current?.controller.abort();
   }, [refresh]);
+  useEffect(() => {
+    if (data?.user.role !== 'attendant') {
+      poolCountRequest.current?.abort();
+      poolCountRequest.current = null;
+      setPoolCounts({ leads: 0, comments: 0 });
+      return;
+    }
+    void refreshPoolCounts();
+    const update = () => {
+      if (!document.hidden) void refreshPoolCounts();
+    };
+    const interval = window.setInterval(update, 15_000);
+    window.addEventListener('focus', update);
+    window.addEventListener('online', update);
+    document.addEventListener('visibilitychange', update);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', update);
+      window.removeEventListener('online', update);
+      document.removeEventListener('visibilitychange', update);
+      poolCountRequest.current?.abort();
+      poolCountRequest.current = null;
+    };
+  }, [data?.user.id, data?.user.role, refreshPoolCounts]);
   useEffect(() => {
     if (connected) return;
     // A deploy/network outage isn't a logout. Retry without caching credentials or
@@ -415,6 +467,7 @@ export function App() {
         : page;
   const leads = data.opportunities;
   const pool = leads.filter((l) => l.state === 'POOL');
+  const totalPoolCount = poolCounts.leads + poolCounts.comments;
   const reserved = leads.filter((l) => l.state === 'RESERVED');
   const owned = leads.filter(
     (l) =>
@@ -564,7 +617,11 @@ export function App() {
                 >
                   <Icon size={18} />
                   <span>{label}</span>
-                  {id === 'pool' && <b>{pool.length}</b>}
+                  {id === 'pool' && totalPoolCount > 0 && (
+                    <b className="pool-alert-badge" aria-label={`${totalPoolCount} no bolsão`}>
+                      {totalPoolCount > 99 ? '99+' : totalPoolCount}
+                    </b>
+                  )}
                 </button>
               ))}
             </div>
@@ -708,14 +765,30 @@ export function App() {
                 aria-current={activePage === 'pool' ? 'page' : undefined}
                 onClick={() => navigate('pool')}
               >
-                Leads
+                <span>Leads</span>
+                {poolCounts.leads > 0 && (
+                  <b
+                    className="pool-alert-badge"
+                    aria-label={`${poolCounts.leads} leads disponíveis`}
+                  >
+                    {poolCounts.leads > 99 ? '99+' : poolCounts.leads}
+                  </b>
+                )}
               </button>
               <button
                 className={activePage === 'comments' ? 'active' : ''}
                 aria-current={activePage === 'comments' ? 'page' : undefined}
                 onClick={() => navigate('comments')}
               >
-                Comentários
+                <span>Comentários</span>
+                {poolCounts.comments > 0 && (
+                  <b
+                    className="pool-alert-badge"
+                    aria-label={`${poolCounts.comments} perfis disponíveis por comentários`}
+                  >
+                    {poolCounts.comments > 99 ? '99+' : poolCounts.comments}
+                  </b>
+                )}
               </button>
             </nav>
           )}
@@ -724,6 +797,7 @@ export function App() {
               key={data.user.id}
               user={data.user}
               onSessionExpired={refresh}
+              onPoolChanged={() => refreshPoolCounts(true)}
               onOpenChat={(id) => {
                 setInboxTargetId(id);
                 navigate('inbox');
@@ -807,7 +881,7 @@ export function App() {
         items={isManager ? navItems : salesNav}
         active={!isManager && activePage === 'comments' ? 'pool' : activePage}
         manager={isManager}
-        poolCount={pool.length}
+        poolCount={isManager ? pool.length : totalPoolCount}
         onNavigate={navigate}
       />
       {notice && (

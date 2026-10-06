@@ -486,6 +486,13 @@ export async function initializeMongo(db: MongoStore) {
   await db
     .collection('instagram_comments')
     .createIndex({ account_id: 1, ignored: 1, opportunity_id: 1, received_at: -1, id: -1 });
+  await db.collection('instagram_comments').createIndex({
+    account_id: 1,
+    ignored: 1,
+    opportunity_id: 1,
+    reply_deadline_at: 1,
+    sender_id: 1,
+  });
   await db.collection('instagram_comments').createIndex({ account_id: 1, sender_id: 1 });
   await db.collection('instagram_comments').createIndex({ opportunity_id: 1 });
   await db
