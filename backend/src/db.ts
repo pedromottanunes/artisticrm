@@ -89,6 +89,7 @@ export async function migrate(db: Database) {
       '033_consecutive_queue_weights.sql',
       '034_pool_badge_indexes.sql',
       '035_commercial_drafts.sql',
+      '036_financial_value_text.sql',
     ]) {
       const version = file.split('_')[0];
       const done = await tx.query('SELECT version FROM schema_migrations WHERE version=$1', [

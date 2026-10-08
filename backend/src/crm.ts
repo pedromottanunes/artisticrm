@@ -752,7 +752,8 @@ export class CRM {
         END,
         version=version+1,
         sale_seller_name=$8,consultant=$9,total_value_cents=$10,down_payment_cents=$11,
-        hair_grade_classification=$12,has_pack=$13,pack_quantity=$14,contract_status=$15
+        hair_grade_classification=$12,has_pack=$13,pack_quantity=$14,contract_status=$15,
+        total_value_text=$16,down_payment_text=$17
         WHERE id=$1`,
         [
           id,
@@ -770,6 +771,8 @@ export class CRM {
           commercial.has_pack,
           commercial.pack_quantity,
           commercial.contract_status,
+          commercial.total_value_text,
+          commercial.down_payment_text,
         ],
       );
       const previousLabel = stageLabels[row.stage];

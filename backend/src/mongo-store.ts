@@ -224,6 +224,21 @@ export async function initializeMongo(db: MongoStore) {
       },
     },
   );
+  if (!(await db.one('schema_migrations', { id: '036_financial_value_text' }))) {
+    await db
+      .collection('opportunities')
+      .updateMany({ total_value_text: { $exists: false } }, { $set: { total_value_text: '' } });
+    await db
+      .collection('opportunities')
+      .updateMany({ down_payment_text: { $exists: false } }, { $set: { down_payment_text: '' } });
+    await db
+      .collection('schema_migrations')
+      .updateOne(
+        { id: '036_financial_value_text' },
+        { $setOnInsert: { id: '036_financial_value_text' } },
+        { upsert: true },
+      );
+  }
   const legacyInstagramIds = (
     await db.many<{ opportunity_id: string }>('inbound_events', {
       external_id: { $regex: '^instagram:' },

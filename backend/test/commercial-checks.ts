@@ -71,6 +71,8 @@ export async function checkCommercialDrafts(
       consultant: 'Consultor escolhido',
       total_value_cents: 1650000,
       down_payment_cents: 150000,
+      total_value_text: 'R$ 16.500,00',
+      down_payment_text: 'R$ 1.500,00',
       hair_grade_classification: 'A3',
       has_pack: true,
       pack_quantity: 3,
@@ -96,7 +98,6 @@ export async function checkCommercialDrafts(
       { pack_quantity: -1 },
       { pack_quantity: 1.5 },
       { total_value_cents: -1 },
-      { down_payment_cents: 1700000 },
     ]) {
       assert.equal((await patch({ ...full, version: lead.version, ...invalid })).statusCode, 400);
       assert.equal((await detail()).version, lead.version, 'invalid saves must be atomic');
@@ -134,6 +135,10 @@ export async function checkCommercialDrafts(
       // contradictory quantity. Both stores must persist a consistent pair.
       has_pack: false,
       pack_quantity: 3,
+      total_value_cents: null,
+      down_payment_cents: null,
+      total_value_text: 'Valor combinado diretamente com o paciente',
+      down_payment_text: 'Entrada parcelada em 3 vezes',
     };
     const saleKey = randomUUID();
     const sendSale = () =>
@@ -151,6 +156,10 @@ export async function checkCommercialDrafts(
     assert.equal(lead.sale_seller_name, 'Outro nome livre');
     assert.equal(lead.has_pack, false);
     assert.equal(lead.pack_quantity, 0);
+    assert.equal(lead.total_value_cents, null);
+    assert.equal(lead.down_payment_cents, null);
+    assert.equal(lead.total_value_text, 'Valor combinado diretamente com o paciente');
+    assert.equal(lead.down_payment_text, 'Entrada parcelada em 3 vezes');
     assert.equal(lead.owner_id, users[0].id);
     assert.equal(lead.state, 'CLAIMED');
     const received = await crm.ingest(
@@ -169,6 +178,8 @@ export async function checkCommercialDrafts(
       procedure_date: null,
       total_value_cents: null,
       down_payment_cents: null,
+      total_value_text: '',
+      down_payment_text: '',
       has_pack: false,
       pack_quantity: 0,
       sale_seller_name: '',
@@ -179,6 +190,8 @@ export async function checkCommercialDrafts(
     lead = await detail();
     assert.equal(lead.total_value_cents, null);
     assert.equal(lead.down_payment_cents, null);
+    assert.equal(lead.total_value_text, '');
+    assert.equal(lead.down_payment_text, '');
     assert.equal(lead.sale_seller_name, '');
     assert.equal(lead.pack_quantity, 0);
     assert.equal(lead.procedure_date, null);

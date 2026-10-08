@@ -68,6 +68,8 @@ export interface Lead {
   consultant: string;
   total_value_cents: number | null;
   down_payment_cents: number | null;
+  total_value_text?: string;
+  down_payment_text?: string;
   hair_grade_classification: string;
   has_pack: boolean | null;
   pack_quantity?: number | null;

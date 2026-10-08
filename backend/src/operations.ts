@@ -4,7 +4,7 @@ import { CRM } from './crm.js';
 import { deleteLeadData, type DeleteLeadInput } from './lead-deletion.js';
 import type { Sql } from './db.js';
 import { lockActor } from './access.js';
-import { commercialValues } from './commercial-fields.js';
+import { assertSaleFinancialValues, commercialValues } from './commercial-fields.js';
 import { transferProspects } from './instagram-prospects.js';
 import { hashPassword, verifyPassword } from './auth.js';
 import {
@@ -429,12 +429,11 @@ export class Operations extends CRM {
             'Informe uma data de cirurgia válida.',
             400,
           );
-        if (input.down_payment_cents > input.total_value_cents)
-          throw new DomainError(
-            'INVALID_DOWN_PAYMENT',
-            'O valor da entrada não pode superar o valor total.',
-            400,
-          );
+        const commercial = commercialValues(row, {
+          ...input,
+          sale_seller_name: input.sale_seller_name ?? (row.sale_seller_name || actor.name),
+        });
+        assertSaleFinancialValues(commercial);
         await this.prepareAttendance(tx, id, input.attendance);
         if (
           (
@@ -456,7 +455,6 @@ export class Operations extends CRM {
         );
         const now = await this.now(tx);
         const stage = input.procedure_date ? 'CLOSED_WITH_DATE' : 'CLOSED_WITHOUT_DATE';
-        const commercial = commercialValues(row, input);
         await tx.query(
           `UPDATE opportunities SET
              unit=$2,procedure_date=$3,stage=$4,
@@ -465,7 +463,8 @@ export class Operations extends CRM {
              consultant=$7,total_value_cents=$8,down_payment_cents=$9,
              hair_grade_classification=$10,has_pack=$11,contract_status=$12,
              next_action=COALESCE($13,next_action),
-             consultation_status=COALESCE($14::text,consultation_status),pack_quantity=$15,version=version+1
+             consultation_status=COALESCE($14::text,consultation_status),pack_quantity=$15,
+             total_value_text=$16,down_payment_text=$17,version=version+1
            WHERE id=$1`,
           [
             id,
@@ -473,16 +472,18 @@ export class Operations extends CRM {
             input.procedure_date,
             stage,
             now,
-            input.sale_seller_name ?? (row.sale_seller_name || actor.name),
-            input.consultant,
-            input.total_value_cents,
-            input.down_payment_cents,
-            input.hair_grade_classification,
+            commercial.sale_seller_name,
+            commercial.consultant,
+            commercial.total_value_cents,
+            commercial.down_payment_cents,
+            commercial.hair_grade_classification,
             commercial.has_pack,
-            input.contract_status,
+            commercial.contract_status,
             input.next_action ?? null,
             input.attendance ?? null,
             commercial.pack_quantity,
+            commercial.total_value_text,
+            commercial.down_payment_text,
           ],
         );
         await this.audit(
@@ -494,11 +495,13 @@ export class Operations extends CRM {
             ? `Dados da venda atualizados por ${actor.name}.`
             : `Venda concluída por ${actor.name}.`,
           {
-            seller: input.sale_seller_name ?? (row.sale_seller_name || actor.name),
-            consultant: input.consultant,
-            total_value_cents: input.total_value_cents,
-            down_payment_cents: input.down_payment_cents,
-            contract_status: input.contract_status,
+            seller: commercial.sale_seller_name,
+            consultant: commercial.consultant,
+            total_value_cents: commercial.total_value_cents,
+            down_payment_cents: commercial.down_payment_cents,
+            total_value_text: commercial.total_value_text,
+            down_payment_text: commercial.down_payment_text,
+            contract_status: commercial.contract_status,
             attendance: input.attendance ?? row.consultation_status,
           },
         );

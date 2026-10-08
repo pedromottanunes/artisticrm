@@ -643,6 +643,8 @@ export class InstagramComments {
                 consultant: '',
                 total_value_cents: null,
                 down_payment_cents: null,
+                total_value_text: '',
+                down_payment_text: '',
                 hair_grade_classification: '',
                 has_pack: null,
                 contract_status: null,

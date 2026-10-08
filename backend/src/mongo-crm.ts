@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { enqueuePushEvent } from './push-store.js';
 import { assertManualLeadAccess } from './manual-leads.js';
-import { commercialValues } from './commercial-fields.js';
+import { assertSaleFinancialValues, commercialValues } from './commercial-fields.js';
 import { acquisitionFor, queueInboundMarketingAd } from './meta-acquisition.js';
 import {
   decideProspect,
@@ -366,6 +366,8 @@ export class MongoOperations {
         consultant: '',
         total_value_cents: null,
         down_payment_cents: null,
+        total_value_text: '',
+        down_payment_text: '',
         hair_grade_classification: '',
         has_pack: null,
         contract_status: null,
@@ -1324,12 +1326,11 @@ export class MongoOperations {
             'Informe uma data de cirurgia válida.',
             400,
           );
-        if (input.down_payment_cents > input.total_value_cents)
-          throw new DomainError(
-            'INVALID_DOWN_PAYMENT',
-            'O valor da entrada não pode superar o valor total.',
-            400,
-          );
+        const commercial = commercialValues(row, {
+          ...input,
+          sale_seller_name: input.sale_seller_name ?? (row.sale_seller_name || actor.name),
+        });
+        assertSaleFinancialValues(commercial);
         await this.prepareAttendance(tx, id, input.attendance);
         if (await tx.one('contacts', { phone: input.phone, id: { $ne: row.contact_id } }))
           throw new DomainError(
@@ -1350,7 +1351,6 @@ export class MongoOperations {
           },
         );
         const firstSale = !row.sale_completed_at;
-        const commercial = commercialValues(row, input);
         const now = await this.now(tx);
         await tx.update(
           'opportunities',
@@ -1361,14 +1361,7 @@ export class MongoOperations {
               procedure_date: input.procedure_date,
               stage: input.procedure_date ? 'CLOSED_WITH_DATE' : 'CLOSED_WITHOUT_DATE',
               sale_completed_at: row.sale_completed_at ?? now,
-              sale_seller_name: input.sale_seller_name ?? (row.sale_seller_name || actor.name),
-              consultant: input.consultant,
-              total_value_cents: input.total_value_cents,
-              down_payment_cents: input.down_payment_cents,
-              hair_grade_classification: input.hair_grade_classification,
-              has_pack: commercial.has_pack,
-              pack_quantity: commercial.pack_quantity,
-              contract_status: input.contract_status,
+              ...commercial,
               ...(input.attendance === undefined ? {} : { consultation_status: input.attendance }),
               ...(input.next_action === undefined ? {} : { next_action: input.next_action }),
             },
@@ -1384,11 +1377,13 @@ export class MongoOperations {
             ? `Venda concluída por ${actor.name}.`
             : `Dados da venda atualizados por ${actor.name}.`,
           {
-            seller: input.sale_seller_name ?? (row.sale_seller_name || actor.name),
-            consultant: input.consultant,
-            total_value_cents: input.total_value_cents,
-            down_payment_cents: input.down_payment_cents,
-            contract_status: input.contract_status,
+            seller: commercial.sale_seller_name,
+            consultant: commercial.consultant,
+            total_value_cents: commercial.total_value_cents,
+            down_payment_cents: commercial.down_payment_cents,
+            total_value_text: commercial.total_value_text,
+            down_payment_text: commercial.down_payment_text,
+            contract_status: commercial.contract_status,
             attendance: input.attendance ?? row.consultation_status,
           },
         );

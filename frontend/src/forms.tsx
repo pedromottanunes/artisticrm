@@ -261,12 +261,10 @@ export function LeadDetail({
   const commercialDraft = (form: FormData) => ({
     sale_seller_name: String(form.get('sale_seller_name') ?? '').trim(),
     consultant: String(form.get('consultant') ?? '').trim(),
-    total_value_cents: String(form.get('total_value') ?? '').trim()
-      ? currencyToCents(String(form.get('total_value')))
-      : null,
-    down_payment_cents: String(form.get('down_payment') ?? '').trim()
-      ? currencyToCents(String(form.get('down_payment')))
-      : null,
+    total_value_text: String(form.get('total_value') ?? '').trim(),
+    down_payment_text: String(form.get('down_payment') ?? '').trim(),
+    total_value_cents: currencyToCents(String(form.get('total_value') ?? '')),
+    down_payment_cents: currencyToCents(String(form.get('down_payment') ?? '')),
     hair_grade_classification: String(form.get('hair_grade_classification') ?? '').trim(),
     has_pack: form.get('has_pack') === 'true',
     pack_quantity:
@@ -694,9 +692,11 @@ export function LeadDetail({
                     Valor total
                     <input
                       name="total_value"
-                      inputMode="decimal"
-                      defaultValue={currencyInput(detail.total_value_cents)}
-                      placeholder="15.000,00"
+                      defaultValue={
+                        detail.total_value_text || currencyInput(detail.total_value_cents)
+                      }
+                      maxLength={160}
+                      placeholder="Digite livremente"
                       required
                     />
                   </label>
@@ -704,9 +704,11 @@ export function LeadDetail({
                     Valor da entrada
                     <input
                       name="down_payment"
-                      inputMode="decimal"
-                      defaultValue={currencyInput(detail.down_payment_cents)}
-                      placeholder="1.500,00"
+                      defaultValue={
+                        detail.down_payment_text || currencyInput(detail.down_payment_cents)
+                      }
+                      maxLength={160}
+                      placeholder="Digite livremente"
                       required
                     />
                   </label>
@@ -959,13 +961,14 @@ export function LeadDetail({
 
 function currencyToCents(input: string) {
   const compact = input.replace(/\s|R\$/gi, '');
+  if (!compact) return null;
   const decimal = compact.includes(',')
     ? compact.replace(/\./g, '').replace(',', '.')
     : /^\d{1,3}(\.\d{3})+$/.test(compact)
       ? compact.replace(/\./g, '')
       : compact;
   const value = Number(decimal);
-  if (!Number.isFinite(value) || value < 0) throw new Error('Informe valores financeiros válidos.');
+  if (!Number.isFinite(value) || value < 0) return null;
   return Math.round(value * 100);
 }
 
@@ -977,6 +980,11 @@ function money(cents: number | null) {
   return cents === null
     ? 'A definir'
     : new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cents / 100);
+}
+
+function financialText(text: string, cents: number | null) {
+  const value = text.trim();
+  return value || money(cents);
 }
 
 function channelLabel(channel: Detail['channel']) {
@@ -1092,8 +1100,8 @@ function saleText(detail: Detail) {
     `Cidade residência: ${detail.residence_city || 'A definir'}`,
     `Quem fez a venda: ${detail.sale_seller_name || 'A definir'}`,
     `Consultor: ${detail.consultant || 'A definir'}`,
-    `Valor total: ${money(detail.total_value_cents)}`,
-    `Valor entrada: ${money(detail.down_payment_cents)}`,
+    `Valor total: ${financialText(detail.total_value_text ?? '', detail.total_value_cents)}`,
+    `Valor entrada: ${financialText(detail.down_payment_text ?? '', detail.down_payment_cents)}`,
     `Grau e classificação A: ${detail.hair_grade_classification || 'A definir'}`,
     `De onde veio: ${saleOrigin(detail)}`,
     `Se teve pack ou não: ${detail.has_pack ? 'sim' : 'não'}`,

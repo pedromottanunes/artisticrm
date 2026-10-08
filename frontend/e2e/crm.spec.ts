@@ -888,8 +888,8 @@ for (const mobile of [false, true]) {
     await dialog.getByLabel('Cidade de residência').fill('Bonito');
     await dialog.getByLabel('Quem fez a venda').fill('Nome livre do vendedor');
     await dialog.getByLabel('Consultor', { exact: true }).fill('Consultor teste');
-    await dialog.getByLabel('Valor total').fill('16.500,00');
-    await dialog.getByLabel('Valor da entrada').fill('1.500,00');
+    await dialog.getByLabel('Valor total').fill('18000');
+    await dialog.getByLabel('Valor da entrada').fill('Entrada parcelada em 3 vezes');
     await dialog.getByLabel('Grau e classificação A').fill('A3');
     await dialog.getByLabel('Teve pack?').selectOption('true');
     await dialog.getByLabel('Quantidade de packs').fill('3');
@@ -900,8 +900,10 @@ for (const mobile of [false, true]) {
     await expect(dialog.getByRole('status')).toHaveText('Cadastro salvo.');
     expect(await persisted()).toMatchObject({
       sale_seller_name: 'Nome livre do vendedor',
-      total_value_cents: 1650000,
-      down_payment_cents: 150000,
+      total_value_cents: 1800000,
+      down_payment_cents: null,
+      total_value_text: '18000',
+      down_payment_text: 'Entrada parcelada em 3 vezes',
       pack_quantity: 3,
       sale_completed_at: null,
       state: 'CLAIMED',
@@ -916,8 +918,8 @@ for (const mobile of [false, true]) {
     await page.reload();
     await open();
     await expect(dialog.getByLabel('Quem fez a venda')).toHaveValue('Nome livre do vendedor');
-    await expect(dialog.getByLabel('Valor total')).toHaveValue('16500,00');
-    await expect(dialog.getByLabel('Valor da entrada')).toHaveValue('1500,00');
+    await expect(dialog.getByLabel('Valor total')).toHaveValue('18000');
+    await expect(dialog.getByLabel('Valor da entrada')).toHaveValue('Entrada parcelada em 3 vezes');
     await expect(dialog.getByLabel('Quantidade de packs')).toHaveValue('3');
     await expect(dialog.getByLabel('Data da cirurgia')).toHaveValue('2027-11-09');
     await expect(dialog.getByLabel('Assinou contrato?')).toHaveValue('signed');
