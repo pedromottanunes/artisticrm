@@ -1,14 +1,6 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { KeyRound, Plus, ShieldCheck, Users, Save } from 'lucide-react';
-import {
-  api,
-  ApiError,
-  isClosedStage,
-  type Snapshot,
-  type User,
-  type Detail,
-  type Appointment,
-} from './api';
+import { api, ApiError, type Snapshot, type User, type Detail, type Appointment } from './api';
 import { Modal, dateLabel } from './components';
 
 // Keep the same command key after an ambiguous network failure. Do not let changed
@@ -450,7 +442,7 @@ export function Transfer({
       <div className="modal-actions">
         <button
           className="button gold"
-          disabled={busy || !connected || isClosedStage(detail.stage)}
+          disabled={busy || !connected || detail.state === 'CANCELLED'}
         >
           {busy ? 'Transferindo…' : 'Confirmar atribuição'}
         </button>

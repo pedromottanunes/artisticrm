@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { Document } from 'mongodb';
 import type { Database } from './db.js';
 import type { MongoStore } from './mongo-store.js';
-import { closedStages, consultationStatuses, requireManager, stages, type User } from './types.js';
+import { consultationStatuses, requireManager, stages, type User } from './types.js';
 import { previewWeightedOrder } from './weighted-queue.js';
 
 export const distributionQuery = z
@@ -19,8 +19,6 @@ export const distributionQuery = z
   })
   .strict();
 const states = ['RESERVED', 'POOL', 'CLAIMED', 'PENDING'];
-const closedStageList = [...closedStages];
-const closedStageSql = closedStages.map((stage) => `'${stage}'`).join(',');
 const kinds = [
   'lead.created',
   'reservation.created',
@@ -171,21 +169,20 @@ async function readDistributionBoard(
         timeout_minutes: configuration.timeout_minutes,
         last_position: configuration.last_position,
       };
-      const open = { state: { $in: states }, stage: { $nin: closedStageList } };
+      const open = { state: { $in: states } };
       const filter: Document =
         query.scope === 'OPEN'
           ? { ...open }
           : query.scope === 'CLOSED'
-            ? { stage: { $in: closedStageList } }
+            ? { state: 'CANCELLED' }
             : {};
-      if (query.stage !== 'ALL') {
-        if (filter.stage !== undefined) {
-          const scopeStage = filter.stage;
-          delete filter.stage;
-          filter.$and = [{ stage: scopeStage }, { stage: query.stage }];
-        } else filter.stage = query.stage;
+      if (query.stage !== 'ALL') filter.stage = query.stage;
+      if (query.state !== 'ALL') {
+        if (filter.state !== undefined) {
+          filter.$and = [{ state: filter.state }, { state: query.state }];
+          delete filter.state;
+        } else filter.state = query.state;
       }
-      if (query.state !== 'ALL') filter.state = query.state;
       if (query.consultation !== 'ALL') filter.consultation_status = query.consultation;
       if (query.attendant)
         filter.$or = [
@@ -373,8 +370,8 @@ async function readDistributionBoard(
         'SELECT version,timeout_minutes,last_position FROM distribution_settings WHERE id=1',
       )
     ).rows[0];
-    const open = `o.state IN ('RESERVED','POOL','CLAIMED','PENDING') AND o.stage NOT IN (${closedStageSql})`;
-    const selectedScope = `($4='ALL' OR ($4='OPEN' AND ${open}) OR ($4='CLOSED' AND o.stage IN (${closedStageSql})))`;
+    const open = `o.state IN ('RESERVED','POOL','CLAIMED','PENDING')`;
+    const selectedScope = `($4='ALL' OR ($4='OPEN' AND ${open}) OR ($4='CLOSED' AND o.state='CANCELLED'))`;
     const where = `${selectedScope} AND ($1='ALL' OR o.state=$1)
       AND ($2='' OR (o.state='RESERVED' AND o.reserved_to::text=$2) OR (o.state='CLAIMED' AND o.owner_id::text=$2) OR ($4<>'OPEN' AND o.owner_id::text=$2))
       AND ($3='' OR strpos(lower(c.name),lower($3))>0 OR strpos(c.phone,$3)>0)

@@ -4,7 +4,6 @@ import type { Database } from './db.js';
 import type { MongoStore, MongoTx } from './mongo-store.js';
 import {
   DomainError,
-  isClosedStage,
   isSaleStage,
   normalizeStage,
   requireManager,
@@ -413,7 +412,7 @@ function buildReport(data: ReportData, from: string, to: string) {
   }
   const activities = new Map<string, Bucket>();
   for (const row of data.periodOpportunities) {
-    if (!row.owner_id || isClosedStage(row.stage) || !row.next_action.trim()) continue;
+    if (!row.owner_id || row.state === 'CANCELLED' || !row.next_action.trim()) continue;
     const value = bucket(activities, row.owner_id);
     value.count++;
     value.lead_ids.add(row.id);

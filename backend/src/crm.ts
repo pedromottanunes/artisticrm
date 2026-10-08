@@ -1,9 +1,7 @@
 import { randomUUID, createHash } from 'node:crypto';
 import type { Database, Sql } from './db.js';
 import {
-  closedStages,
   DomainError,
-  isClosedStage,
   isValidDateOnly,
   requireManager,
   stageLabels,
@@ -13,6 +11,7 @@ import {
   type User,
 } from './types.js';
 import { lockActor } from './access.js';
+import { commercialValues, type CommercialInput } from './commercial-fields.js';
 import { assertManualLeadAccess } from './manual-leads.js';
 import { acquisitionFor, queueInboundMarketingAd } from './meta-acquisition.js';
 import { enqueuePushEvent } from './push-store.js';
@@ -36,7 +35,6 @@ const selectOpportunity = `SELECT o.*, c.name, c.phone, c.email, c.residence_cit
     ORDER BY ci.profile_updated_at DESC NULLS LAST LIMIT 1
   ),'') AS profile_picture_url
   FROM opportunities o JOIN contacts c ON c.id = o.contact_id`;
-const closedStageSql = closedStages.map((stage) => `'${stage}'`).join(',');
 export interface LeadInput {
   name: string;
   phone?: string;
@@ -310,7 +308,7 @@ export class CRM {
         );
       const existing = (
         await tx.query<Pick<Opportunity, 'id' | 'owner_id' | 'state' | 'stage'>>(
-          `SELECT id,owner_id,state,stage FROM opportunities WHERE contact_id=$1 AND stage NOT IN (${closedStageSql}) FOR UPDATE`,
+          `SELECT id,owner_id,state,stage FROM opportunities WHERE contact_id=$1 AND state<>'CANCELLED' FOR UPDATE`,
           [contact.id],
         )
       ).rows[0];
@@ -666,7 +664,7 @@ export class CRM {
   async update(
     user: User,
     id: string,
-    input: {
+    input: CommercialInput & {
       version: number;
       name: string;
       phone?: string | null;
@@ -705,21 +703,13 @@ export class CRM {
           'Informe a data do procedimento para concluir como fechado com data.',
           400,
         );
-      if (stage === 'DECLINED' && hasScheduled)
+      if (input.procedure_date && !isValidDateOnly(input.procedure_date))
         throw new DomainError(
-          'OPEN_APPOINTMENTS',
-          'Conclua ou cancele as consultas antes de declinar o lead.',
+          'INVALID_PROCEDURE_DATE',
+          'Informe uma data de cirurgia válida.',
+          400,
         );
-      if (row.stage === 'DECLINED' && stage !== 'DECLINED')
-        throw new DomainError(
-          'REENTRY_PENDING',
-          'Um lead declinado não pode ser reaberto. Uma nova entrada deve ser criada.',
-        );
-      if (isClosedStage(row.stage) && !isClosedStage(stage))
-        throw new DomainError(
-          'REENTRY_PENDING',
-          'Uma qualificação encerrada não pode voltar ao atendimento ativo.',
-        );
+      const commercial = commercialValues(row, input);
       const contact = (
         await tx.query<{ phone: string | null; email: string; residence_city: string }>(
           'SELECT phone,email,residence_city FROM contacts WHERE id=$1 FOR UPDATE',
@@ -761,9 +751,8 @@ export class CRM {
           ELSE consultation_status
         END,
         version=version+1,
-        state=CASE WHEN $4 IN (${closedStageSql}) THEN 'CANCELLED' ELSE state END,
-        reserved_to=CASE WHEN $4 IN (${closedStageSql}) THEN NULL ELSE reserved_to END,
-        expires_at=CASE WHEN $4 IN (${closedStageSql}) THEN NULL ELSE expires_at END
+        sale_seller_name=$8,consultant=$9,total_value_cents=$10,down_payment_cents=$11,
+        hair_grade_classification=$12,has_pack=$13,pack_quantity=$14,contract_status=$15
         WHERE id=$1`,
         [
           id,
@@ -771,8 +760,16 @@ export class CRM {
           input.unit,
           stage,
           input.next_action,
-          stage === 'CLOSED_WITH_DATE' ? input.procedure_date : null,
+          input.procedure_date,
           input.attendance ?? null,
+          commercial.sale_seller_name,
+          commercial.consultant,
+          commercial.total_value_cents,
+          commercial.down_payment_cents,
+          commercial.hair_grade_classification,
+          commercial.has_pack,
+          commercial.pack_quantity,
+          commercial.contract_status,
         ],
       );
       const previousLabel = stageLabels[row.stage];
@@ -804,6 +801,7 @@ export class CRM {
             'procedure_date',
             'next_action',
             'consultation_status',
+            ...Object.keys(commercial),
           ],
         },
       );
@@ -824,8 +822,8 @@ export class CRM {
         throw new DomainError('NOT_FOUND', 'Lead não encontrado.', 404);
       if (row.version !== input.expected_version)
         throw new DomainError('VERSION_CONFLICT', 'O lead mudou. Reabra a ficha.');
-      if (isClosedStage(row.stage))
-        throw new DomainError('CLOSED', 'A oportunidade está encerrada.');
+      if (row.state === 'CANCELLED')
+        throw new DomainError('CLOSED', 'Este atendimento pertence ao histórico encerrado.');
       if (new Date(input.starts_at) <= (await this.now(tx)))
         throw new DomainError('INVALID_DATE', 'Escolha um horário futuro.', 400);
       if (
@@ -841,12 +839,15 @@ export class CRM {
           'Já existe uma consulta agendada. Remarque ou cancele a consulta atual.',
         );
       const appointmentId = randomUUID();
+      const stage = ['NEW_LEAD', 'CONSULTATION_NOT_SCHEDULED'].includes(row.stage)
+        ? 'FOLLOW_UP'
+        : row.stage;
       await tx.query(
         'INSERT INTO appointments(id,opportunity_id,starts_at,unit,created_by) VALUES ($1,$2,$3,$4,$5)',
         [appointmentId, id, input.starts_at, input.unit, user.id],
       );
       await tx.query(
-        `UPDATE opportunities SET stage='FOLLOW_UP',consultation_status='SCHEDULED',version=version+1 WHERE id=$1`,
+        `UPDATE opportunities SET stage=CASE WHEN stage IN ('NEW_LEAD','CONSULTATION_NOT_SCHEDULED') THEN 'FOLLOW_UP' ELSE stage END,consultation_status='SCHEDULED',version=version+1 WHERE id=$1`,
         [id],
       );
       await this.audit(
@@ -855,14 +856,14 @@ export class CRM {
         user.id,
         'appointment.created',
         `Consulta agendada por ${user.name} para ${new Date(input.starts_at).toISOString()}.${
-          row.stage === 'FOLLOW_UP'
+          row.stage === stage
             ? ''
             : ` Qualificação: ${stageLabels[row.stage]} → ${stageLabels.FOLLOW_UP}.`
         }`,
         {
           appointment_id: appointmentId,
           previous_stage: row.stage,
-          next_stage: 'FOLLOW_UP',
+          next_stage: stage,
         },
       );
       return { id: appointmentId };

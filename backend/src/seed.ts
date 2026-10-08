@@ -75,10 +75,7 @@ export async function seedDemo(crm: CRM, withLeads = true) {
         consultation_status=CASE
           WHEN $2='CONSULTATION_NOT_SCHEDULED' THEN 'NOT_SCHEDULED'
           ELSE consultation_status
-        END,
-        state=CASE WHEN $2='CONTRACT_PENDING' THEN 'CANCELLED' ELSE state END,
-        reserved_to=CASE WHEN $2='CONTRACT_PENDING' THEN NULL ELSE reserved_to END,
-        expires_at=CASE WHEN $2='CONTRACT_PENDING' THEN NULL ELSE expires_at END
+        END
         WHERE id=$1`,
         [
           created.id,

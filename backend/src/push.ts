@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { tokenHash } from './auth.js';
 import { MongoTx } from './mongo-store.js';
-import { DomainError, isClosedStage, type User } from './types.js';
+import { DomainError, type User } from './types.js';
 import {
   cleanPush,
   getPush,
@@ -251,7 +251,7 @@ export class PushService {
       'sale.updated',
       'lead.repeated',
     ].includes(kind);
-    if (!received && !movement && isClosedStage(lead.stage)) return null;
+    if (!received && !movement && lead.state === 'CANCELLED') return null;
     const target = lead.state === 'RESERVED' ? lead.reserved_to : lead.owner_id;
     const manager = user.role === 'manager';
     if (received) {

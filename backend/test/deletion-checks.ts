@@ -267,6 +267,10 @@ export async function checkDeleteShared(ops: Ops, manager: User, users: User[]) 
     stage: 'DECLINED',
     procedure_date: null,
   });
+  // Historical cancelled record from the previous lifecycle, not a new qualification edit.
+  if (ops.db.kind === 'mongo')
+    await ops.db.update('opportunities', { id }, { $set: { state: 'CANCELLED', open: false } });
+  else await ops.db.query("UPDATE opportunities SET state='CANCELLED' WHERE id=$1", [id]);
   const returning = await ops.ingest(input(), randomUUID(), manager.id);
   const preserved = await ops.detail(manager, returning.id);
   await assert.rejects(ops.deleteLead(owner, id, confirmation(3), randomUUID()), {

@@ -28,6 +28,12 @@ import { checkEncodedRoutes } from './security-checks.js';
 import { checkAgenda } from './agenda-checks.js';
 import { checkLeadLists } from './lead-list-checks.js';
 import { checkPersistentSessions } from './session-checks.js';
+import { checkCommercialDrafts, checkCommercialMigration } from './commercial-checks.js';
+
+test('Mongo: ficha completa, venda separada, permissões e persistência após reinício', () =>
+  checkCommercialDrafts(db, manager, users));
+test('Mongo: migração preserva campos e não reabre atendimentos duplicados', () =>
+  checkCommercialMigration(db, manager, users));
 import { checkProspects } from './prospect-checks.js';
 import { checkManualLeads } from './manual-lead-checks.js';
 import { checkMarketingOrigins } from './marketing-origin-checks.js';
@@ -496,9 +502,8 @@ test('Mongo: atualização e agendamento concorrentes respeitam versões e avali
   ]);
   assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
   assert.equal(await db.count('appointments'), 1);
-  await assert.rejects(ops.update(users[0], id, { ...lose, version: 3 }), {
-    code: 'OPEN_APPOINTMENTS',
-  });
+  await ops.update(users[0], id, { ...lose, version: 3 });
+  assert.equal((await row(id)).consultation_status, 'SCHEDULED');
   const appt = (await db.one('appointments', { opportunity_id: id }))!;
   const change = {
     expected_version: 1,
@@ -520,11 +525,11 @@ test('Mongo: atualização e agendamento concorrentes respeitam versões e avali
   );
   await ops.update(users[0], id, {
     ...lose,
-    version: 4,
+    version: 5,
     stage: 'CLOSED_WITH_DATE',
     procedure_date: '2026-10-20',
   });
-  assert.equal((await row(id)).open, false);
+  assert.equal((await row(id)).open, true);
   assert.equal((await row(id)).procedure_date, '2026-10-20');
 });
 test('Mongo: falta mantém follow-up e venda estrutura os dados comerciais', async () => {
@@ -618,9 +623,14 @@ test('Mongo: comparecimento direto cria follow-up sem exigir consulta', async ()
   assert.equal((await row(scheduled.id)).consultation_status, 'NO_SHOW');
   assert.equal((await db.one('appointments', { opportunity_id: scheduled.id }))!.status, 'no_show');
 });
-test('Mongo: retorno após perdido preserva histórico e exige revisão', async () => {
+test('Mongo: retorno após cancelamento legado preserva histórico e exige revisão', async () => {
   const { id } = await lead();
   await ops.update(manager, id, { ...lose, version: 1 });
+  await db.update(
+    'opportunities',
+    { id },
+    { $set: { state: 'CANCELLED', open: false, reserved_to: null, expires_at: null } },
+  );
   const returned = await ops.ingest(input(), 'new-return', null);
   assert.notEqual(returned.id, id);
   assert.equal((await row(returned.id)).needs_review, true);
@@ -628,9 +638,12 @@ test('Mongo: retorno após perdido preserva histórico e exige revisão', async 
   assert.equal((await row(returned.id)).state, 'PENDING');
   assert.equal(await db.count('contacts'), 1);
   assert.equal(await db.count('opportunities'), 2);
-  await assert.rejects(ops.update(manager, id, { ...lose, version: 2, stage: 'FOLLOW_UP' }), {
-    code: 'REENTRY_PENDING',
-  });
+  await ops.update(manager, id, { ...lose, version: 2, stage: 'FOLLOW_UP' });
+  assert.equal(
+    (await row(id)).open,
+    false,
+    'editing historical fields must not reopen duplicate attendance',
+  );
   await assert.rejects(
     ops.update(manager, returned.id, {
       ...lose,

@@ -482,9 +482,7 @@ test('gestão móvel: status compacto e ficha pelo nome na central', async ({ pa
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole('heading', { name, exact: true })).toBeVisible();
-    await dialog
-      .getByRole('button', { name: /^(Fechar janela|Voltar da ficha do lead)$/ })
-      .click();
+    await dialog.getByRole('button', { name: /^(Fechar janela|Voltar da ficha do lead)$/ }).click();
   }
   await contact.focus();
   await page.keyboard.press('Enter');
@@ -852,14 +850,113 @@ test('gestão navega, filtra e cadastra lead persistente', async ({ page }) => {
   await dialog.getByLabel('Data da cirurgia').fill('2027-10-20');
   await dialog.getByLabel('Assinou contrato?').selectOption('awaiting');
   await dialog.getByRole('button', { name: 'Registrar venda' }).click();
+  await expect(dialog.getByText('Venda registrada', { exact: true })).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Confirmar venda', exact: true }).click();
   await expect(dialog.getByText('Venda registrada', { exact: true })).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Copiar para WhatsApp' })).toBeEnabled();
-  await expect(dialog.getByLabel('Quem fez a venda')).toHaveValue('Cadu');
+  await expect(dialog.getByLabel('Quem fez a venda')).toBeEditable();
   await dialog.getByRole('button', { name: 'Fechar janela' }).click();
   await expect(page.getByRole('button', { name: 'Meta Ads', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Google Ads', exact: true })).toHaveCount(0);
   expect(errors).toEqual([]);
 });
+for (const mobile of [false, true]) {
+  test(`ficha completa: salvar, reabrir e confirmar venda separadamente (${mobile ? 'mobile' : 'desktop'})`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1400, height: 950 });
+    await login(page, 'vanessa');
+    const name = `Ficha persistente ${mobile} ${Date.now()}`;
+    const created = await page.request.post('/api/v1/opportunities', {
+      headers: { 'X-Artisti-Client': 'web', 'Idempotency-Key': `draft-${Date.now()}` },
+      data: {
+        name,
+        phone: `554896${String(Date.now()).slice(-7)}`,
+        unit: 'Teste',
+        source: 'Indicação',
+      },
+    });
+    expect(created.status()).toBe(201);
+    const { id } = await created.json();
+    const url = `/api/v1/opportunities/${id}`;
+    const persisted = async () => (await page.request.get(url)).json();
+    await page.goto('/#mine');
+    const open = () =>
+      page.getByRole('button', { name: `Abrir ficha de ${name}`, exact: true }).click();
+    await open();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByLabel('Cidade de residência').fill('Bonito');
+    await dialog.getByLabel('Quem fez a venda').fill('Nome livre do vendedor');
+    await dialog.getByLabel('Consultor', { exact: true }).fill('Consultor teste');
+    await dialog.getByLabel('Valor total').fill('16.500,00');
+    await dialog.getByLabel('Valor da entrada').fill('1.500,00');
+    await dialog.getByLabel('Grau e classificação A').fill('A3');
+    await dialog.getByLabel('Teve pack?').selectOption('true');
+    await dialog.getByLabel('Quantidade de packs').fill('3');
+    await dialog.getByLabel('Cidade onde opera').fill('Florianópolis');
+    await dialog.getByLabel('Data da cirurgia').fill('2027-11-09');
+    await dialog.getByLabel('Assinou contrato?').selectOption('signed');
+    await dialog.getByRole('button', { name: 'Salvar cadastro', exact: true }).click();
+    await expect(dialog.getByRole('status')).toHaveText('Cadastro salvo.');
+    expect(await persisted()).toMatchObject({
+      sale_seller_name: 'Nome livre do vendedor',
+      total_value_cents: 1650000,
+      down_payment_cents: 150000,
+      pack_quantity: 3,
+      sale_completed_at: null,
+      state: 'CLAIMED',
+      contract_status: 'signed',
+    });
+    await dialog
+      .getByRole('button', {
+        name: mobile ? 'Voltar da ficha do lead' : 'Fechar janela',
+        exact: true,
+      })
+      .click();
+    await page.reload();
+    await open();
+    await expect(dialog.getByLabel('Quem fez a venda')).toHaveValue('Nome livre do vendedor');
+    await expect(dialog.getByLabel('Valor total')).toHaveValue('16500,00');
+    await expect(dialog.getByLabel('Valor da entrada')).toHaveValue('1500,00');
+    await expect(dialog.getByLabel('Quantidade de packs')).toHaveValue('3');
+    await expect(dialog.getByLabel('Data da cirurgia')).toHaveValue('2027-11-09');
+    await expect(dialog.getByLabel('Assinou contrato?')).toHaveValue('signed');
+    const askSale = async () => {
+      if (mobile) await dialog.getByLabel('Mais ações do lead').click();
+      await dialog.getByRole('button', { name: 'Registrar venda', exact: true }).click();
+    };
+    await askSale();
+    expect((await persisted()).sale_completed_at).toBeNull();
+    await dialog.getByRole('button', { name: 'Cancelar', exact: true }).click();
+    expect((await persisted()).sale_completed_at).toBeNull();
+    await askSale();
+    await dialog.getByRole('button', { name: 'Confirmar venda', exact: true }).click();
+    await expect(dialog.getByText('Venda registrada', { exact: true })).toBeVisible();
+    const sale = await persisted();
+    expect(sale.sale_completed_at).toBeTruthy();
+    expect(sale.state).toBe('CLAIMED');
+    await dialog.getByLabel('Quem fez a venda').fill('Vendedor corrigido');
+    await dialog.getByLabel('Quantidade de packs').fill('4');
+    await dialog.getByRole('button', { name: 'Salvar cadastro', exact: true }).click();
+    await expect(dialog.getByRole('status')).toHaveText('Cadastro salvo.');
+    expect(await persisted()).toMatchObject({
+      sale_seller_name: 'Vendedor corrigido',
+      pack_quantity: 4,
+      sale_completed_at: sale.sale_completed_at,
+    });
+    expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    // Keep later layout scenarios independent of these long synthetic lead names.
+    // Clear the attendant cookie before restoring the cached manager session.
+    await page.context().clearCookies();
+    await login(page);
+    const removed = await page.request.delete(url, {
+      headers: { 'X-Artisti-Client': 'web', 'Idempotency-Key': `cleanup-${id}` },
+      data: { expected_version: (await persisted()).version, confirmation: 'EXCLUIR' },
+    });
+    expect(removed.ok()).toBe(true);
+  });
+}
+
 test('atendimento móvel acessa bolsão e confirma aceite sem abrir contato fictício', async ({
   page,
 }) => {

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { enqueuePushEvent } from './push-store.js';
 import { assertManualLeadAccess } from './manual-leads.js';
+import { commercialValues } from './commercial-fields.js';
 import { acquisitionFor, queueInboundMarketingAd } from './meta-acquisition.js';
 import {
   decideProspect,
@@ -12,7 +13,6 @@ import { deleteLeadData, wasDeleted, type DeleteLeadInput } from './lead-deletio
 import { MongoStore, MongoTx, mongoUser } from './mongo-store.js';
 import {
   DomainError,
-  isClosedStage,
   isValidDateOnly,
   requireManager,
   stageLabels,
@@ -771,18 +771,13 @@ export class MongoOperations {
           'Informe a data do procedimento para concluir como fechado com data.',
           400,
         );
-      if (stage === 'DECLINED' && hasScheduled)
-        throw new DomainError('OPEN_APPOINTMENTS', 'Conclua ou cancele as consultas.');
-      if (row.stage === 'DECLINED' && stage !== 'DECLINED')
+      if (input.procedure_date && !isValidDateOnly(input.procedure_date))
         throw new DomainError(
-          'REENTRY_PENDING',
-          'Um lead declinado não pode ser reaberto. Uma nova entrada deve ser criada.',
+          'INVALID_PROCEDURE_DATE',
+          'Informe uma data de cirurgia válida.',
+          400,
         );
-      if (isClosedStage(row.stage) && !isClosedStage(stage))
-        throw new DomainError(
-          'REENTRY_PENDING',
-          'Uma qualificação encerrada não pode voltar ao atendimento ativo.',
-        );
+      const commercial = commercialValues(row, input);
       const contact = await tx.one('contacts', { id: row.contact_id });
       if (!contact) throw new Error('Missing contact');
       const phone = input.phone === undefined ? contact.phone : input.phone;
@@ -820,11 +815,9 @@ export class MongoOperations {
                 : stage === 'NEW_LEAD'
                   ? 'UNDEFINED'
                   : row.consultation_status),
-            procedure_date: stage === 'CLOSED_WITH_DATE' ? input.procedure_date : null,
+            procedure_date: input.procedure_date,
             next_action: input.next_action,
-            state: isClosedStage(stage) ? 'CANCELLED' : row.state,
-            ...(isClosedStage(stage) ? { reserved_to: null, expires_at: null } : {}),
-            open: !isClosedStage(stage),
+            ...commercial,
           },
           $inc: { version: 1 },
         },
@@ -857,12 +850,16 @@ export class MongoOperations {
         throw new DomainError('NOT_FOUND', 'Lead não encontrado.', 404);
       if (row.version !== input.expected_version)
         throw new DomainError('VERSION_CONFLICT', 'O lead mudou.');
-      if (isClosedStage(row.stage)) throw new DomainError('CLOSED', 'Oportunidade encerrada.');
+      if (row.state === 'CANCELLED')
+        throw new DomainError('CLOSED', 'Este atendimento pertence ao histórico encerrado.');
       if (new Date(input.starts_at) <= (await this.now(tx)))
         throw new DomainError('INVALID_DATE', 'Escolha um horário futuro.', 400);
       if (await tx.count('appointments', { opportunity_id: id, status: 'scheduled' }))
         throw new DomainError('OPEN_APPOINTMENT', 'Já existe uma consulta agendada.');
       const appointmentId = randomUUID();
+      const stage = ['NEW_LEAD', 'CONSULTATION_NOT_SCHEDULED'].includes(row.stage)
+        ? 'FOLLOW_UP'
+        : row.stage;
       await tx.insert('appointments', {
         id: appointmentId,
         opportunity_id: id,
@@ -875,7 +872,7 @@ export class MongoOperations {
       await tx.update(
         'opportunities',
         { id },
-        { $set: { stage: 'FOLLOW_UP', consultation_status: 'SCHEDULED' }, $inc: { version: 1 } },
+        { $set: { stage, consultation_status: 'SCHEDULED' }, $inc: { version: 1 } },
       );
       await this.audit(
         tx,
@@ -883,14 +880,14 @@ export class MongoOperations {
         user.id,
         'appointment.created',
         `Consulta agendada por ${user.name}.${
-          row.stage === 'FOLLOW_UP'
+          row.stage === stage
             ? ''
             : ` Qualificação: ${stageLabels[row.stage]} → ${stageLabels.FOLLOW_UP}.`
         }`,
         {
           appointment_id: appointmentId,
           previous_stage: row.stage,
-          next_stage: 'FOLLOW_UP',
+          next_stage: stage,
         },
       );
       return { id: appointmentId };
@@ -1096,7 +1093,7 @@ export class MongoOperations {
         if (!row) throw new DomainError('NOT_FOUND', 'Lead não encontrado.', 404);
         if (row.version !== input.expected_version)
           throw new DomainError('VERSION_CONFLICT', 'O lead mudou.');
-        if (isClosedStage(row.stage)) throw new DomainError('CLOSED', 'Oportunidade encerrada.');
+        if (row.state === 'CANCELLED') throw new DomainError('CLOSED', 'Oportunidade encerrada.');
         if (row.owner_id === target.id)
           throw new DomainError('SAME_OWNER', 'A atendente já é responsável.');
         await this.assign(tx, row, target, actor, input.reason);
@@ -1353,6 +1350,7 @@ export class MongoOperations {
           },
         );
         const firstSale = !row.sale_completed_at;
+        const commercial = commercialValues(row, input);
         const now = await this.now(tx);
         await tx.update(
           'opportunities',
@@ -1362,17 +1360,14 @@ export class MongoOperations {
               unit: input.unit,
               procedure_date: input.procedure_date,
               stage: input.procedure_date ? 'CLOSED_WITH_DATE' : 'CLOSED_WITHOUT_DATE',
-              state: 'CANCELLED',
-              reserved_to: null,
-              expires_at: null,
-              open: false,
               sale_completed_at: row.sale_completed_at ?? now,
-              sale_seller_name: row.sale_seller_name || actor.name,
+              sale_seller_name: input.sale_seller_name ?? (row.sale_seller_name || actor.name),
               consultant: input.consultant,
               total_value_cents: input.total_value_cents,
               down_payment_cents: input.down_payment_cents,
               hair_grade_classification: input.hair_grade_classification,
-              has_pack: input.has_pack,
+              has_pack: commercial.has_pack,
+              pack_quantity: commercial.pack_quantity,
               contract_status: input.contract_status,
               ...(input.attendance === undefined ? {} : { consultation_status: input.attendance }),
               ...(input.next_action === undefined ? {} : { next_action: input.next_action }),
@@ -1389,7 +1384,7 @@ export class MongoOperations {
             ? `Venda concluída por ${actor.name}.`
             : `Dados da venda atualizados por ${actor.name}.`,
           {
-            seller: row.sale_seller_name || actor.name,
+            seller: input.sale_seller_name ?? (row.sale_seller_name || actor.name),
             consultant: input.consultant,
             total_value_cents: input.total_value_cents,
             down_payment_cents: input.down_payment_cents,

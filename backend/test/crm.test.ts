@@ -498,8 +498,8 @@ test('cadastro usa controle de versão e exige data no fechamento correspondente
       : closed.procedure_date,
     '2026-10-20',
   );
-  assert.equal(closed.state, 'CANCELLED');
-  assert.equal(closed.reserved_to, null);
+  assert.equal(closed.state, 'RESERVED');
+  assert.ok(closed.reserved_to);
 });
 test('agendamento confirma data futura e mantém histórico', async () => {
   const { id } = await create();

@@ -79,6 +79,31 @@ export async function checkReports(
   assert.equal(result.open_activities_by_user[0].count, 1);
   assert.equal(Object.keys(result.leads).length, 2);
 
+  const active = await crm.detail(manager, first.id);
+  await crm.update(users[0], first.id, {
+    name: active.name,
+    email: active.email ?? '',
+    instagram: active.instagram ?? '',
+    interest: active.interest,
+    unit: active.unit,
+    stage: 'CLOSED_WITH_DATE',
+    procedure_date: '2026-10-20',
+    next_action: active.next_action,
+    version: active.version,
+  });
+  const afterCommercialClose = await reportsOverview(
+    db,
+    manager,
+    { from: '2026-09-10', to: '2026-09-10' },
+    async () => now(),
+  );
+  assert.equal(
+    afterCommercialClose.open_activities_by_user.find((row) => row.user_id === users[0].id)
+      ?.count,
+    1,
+    'a final commercial stage must not hide an operationally active follow-up',
+  );
+
   await assert.rejects(
     () =>
       reportsOverview(db, users[0], { from: '2026-09-10', to: '2026-09-10' }, async () => now()),

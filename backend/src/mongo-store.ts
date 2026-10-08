@@ -142,31 +142,16 @@ export async function initializeMongo(db: MongoStore) {
     WON: 'CLOSED_WITHOUT_DATE',
     LOST: 'DECLINED',
   } as const;
-  const closedStages = ['CONTRACT_PENDING', 'CLOSED_WITH_DATE', 'CLOSED_WITHOUT_DATE', 'DECLINED'];
   for (const [previous, next] of Object.entries(stageMigration)) {
-    const closed = closedStages.includes(next);
     await db.collection('opportunities').updateMany(
       { stage: previous },
       {
         $set: {
           stage: next,
-          open: !closed,
-          ...(closed ? { state: 'CANCELLED', reserved_to: null, expires_at: null } : {}),
         },
       },
     );
   }
-  await db.collection('opportunities').updateMany(
-    { stage: { $in: closedStages } },
-    {
-      $set: {
-        open: false,
-        state: 'CANCELLED',
-        reserved_to: null,
-        expires_at: null,
-      },
-    },
-  );
   await db
     .collection('opportunities')
     .updateMany({ procedure_date: { $exists: false } }, { $set: { procedure_date: null } });
@@ -238,22 +223,6 @@ export async function initializeMongo(db: MongoStore) {
         contract_status: null,
       },
     },
-  );
-  await db.collection('opportunities').updateMany(
-    {
-      stage: { $in: ['CONTRACT_PENDING', 'CLOSED_WITH_DATE', 'CLOSED_WITHOUT_DATE'] },
-      sale_completed_at: null,
-    },
-    [
-      {
-        $set: {
-          sale_completed_at: '$created_at',
-          contract_status: {
-            $cond: [{ $eq: ['$stage', 'CONTRACT_PENDING'] }, 'awaiting', '$contract_status'],
-          },
-        },
-      },
-    ],
   );
   const legacyInstagramIds = (
     await db.many<{ opportunity_id: string }>('inbound_events', {
@@ -512,6 +481,50 @@ export async function initializeMongo(db: MongoStore) {
       { $setOnInsert: { id: 1, last_position: 0, timeout_minutes: 10, version: 1, fence: 0 } },
       { upsert: true },
     );
+  // One-time recovery of the latest owned lead. Older records for the same contact
+  // remain history; never reactivate two opportunities or replace a current owner.
+  if (!(await db.one('schema_migrations', { id: '035_commercial_drafts' }))) {
+    const filter = {
+      state: 'CANCELLED',
+      owner_id: { $type: 'string' },
+      stage: { $in: ['CONTRACT_PENDING', 'CLOSED_WITH_DATE', 'CLOSED_WITHOUT_DATE', 'DECLINED'] },
+    };
+    // Stream candidates and commit individually: a large history must not create
+    // one unbounded transaction. Repeating after interruption is safe.
+    const candidates = db
+      .collection('opportunities')
+      .find(filter, { projection: { id: 1, contact_id: 1 } })
+      .batchSize(100);
+    for await (const candidate of candidates) {
+      await db.atomic(async (tx) => {
+        if (await tx.one('opportunities', { contact_id: candidate.contact_id, open: true })) return;
+        const latest = (
+          await tx.many(
+            'opportunities',
+            { contact_id: candidate.contact_id },
+            { created_at: -1, id: -1 },
+            1,
+          )
+        )[0];
+        if (latest?.id !== candidate.id) return;
+        await tx.update(
+          'opportunities',
+          { ...filter, id: candidate.id },
+          {
+            $set: { state: 'CLAIMED', open: true },
+            $inc: { version: 1 },
+          },
+        );
+      });
+    }
+    await db
+      .collection('schema_migrations')
+      .updateOne(
+        { id: '035_commercial_drafts' },
+        { $setOnInsert: { id: '035_commercial_drafts' } },
+        { upsert: true },
+      );
+  }
   const users = await db.many<{ id: string; queue_position: number | null; version: number }>(
     'users',
     { role: 'attendant' },

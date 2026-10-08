@@ -30,6 +30,7 @@ import { InstagramProspects, prospectSchema } from './instagram-prospects.js';
 import { DomainError, requireManager, stages, type User } from './types.js';
 import { personalQueueStatus } from './queue-status.js';
 import { attendantPoolCounts } from './pool-counts.js';
+import { commercialFields } from './commercial-fields.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -469,6 +470,7 @@ export async function buildApp(
   app.patch('/api/v1/opportunities/:id', async (request) => {
     const input = z
       .object({
+        ...commercialFields,
         version: z.number().int().positive(),
         name: shortText.min(2),
         phone: optionalPhone.optional(),
@@ -489,6 +491,8 @@ export async function buildApp(
   app.put('/api/v1/opportunities/:id/sale', async (request) => {
     const input = z
       .object({
+        sale_seller_name: commercialFields.sale_seller_name,
+        pack_quantity: commercialFields.pack_quantity,
         expected_version: z.number().int().positive(),
         name: shortText.min(2),
         phone: optionalPhone.refine((value) => value !== null, 'Informe o telefone do paciente.'),

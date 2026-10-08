@@ -208,18 +208,20 @@ export async function checkDistribution(
       next_action: detail.next_action,
     });
     const openAfterClose = await board({ scope: 'OPEN' });
-    assert.equal(openAfterClose.total, 505);
+    assert.equal(openAfterClose.total, 506);
     const closed = await board({ scope: 'CLOSED' });
-    assert.equal(closed.total, 1);
-    assert.equal(closed.rows[0].id, first.id);
-    assert.equal(closed.rows[0].stage, 'DECLINED');
+    assert.equal(closed.total, 0);
+    const qualified = await board({ scope: 'OPEN', stage: 'DECLINED' });
+    assert.equal(qualified.rows[0].id, first.id);
+    assert.equal(qualified.rows[0].state, 'CLAIMED');
     assert.equal((await board({ scope: 'ALL' })).total, 506);
     assert.equal((await board({ scope: 'ALL', stage: 'DECLINED' })).total, 1);
     assert.equal((await board({ scope: 'ALL', stage: 'NEW_LEAD' })).total, 505);
     assert.equal((await board({ scope: 'ALL', stage: 'CONSULTATION_NOT_SCHEDULED' })).total, 0);
     const recent = await board({ scope: 'ALL', order: 'RECENT' });
     assert.notEqual(recent.rows[0].id, first.id);
-    assert.equal((await board({ scope: 'CLOSED', attendant: users[2].id })).total, 1);
+    assert.equal((await board({ scope: 'OPEN', attendant: users[2].id })).total, 1);
+    assert.equal((await board({ scope: 'CLOSED', state: 'CLAIMED' })).total, 0);
   } finally {
     await app.close();
   }

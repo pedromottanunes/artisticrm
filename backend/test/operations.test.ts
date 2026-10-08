@@ -17,6 +17,12 @@ import { checkEncodedRoutes } from './security-checks.js';
 import { checkAgenda } from './agenda-checks.js';
 import { checkLeadLists } from './lead-list-checks.js';
 import { checkPersistentSessions } from './session-checks.js';
+import { checkCommercialDrafts, checkCommercialMigration } from './commercial-checks.js';
+
+test('SQL: ficha completa, venda separada, permissões e persistência após reinício', () =>
+  checkCommercialDrafts(db, manager, users));
+test('SQL: migração preserva campos e não reabre atendimentos duplicados', () =>
+  checkCommercialMigration(db, manager, users));
 
 let db: Database, ops: Operations, manager: User, users: User[];
 test('sessões persistentes: deploy, renovação, concorrência e revogação (SQL)', () =>
@@ -248,9 +254,13 @@ test('desativação transfere trabalho, revoga sessões e bloqueia comando auten
     code: 'UNAUTHENTICATED',
   });
 });
-test('retorno de encerrado aguarda revisão e não é liberado ao salvar fila', async () => {
+test('retorno de encerrado legado aguarda revisão e não é liberado ao salvar fila', async () => {
   const { id } = await lead();
   await ops.update(manager, id, { ...update, version: 1 });
+  await db.query(
+    "UPDATE opportunities SET state='CANCELLED',reserved_to=NULL,expires_at=NULL WHERE id=$1",
+    [id],
+  );
   const returning = await ops.ingest(
     {
       name: 'Contato Teste',
@@ -311,7 +321,7 @@ test('remarcação preserva antes/depois, cancelamento não pode ser reescrito',
     { code: 'APPOINTMENT_CLOSED' },
   );
 });
-test('agenda protege contra duplicação, conclusão futura e encerramento com avaliação aberta', async () => {
+test('agenda protege contra duplicação e conclusão futura sem bloquear a qualificação', async () => {
   const { id } = await lead();
   const a = await ops.schedule(manager, id, {
     expected_version: 1,
@@ -327,9 +337,8 @@ test('agenda protege contra duplicação, conclusão futura e encerramento com a
       }),
     { code: 'OPEN_APPOINTMENT' },
   );
-  await assert.rejects(() => ops.update(manager, id, { ...update, version: 2 }), {
-    code: 'OPEN_APPOINTMENTS',
-  });
+  await ops.update(manager, id, { ...update, version: 2 });
+  assert.equal((await row(id)).consultation_status, 'SCHEDULED');
   const input = {
     expected_version: 1,
     status: 'attended' as const,

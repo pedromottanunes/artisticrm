@@ -16,7 +16,6 @@ import {
   ApiError,
   consultationStatusLabels,
   contractStatusLabels,
-  isClosedStage,
   stages,
   type Detail,
   type Snapshot,
@@ -200,6 +199,9 @@ export function LeadDetail({
   );
   const [confirmation, setConfirmation] = useState('');
   const [copied, setCopied] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [confirmSale, setConfirmSale] = useState(false);
+  const [hasPack, setHasPack] = useState(detail.has_pack === true);
   const instagramUsername = detail.instagram?.replace(/^@+/, '').trim();
   const scheduledAppointment = detail.appointments.find(
     (appointment) => appointment.status === 'scheduled',
@@ -252,12 +254,36 @@ export function LeadDetail({
   };
   const formRef = useRef<HTMLFormElement>(null);
   const formId = useId();
+  useEffect(() => {
+    setHasPack(detail.has_pack === true);
+    setConfirmSale(false);
+  }, [detail.id, detail.version, detail.has_pack]);
+  const commercialDraft = (form: FormData) => ({
+    sale_seller_name: String(form.get('sale_seller_name') ?? '').trim(),
+    consultant: String(form.get('consultant') ?? '').trim(),
+    total_value_cents: String(form.get('total_value') ?? '').trim()
+      ? currencyToCents(String(form.get('total_value')))
+      : null,
+    down_payment_cents: String(form.get('down_payment') ?? '').trim()
+      ? currencyToCents(String(form.get('down_payment')))
+      : null,
+    hair_grade_classification: String(form.get('hair_grade_classification') ?? '').trim(),
+    has_pack: form.get('has_pack') === 'true',
+    pack_quantity:
+      form.get('has_pack') !== 'true'
+        ? 0
+        : String(form.get('pack_quantity') ?? '').trim()
+          ? Number(form.get('pack_quantity'))
+          : null,
+    contract_status: String(form.get('contract_status') ?? 'awaiting'),
+  });
   const save = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (saving) return;
     setSaving(true);
     setError('');
-    const fields = Object.fromEntries(new FormData(e.currentTarget));
+    const form = new FormData(e.currentTarget);
+    const fields = Object.fromEntries(form);
     try {
       const phone = normalizeLeadPhone(String(fields.phone ?? ''));
       if (phone === null)
@@ -265,6 +291,7 @@ export function LeadDetail({
       await api(`/opportunities/${detail.id}`, {
         method: 'PATCH',
         body: JSON.stringify({
+          ...commercialDraft(form),
           name: fields.name,
           phone,
           residence_city: fields.residence_city,
@@ -274,12 +301,12 @@ export function LeadDetail({
           stage: fields.stage,
           next_action: fields.next_action,
           attendance: fields.attendance || undefined,
-          procedure_date:
-            selectedStage === 'CLOSED_WITH_DATE' ? String(fields.procedure_date) : null,
+          procedure_date: fields.procedure_date || null,
           version: detail.version,
         }),
       });
       await onSaved();
+      setSaved(true);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -297,6 +324,7 @@ export function LeadDetail({
       if (!phone)
         throw new Error('Informe um telefone com DDD. Para outro país, use + e o código do país.');
       const payload = JSON.stringify({
+        ...commercialDraft(form),
         expected_version: detail.version,
         name: form.get('name'),
         phone,
@@ -322,6 +350,7 @@ export function LeadDetail({
         body: payload,
       });
       saleCommand.current = null;
+      setConfirmSale(false);
       await onSaved();
     } catch (caught) {
       if (caught instanceof ApiError && caught.status < 500) saleCommand.current = null;
@@ -415,7 +444,9 @@ export function LeadDetail({
           }}
           onConversation={onWhatsApp}
           onCopy={() => void copySale()}
-          onSale={() => void recordSale()}
+          onSale={() => {
+            if (formRef.current?.reportValidity()) setConfirmSale(true);
+          }}
         />
       }
     >
@@ -432,7 +463,7 @@ export function LeadDetail({
       <div className="detail-tabs">
         {[
           { id: 'cadastro', label: 'Cadastro comercial', step: 1 },
-          ...(detail.can_edit && !isClosedStage(detail.stage)
+          ...(detail.can_edit && detail.state !== 'CANCELLED'
             ? [{ id: 'agendar', label: 'Agendar consulta', step: 2 }]
             : []),
           ...(detail.can_edit
@@ -478,7 +509,7 @@ export function LeadDetail({
                 Se houver outro atendimento do mesmo contato, ele será preservado. Esta ação não
                 apaga conversas no WhatsApp.
               </p>
-              <p>Para apenas encerrar o atendimento e manter o histórico, não use a exclusão.</p>
+              <p>Para manter o histórico, altere a qualificação na ficha em vez de excluir.</p>
             </div>
             <label className="full">
               Digite EXCLUIR para confirmar
@@ -523,7 +554,13 @@ export function LeadDetail({
         </form>
       )}
       {tab === 'cadastro' && (
-        <form id={formId} ref={formRef} onSubmit={save} key={detail.id + ':' + detail.version}>
+        <form
+          id={formId}
+          ref={formRef}
+          onSubmit={save}
+          onChange={() => setSaved(false)}
+          key={detail.id + ':' + detail.version}
+        >
           <div className="lead-form-scroll">
             <fieldset className="modal-body commercial-form" disabled={!detail.can_edit || saving}>
               <section className="commercial-panel commercial-lead-data">
@@ -578,14 +615,7 @@ export function LeadDetail({
                       onChange={(event) => setSelectedStage(event.target.value)}
                     >
                       {Object.entries(stages).map(([key, label]) => (
-                        <option
-                          disabled={
-                            (detail.stage === 'DECLINED' && key !== 'DECLINED') ||
-                            (isClosedStage(detail.stage) && !isClosedStage(key))
-                          }
-                          key={key}
-                          value={key}
-                        >
+                        <option key={key} value={key}>
                           {label}
                         </option>
                       ))}
@@ -636,9 +666,7 @@ export function LeadDetail({
                 <div className="commercial-section-heading">
                   <div>
                     <span>FECHAMENTO</span>
-                    <h3>
-                      {detail.sale_completed_at ? 'Dados da venda' : 'Registrar venda concluída'}
-                    </h3>
+                    <h3>{detail.sale_completed_at ? 'Dados da venda' : 'Dados comerciais'}</h3>
                   </div>
                   {detail.sale_completed_at ? <strong>Venda registrada</strong> : null}
                 </div>
@@ -646,8 +674,10 @@ export function LeadDetail({
                   <label>
                     Quem fez a venda
                     <input
-                      value={detail.sale_seller_name || 'Preenchido automaticamente ao registrar'}
-                      readOnly
+                      name="sale_seller_name"
+                      defaultValue={detail.sale_seller_name}
+                      maxLength={160}
+                      placeholder="Nome de quem fez a venda"
                     />
                   </label>
                   <label>
@@ -694,11 +724,27 @@ export function LeadDetail({
                     Teve pack?
                     <select
                       name="has_pack"
-                      defaultValue={detail.has_pack === true ? 'true' : 'false'}
+                      value={hasPack ? 'true' : 'false'}
+                      onChange={(event) => setHasPack(event.target.value === 'true')}
                     >
                       <option value="false">Não</option>
                       <option value="true">Sim</option>
                     </select>
+                  </label>
+                  <label>
+                    Quantidade de packs
+                    <input
+                      key={`${hasPack}:${detail.version}`}
+                      name="pack_quantity"
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      max={10000}
+                      step={1}
+                      disabled={!hasPack}
+                      defaultValue={hasPack ? (detail.pack_quantity ?? '') : 0}
+                      placeholder="Quantidade"
+                    />
                   </label>
                   <label>
                     Data da cirurgia
@@ -737,65 +783,99 @@ export function LeadDetail({
               {error}
             </p>
           )}
-          <div className="modal-actions commercial-actions">
-            {!isManager && detail.state === 'CLAIMED' && detail.can_edit && (
-              <button
-                className="button outline lead-secondary-action"
-                type="button"
-                disabled={!connected}
-                onClick={onWhatsApp}
-              >
-                <MessageCircle size={16} />
-                {detail.channel === 'instagram' ? 'Abrir conversa' : 'WhatsApp'}
-              </button>
-            )}
-            {detail.can_edit ? (
-              <div className="commercial-action-group">
+          {!confirmSale && (
+            <div className="modal-actions commercial-actions">
+              {!isManager && detail.state === 'CLAIMED' && detail.can_edit && (
                 <button
                   className="button outline lead-secondary-action"
                   type="button"
-                  disabled={!detail.sale_completed_at || saving}
-                  onClick={() => void copySale()}
+                  disabled={!connected}
+                  onClick={onWhatsApp}
                 >
-                  <Copy size={16} />
-                  {copied ? 'Copiado!' : 'Copiar para WhatsApp'}
+                  <MessageCircle size={16} />
+                  {detail.channel === 'instagram' ? 'Abrir conversa' : 'WhatsApp'}
                 </button>
-                <button
-                  className="button outline lead-primary-save"
-                  disabled={!connected || saving}
-                  formNoValidate
-                >
-                  <Save size={16} />
-                  {saving ? 'Salvando…' : 'Salvar cadastro'}
-                </button>
-                <button
-                  className="button gold lead-secondary-action"
-                  type="button"
-                  disabled={!connected || saving}
-                  onClick={() => void recordSale()}
-                >
-                  <Save size={16} />
-                  {saving
-                    ? 'Salvando…'
-                    : detail.sale_completed_at
-                      ? 'Atualizar venda'
-                      : 'Registrar venda'}
-                </button>
-              </div>
-            ) : (
-              !isManager && (
-                <button
-                  type="button"
-                  className="button gold"
-                  disabled={!connected || busy}
-                  onClick={onClaim}
-                >
-                  {busy ? 'Confirmando…' : 'Assumir lead'}
-                  <Check size={16} />
-                </button>
-              )
-            )}
-          </div>
+              )}
+              {detail.can_edit ? (
+                <div className="commercial-action-group">
+                  <button
+                    className="button outline lead-secondary-action"
+                    type="button"
+                    disabled={!detail.sale_completed_at || saving}
+                    onClick={() => void copySale()}
+                  >
+                    <Copy size={16} />
+                    {copied ? 'Copiado!' : 'Copiar para WhatsApp'}
+                  </button>
+                  <button
+                    className="button outline lead-primary-save"
+                    disabled={!connected || saving}
+                    formNoValidate
+                  >
+                    <Save size={16} />
+                    {saving ? 'Salvando…' : 'Salvar cadastro'}
+                  </button>
+                  <button
+                    className="button gold lead-secondary-action"
+                    type="button"
+                    disabled={!connected || saving}
+                    onClick={() => {
+                      if (formRef.current?.reportValidity()) setConfirmSale(true);
+                    }}
+                  >
+                    <Save size={16} />
+                    {saving
+                      ? 'Salvando…'
+                      : detail.sale_completed_at
+                        ? 'Atualizar venda'
+                        : 'Registrar venda'}
+                  </button>
+                </div>
+              ) : (
+                !isManager && (
+                  <button
+                    type="button"
+                    className="button gold"
+                    disabled={!connected || busy}
+                    onClick={onClaim}
+                  >
+                    {busy ? 'Confirmando…' : 'Assumir lead'}
+                    <Check size={16} />
+                  </button>
+                )
+              )}
+            </div>
+          )}
+          {saved && (
+            <p className="lead-save-status" role="status">
+              Cadastro salvo.
+            </p>
+          )}
+          {confirmSale && (
+            <div className="sale-confirmation" role="group" aria-label="Confirmação da venda">
+              <p>
+                {detail.sale_completed_at
+                  ? 'Confirmar atualização da venda?'
+                  : 'Confirmar o registro desta venda?'}
+              </p>
+              <button
+                type="button"
+                className="button outline"
+                disabled={saving}
+                onClick={() => setConfirmSale(false)}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="button gold"
+                disabled={saving || !connected}
+                onClick={() => void recordSale()}
+              >
+                {saving ? 'Registrando…' : 'Confirmar venda'}
+              </button>
+            </div>
+          )}
         </form>
       )}
       {tab === 'agendar' && (
@@ -804,8 +884,8 @@ export function LeadDetail({
             <div className="inline-info full">
               <CalendarDays size={20} />
               <span>
-                A consulta será registrada na Agenda e o lead passará automaticamente para Em
-                follow-up.
+                A consulta será registrada na Agenda. Leads novos ou não agendados passam para Em
+                follow-up; as demais qualificações são mantidas.
               </span>
             </div>
             <div className="schedule-fields full">
@@ -1017,6 +1097,7 @@ function saleText(detail: Detail) {
     `Grau e classificação A: ${detail.hair_grade_classification || 'A definir'}`,
     `De onde veio: ${saleOrigin(detail)}`,
     `Se teve pack ou não: ${detail.has_pack ? 'sim' : 'não'}`,
+    `Quantidade de packs: ${detail.pack_quantity ?? 'A definir'}`,
     `Cidade q opera: ${detail.unit || 'A definir'}`,
     `Data da cirurgia: ${dateOnly(detail.procedure_date)}`,
     `Assinou contrato: ${detail.contract_status ? contractStatusLabels[detail.contract_status] : 'Aguardando'}`,

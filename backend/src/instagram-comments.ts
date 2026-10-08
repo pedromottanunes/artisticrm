@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import type { Database, Sql } from './db.js';
 import { MongoTx, type MongoStore } from './mongo-store.js';
-import { DomainError, isClosedStage, type User } from './types.js';
+import { DomainError, type User } from './types.js';
 import type { InstagramConfig, InstagramFetch } from './instagram.js';
 import { enqueuePushEvent, putPush } from './push-store.js';
 import { wasDeleted } from './lead-deletion.js';
@@ -588,7 +588,7 @@ export class InstagramComments {
             ).rows[0];
       let lead = existing;
       if (lead) {
-        if (isClosedStage(lead.stage) || lead.state === 'CANCELLED')
+        if (lead.state === 'CANCELLED')
           throw new DomainError(
             'LEAD_CLOSED',
             'Este contato já tem um atendimento encerrado. Solicite a revisão da gestão.',

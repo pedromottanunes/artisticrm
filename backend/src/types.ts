@@ -39,6 +39,7 @@ export interface Opportunity {
   down_payment_cents: number | null;
   hair_grade_classification: string;
   has_pack: boolean | null;
+  pack_quantity?: number | null;
   contract_status: ContractStatus | null;
   state: string;
   reserved_to: string | null;
@@ -63,6 +64,8 @@ export type AttendanceStatus = 'ATTENDED' | 'NO_SHOW';
 export const contractStatuses = ['awaiting', 'signed', 'not_signed'] as const;
 export type ContractStatus = (typeof contractStatuses)[number];
 export interface SaleInput {
+  sale_seller_name?: string;
+  pack_quantity?: number | null;
   expected_version: number;
   name: string;
   phone: string;

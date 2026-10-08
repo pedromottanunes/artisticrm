@@ -70,6 +70,7 @@ export interface Lead {
   down_payment_cents: number | null;
   hair_grade_classification: string;
   has_pack: boolean | null;
+  pack_quantity?: number | null;
   contract_status: ContractStatus | null;
   state: string;
   reserved_to: string | null;

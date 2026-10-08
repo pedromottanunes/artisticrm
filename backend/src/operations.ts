@@ -4,12 +4,11 @@ import { CRM } from './crm.js';
 import { deleteLeadData, type DeleteLeadInput } from './lead-deletion.js';
 import type { Sql } from './db.js';
 import { lockActor } from './access.js';
+import { commercialValues } from './commercial-fields.js';
 import { transferProspects } from './instagram-prospects.js';
 import { hashPassword, verifyPassword } from './auth.js';
 import {
-  closedStages,
   DomainError,
-  isClosedStage,
   isValidDateOnly,
   requireManager,
   type SaleInput,
@@ -17,8 +16,6 @@ import {
   type Opportunity,
 } from './types.js';
 import { compactQueuePositions } from './weighted-queue.js';
-
-const closedStageSql = closedStages.map((stage) => `'${stage}'`).join(',');
 
 export interface AppointmentRow {
   id: string;
@@ -142,7 +139,7 @@ export class Operations extends CRM {
         if (!input.active) {
           const owned = (
             await tx.query<Opportunity>(
-              `SELECT * FROM opportunities WHERE stage NOT IN (${closedStageSql})
+              `SELECT * FROM opportunities WHERE state<>'CANCELLED'
             AND (owner_id=$1 OR (state='RESERVED' AND reserved_to=$1)) ORDER BY id FOR UPDATE`,
               [id],
             )
@@ -304,7 +301,7 @@ export class Operations extends CRM {
         if (!row) throw new DomainError('NOT_FOUND', 'Lead não encontrado.', 404);
         if (row.version !== input.expected_version)
           throw new DomainError('VERSION_CONFLICT', 'O lead mudou. Reabra a ficha.');
-        if (isClosedStage(row.stage))
+        if (row.state === 'CANCELLED')
           throw new DomainError(
             'CLOSED',
             'Oportunidade encerrada: crie uma nova entrada para revisão.',
@@ -459,15 +456,16 @@ export class Operations extends CRM {
         );
         const now = await this.now(tx);
         const stage = input.procedure_date ? 'CLOSED_WITH_DATE' : 'CLOSED_WITHOUT_DATE';
+        const commercial = commercialValues(row, input);
         await tx.query(
           `UPDATE opportunities SET
-             unit=$2,procedure_date=$3,stage=$4,state='CANCELLED',reserved_to=NULL,expires_at=NULL,
+             unit=$2,procedure_date=$3,stage=$4,
              sale_completed_at=COALESCE(sale_completed_at,$5),
-             sale_seller_name=CASE WHEN sale_completed_at IS NULL THEN $6 ELSE sale_seller_name END,
+             sale_seller_name=$6,
              consultant=$7,total_value_cents=$8,down_payment_cents=$9,
              hair_grade_classification=$10,has_pack=$11,contract_status=$12,
              next_action=COALESCE($13,next_action),
-             consultation_status=COALESCE($14::text,consultation_status),version=version+1
+             consultation_status=COALESCE($14::text,consultation_status),pack_quantity=$15,version=version+1
            WHERE id=$1`,
           [
             id,
@@ -475,15 +473,16 @@ export class Operations extends CRM {
             input.procedure_date,
             stage,
             now,
-            actor.name,
+            input.sale_seller_name ?? (row.sale_seller_name || actor.name),
             input.consultant,
             input.total_value_cents,
             input.down_payment_cents,
             input.hair_grade_classification,
-            input.has_pack,
+            commercial.has_pack,
             input.contract_status,
             input.next_action ?? null,
             input.attendance ?? null,
+            commercial.pack_quantity,
           ],
         );
         await this.audit(
@@ -495,7 +494,7 @@ export class Operations extends CRM {
             ? `Dados da venda atualizados por ${actor.name}.`
             : `Venda concluída por ${actor.name}.`,
           {
-            seller: row.sale_seller_name || actor.name,
+            seller: input.sale_seller_name ?? (row.sale_seller_name || actor.name),
             consultant: input.consultant,
             total_value_cents: input.total_value_cents,
             down_payment_cents: input.down_payment_cents,
