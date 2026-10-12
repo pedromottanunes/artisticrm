@@ -238,7 +238,7 @@ export class PushService {
       };
     }
     const lead = await pushOpportunity(tx, event.data.opportunityId);
-    if (!lead) return null;
+    if (!lead || lead.non_commercial_reason) return null;
     const kind = String(event.data.kind);
     const received = kind === 'message.received' || kind === 'comment.received.owned';
     const movement = [

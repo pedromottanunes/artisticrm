@@ -75,7 +75,10 @@ export function LeadMarketing({ detail, isManager }: { detail: Detail; isManager
       });
     return () => controller.abort();
   }, [expanded, isManager, detail.id, detail.version]);
-  if (!detail.can_edit || (detail.channel !== 'instagram' && !detail.attributions.length))
+  if (
+    (!detail.can_edit && !detail.non_commercial_reason) ||
+    (detail.channel !== 'instagram' && !detail.attributions.length)
+  )
     return null;
   const initialId = detail.acquisition?.kind === 'paid' ? detail.acquisition.ad_id : null;
   const ids = [

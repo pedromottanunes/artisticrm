@@ -52,6 +52,7 @@ export function marketingPeriod(from: string, to: string, timeZone: string, now:
 interface Counts {
   ad_id: string | null;
   leads: number;
+  non_commercial: number;
   scheduled: number;
   attended: number;
   no_show: number;
@@ -81,8 +82,10 @@ async function cohort(
 ): Promise<Counts[]> {
   const { db } = store;
   if (db.kind === 'mongo') {
+    const commercial = { $eq: [{ $ifNull: ['$non_commercial_reason', null] }, null] };
     const sale = {
       $and: [
+        commercial,
         { $in: ['$stage', ['CLOSED_WITH_DATE', 'CLOSED_WITHOUT_DATE']] },
         { $ne: [{ $ifNull: ['$sale_completed_at', null] }, null] },
       ],
@@ -130,10 +133,31 @@ async function cohort(
           {
             $group: {
               _id: { $cond: [{ $eq: ['$acquisition.kind', 'paid'] }, '$acquisition.ad_id', null] },
-              leads: { $sum: 1 },
-              scheduled: { $sum: { $cond: [{ $gt: [{ $size: '$bookings' }, 0] }, 1, 0] } },
-              attended: { $sum: { $cond: [{ $eq: ['$consultation_status', 'ATTENDED'] }, 1, 0] } },
-              no_show: { $sum: { $cond: [{ $eq: ['$consultation_status', 'NO_SHOW'] }, 1, 0] } },
+              leads: { $sum: { $cond: [commercial, 1, 0] } },
+              non_commercial: { $sum: { $cond: [commercial, 0, 1] } },
+              scheduled: {
+                $sum: {
+                  $cond: [{ $and: [commercial, { $gt: [{ $size: '$bookings' }, 0] }] }, 1, 0],
+                },
+              },
+              attended: {
+                $sum: {
+                  $cond: [
+                    { $and: [commercial, { $eq: ['$consultation_status', 'ATTENDED'] }] },
+                    1,
+                    0,
+                  ],
+                },
+              },
+              no_show: {
+                $sum: {
+                  $cond: [
+                    { $and: [commercial, { $eq: ['$consultation_status', 'NO_SHOW'] }] },
+                    1,
+                    0,
+                  ],
+                },
+              },
               sales: { $sum: { $cond: [sale, 1, 0] } },
               signed: {
                 $sum: { $cond: [{ $and: [sale, { $eq: ['$contract_status', 'signed'] }] }, 1, 0] },
@@ -160,6 +184,7 @@ async function cohort(
       ...Object.fromEntries(
         [
           'leads',
+          'non_commercial',
           'scheduled',
           'attended',
           'no_show',
@@ -175,14 +200,15 @@ async function cohort(
     await db.query<Record<string, unknown>>(
       `SELECT
       CASE WHEN acquisition->>'kind'='paid' THEN acquisition->>'ad_id' ELSE NULL END AS ad_id,
-      COUNT(*) AS leads,
-      COUNT(*) FILTER(WHERE EXISTS(SELECT 1 FROM appointments a WHERE a.opportunity_id=o.id AND a.status IN ('scheduled','attended','no_show'))) AS scheduled,
-      COUNT(*) FILTER(WHERE consultation_status='ATTENDED') AS attended,
-      COUNT(*) FILTER(WHERE consultation_status='NO_SHOW') AS no_show,
-      COUNT(*) FILTER(WHERE stage IN ('CLOSED_WITH_DATE','CLOSED_WITHOUT_DATE') AND sale_completed_at IS NOT NULL) AS sales,
-      COUNT(*) FILTER(WHERE stage IN ('CLOSED_WITH_DATE','CLOSED_WITHOUT_DATE') AND sale_completed_at IS NOT NULL AND contract_status='signed') AS signed,
-      COALESCE(SUM(total_value_cents) FILTER(WHERE stage IN ('CLOSED_WITH_DATE','CLOSED_WITHOUT_DATE') AND sale_completed_at IS NOT NULL),0) AS value_cents,
-      COUNT(*) FILTER(WHERE stage IN ('CLOSED_WITH_DATE','CLOSED_WITHOUT_DATE') AND sale_completed_at IS NOT NULL AND total_value_cents IS NULL) AS missing_value
+      COUNT(*) FILTER(WHERE non_commercial_reason IS NULL) AS leads,
+      COUNT(*) FILTER(WHERE non_commercial_reason IS NOT NULL) AS non_commercial,
+      COUNT(*) FILTER(WHERE non_commercial_reason IS NULL AND EXISTS(SELECT 1 FROM appointments a WHERE a.opportunity_id=o.id AND a.status IN ('scheduled','attended','no_show'))) AS scheduled,
+      COUNT(*) FILTER(WHERE non_commercial_reason IS NULL AND consultation_status='ATTENDED') AS attended,
+      COUNT(*) FILTER(WHERE non_commercial_reason IS NULL AND consultation_status='NO_SHOW') AS no_show,
+      COUNT(*) FILTER(WHERE non_commercial_reason IS NULL AND stage IN ('CLOSED_WITH_DATE','CLOSED_WITHOUT_DATE') AND sale_completed_at IS NOT NULL) AS sales,
+      COUNT(*) FILTER(WHERE non_commercial_reason IS NULL AND stage IN ('CLOSED_WITH_DATE','CLOSED_WITHOUT_DATE') AND sale_completed_at IS NOT NULL AND contract_status='signed') AS signed,
+      COALESCE(SUM(total_value_cents) FILTER(WHERE non_commercial_reason IS NULL AND stage IN ('CLOSED_WITH_DATE','CLOSED_WITHOUT_DATE') AND sale_completed_at IS NOT NULL),0) AS value_cents,
+      COUNT(*) FILTER(WHERE non_commercial_reason IS NULL AND stage IN ('CLOSED_WITH_DATE','CLOSED_WITHOUT_DATE') AND sale_completed_at IS NOT NULL AND total_value_cents IS NULL) AS missing_value
       FROM opportunities o WHERE channel='instagram'
       AND ((acquisition->>'occurred_at'>=$1::text AND acquisition->>'occurred_at'<$2::text)
         OR (acquisition IS NULL AND created_at>=$1::timestamptz AND created_at<$2::timestamptz))
@@ -196,6 +222,7 @@ async function cohort(
     ...Object.fromEntries(
       [
         'leads',
+        'non_commercial',
         'scheduled',
         'attended',
         'no_show',
@@ -317,6 +344,7 @@ export async function marketingReport(
         clicks: cost?.clicks ?? 0,
         impressions: cost?.impressions ?? 0,
         attributed_leads: count?.leads ?? 0,
+        non_commercial_leads: count?.non_commercial ?? 0,
         scheduled: count?.scheduled ?? 0,
         attended: count?.attended ?? 0,
         no_show: count?.no_show ?? 0,
@@ -348,6 +376,7 @@ export async function marketingReport(
       clicks: number;
       reach: null;
       attributed_leads: number;
+      non_commercial_leads: number;
       cpl: number | null;
       eligible: boolean;
     }
@@ -363,6 +392,7 @@ export async function marketingReport(
       clicks: 0,
       reach: null,
       attributed_leads: 0,
+      non_commercial_leads: 0,
       cpl: null,
       eligible: true,
     };
@@ -370,6 +400,7 @@ export async function marketingReport(
     campaign.impressions += row.impressions;
     campaign.clicks += row.clicks;
     campaign.attributed_leads += row.attributed_leads;
+    campaign.non_commercial_leads += row.non_commercial_leads;
     campaign.eligible &&= row.scope === 'instagram_direct';
     campaigns.set(key, campaign);
   }
@@ -383,6 +414,10 @@ export async function marketingReport(
   );
   const eligibleLeads = eligible.reduce((sum, row) => sum + row.attributed_leads, 0);
   const paid = counts.filter((row) => row.ad_id).reduce((sum, row) => sum + row.leads, 0);
+  const paidNonCommercial = counts
+    .filter((row) => row.ad_id)
+    .reduce((sum, row) => sum + row.non_commercial, 0);
+  const nonCommercial = counts.reduce((sum, row) => sum + row.non_commercial, 0);
   const matched = rows
     .filter((row) => catalog.has(row.ad_id) || costs.has(row.ad_id))
     .reduce((sum, row) => sum + row.attributed_leads, 0);
@@ -401,10 +436,14 @@ export async function marketingReport(
     coverage_complete: complete,
     covered_days: covered,
     instagram_leads: counts.reduce((sum, row) => sum + row.leads, 0),
+    instagram_entries: counts.reduce((sum, row) => sum + row.leads + row.non_commercial, 0),
+    non_commercial_leads: nonCommercial,
     identified_paid_leads: paid,
+    identified_paid_non_commercial_leads: paidNonCommercial,
     matched_attributed_leads: matched,
     unmatched_attributed_leads: Math.max(0, paid - matched),
     unattributed_or_organic_leads: conversions.get(null)?.leads ?? 0,
+    unattributed_or_organic_non_commercial_leads: conversions.get(null)?.non_commercial ?? 0,
     cpl:
       complete && eligibleLeads && currencies.size <= 1
         ? eligibleMicros / 1_000_000 / eligibleLeads
@@ -502,7 +541,12 @@ export async function marketingLeads(
     store.db.kind === 'mongo'
       ? await store.db
           .collection('opportunities')
-          .aggregate<{ id: string; name: string; owner_name: string | null }>(
+          .aggregate<{
+            id: string;
+            name: string;
+            owner_name: string | null;
+            non_commercial_reason: string | null;
+          }>(
             [
               {
                 $match: {
@@ -540,6 +584,7 @@ export async function marketingLeads(
                   id: 1,
                   name: { $ifNull: [{ $arrayElemAt: ['$contact.name', 0] }, 'Lead'] },
                   owner_name: { $ifNull: [{ $arrayElemAt: ['$owner.name', 0] }, null] },
+                  non_commercial_reason: { $ifNull: ['$non_commercial_reason', null] },
                 },
               },
             ],
@@ -547,8 +592,13 @@ export async function marketingLeads(
           )
           .toArray()
       : (
-          await store.db.query<{ id: string; name: string; owner_name: string | null }>(
-            `SELECT o.id,c.name,u.name AS owner_name
+          await store.db.query<{
+            id: string;
+            name: string;
+            owner_name: string | null;
+            non_commercial_reason: string | null;
+          }>(
+            `SELECT o.id,c.name,u.name AS owner_name,o.non_commercial_reason
       FROM opportunities o JOIN contacts c ON c.id=o.contact_id LEFT JOIN users u ON u.id=o.owner_id
       WHERE o.channel='instagram' AND o.acquisition->>'kind'='paid' AND o.acquisition->>'ad_id'=$1
       AND o.acquisition->>'occurred_at'>=$2 AND o.acquisition->>'occurred_at'<$3

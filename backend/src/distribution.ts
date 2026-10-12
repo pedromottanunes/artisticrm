@@ -1,3 +1,4 @@
+import { compensationOrder } from './lead-quality.js';
 import { z } from 'zod';
 import type { Document } from 'mongodb';
 import type { Database } from './db.js';
@@ -20,6 +21,8 @@ export const distributionQuery = z
   .strict();
 const states = ['RESERVED', 'POOL', 'CLAIMED', 'PENDING'];
 const kinds = [
+  'lead.non_commercial',
+  'lead.restored',
   'lead.created',
   'reservation.created',
   'reservation.expired',
@@ -91,6 +94,7 @@ function attendantSummaries(
   settings: { last_position: number },
   team: { user_id: string; state: string; count: number }[],
   expired: { user_id: string; count: number }[],
+  priority: string[] = [],
 ) {
   const eligible = users.filter(
     (user) =>
@@ -99,8 +103,12 @@ function attendantSummaries(
       user.queue_enabled &&
       user.queue_position !== null,
   );
-  const upcoming = previewWeightedOrder(eligible, settings.last_position);
-  const ranks = new Map(upcoming.map((id, index) => [id, index + 1]));
+  const normal = previewWeightedOrder(eligible, settings.last_position);
+  const upcoming = [...priority, ...normal];
+  const ranks = new Map<string, number>();
+  upcoming.forEach((id, index) => {
+    if (!ranks.has(id)) ranks.set(id, index + 1);
+  });
   const metric = (userId: string, state: string) =>
     team.find((item) => item.user_id === userId && item.state === state)?.count ?? 0;
   return users
@@ -169,13 +177,14 @@ async function readDistributionBoard(
         timeout_minutes: configuration.timeout_minutes,
         last_position: configuration.last_position,
       };
-      const open = { state: { $in: states } };
+      const open = { state: { $in: states }, non_commercial_reason: null };
       const filter: Document =
         query.scope === 'OPEN'
           ? { ...open }
           : query.scope === 'CLOSED'
             ? { state: 'CANCELLED' }
             : {};
+      filter.non_commercial_reason = null;
       if (query.stage !== 'ALL') filter.stage = query.stage;
       if (query.state !== 'ALL') {
         if (filter.state !== undefined) {
@@ -240,6 +249,15 @@ async function readDistributionBoard(
             'details.reserved_to': { $type: 'string' },
           },
         },
+        {
+          $lookup: {
+            from: 'opportunities',
+            localField: 'opportunity_id',
+            foreignField: 'id',
+            as: 'lead',
+          },
+        },
+        { $match: { 'lead.non_commercial_reason': null } },
         { $group: { _id: '$details.reserved_to', count: { $sum: 1 } } },
       ]);
       const matched = await aggregate('opportunities', [...join, { $count: 'count' }]);
@@ -343,6 +361,12 @@ async function readDistributionBoard(
           settings,
           normalizedTeam,
           normalizedExpired,
+          await compensationOrder(
+            tx,
+            (users as unknown as BoardUser[]).filter(
+              (u) => u.active && u.queue_enabled && u.role === 'attendant',
+            ),
+          ),
         ),
         settings,
         rows,
@@ -370,9 +394,9 @@ async function readDistributionBoard(
         'SELECT version,timeout_minutes,last_position FROM distribution_settings WHERE id=1',
       )
     ).rows[0];
-    const open = `o.state IN ('RESERVED','POOL','CLAIMED','PENDING')`;
+    const open = `o.non_commercial_reason IS NULL AND o.state IN ('RESERVED','POOL','CLAIMED','PENDING')`;
     const selectedScope = `($4='ALL' OR ($4='OPEN' AND ${open}) OR ($4='CLOSED' AND o.state='CANCELLED'))`;
-    const where = `${selectedScope} AND ($1='ALL' OR o.state=$1)
+    const where = `o.non_commercial_reason IS NULL AND ${selectedScope} AND ($1='ALL' OR o.state=$1)
       AND ($2='' OR (o.state='RESERVED' AND o.reserved_to::text=$2) OR (o.state='CLAIMED' AND o.owner_id::text=$2) OR ($4<>'OPEN' AND o.owner_id::text=$2))
       AND ($3='' OR strpos(lower(c.name),lower($3))>0 OR strpos(c.phone,$3)>0)
       AND ($5='' OR o.source=$5)
@@ -403,6 +427,7 @@ async function readDistributionBoard(
         FROM audit_events
         WHERE kind='reservation.expired' AND created_at >= $1
           AND details->>'reserved_to' IS NOT NULL
+          AND NOT EXISTS(SELECT 1 FROM opportunities o WHERE o.id=audit_events.opportunity_id AND o.non_commercial_reason IS NOT NULL)
         GROUP BY 1`,
         [metricsSince],
       )
@@ -444,7 +469,16 @@ async function readDistributionBoard(
       .map((item) => ({ ...item, count: Number(item.count) }));
     return {
       users: users.map(publicBoardUser),
-      attendants: attendantSummaries(users, settings, normalizedTeam, normalizedExpired),
+      attendants: attendantSummaries(
+        users,
+        settings,
+        normalizedTeam,
+        normalizedExpired,
+        await compensationOrder(
+          tx,
+          users.filter((u) => u.active && u.queue_enabled && u.role === 'attendant'),
+        ),
+      ),
       settings,
       rows,
       total,

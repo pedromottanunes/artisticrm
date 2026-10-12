@@ -1,3 +1,4 @@
+import { nextCompensation, useCompensation, assertCommercial } from './lead-quality.js';
 import { randomUUID, createHash } from 'node:crypto';
 import type { Database, Sql } from './db.js';
 import {
@@ -196,6 +197,8 @@ export class CRM {
         ORDER BY id FOR UPDATE`,
       )
     ).rows;
+    const compensation = await nextCompensation(tx, users);
+    if (compensation) return compensation;
     const selection = selectWeightedParticipant(users, lastPosition);
     if (!selection) return;
     for (const [id, credit] of selection.credits)
@@ -381,7 +384,14 @@ export class CRM {
           [id, assignedOwner, now],
         );
       await finishProspect(tx, prospect, input.identity, id, prospectOwner ?? null, now);
-      if (attendant)
+      if (attendant) {
+        await tx.query('UPDATE opportunities SET reservation_origin=$2 WHERE id=$1', [
+          id,
+          selection?.compensationId ? 'compensation' : 'rotation',
+        ]);
+        await useCompensation(tx, selection?.compensationId, id, now);
+      }
+      if (attendant && !selection?.compensationId)
         await tx.query('UPDATE distribution_settings SET last_position=$1 WHERE id=1', [
           attendant.queue_position,
         ]);
@@ -528,8 +538,8 @@ export class CRM {
           { reserved_to: row.reserved_to },
         );
       await tx.query(
-        `UPDATE opportunities SET state='CLAIMED',owner_id=$2,claimed_at=$3,version=version+1 WHERE id=$1`,
-        [id, user.id, now],
+        `UPDATE opportunities SET state='CLAIMED',owner_id=$2,claimed_at=$3,claim_mode=$4,accepted_by=$2,version=version+1 WHERE id=$1`,
+        [id, user.id, now, mode],
       );
       await this.audit(
         tx,
@@ -584,7 +594,7 @@ export class CRM {
     const rows = (
       await this.db.query<Opportunity>(
         `${selectOpportunity}
-      WHERE ($1::boolean OR o.owner_id=$2 OR (o.state='RESERVED' AND o.reserved_to=$2) OR (o.state='POOL' AND $3::boolean))
+      WHERE o.non_commercial_reason IS NULL AND ($1::boolean OR o.owner_id=$2 OR (o.state='RESERVED' AND o.reserved_to=$2) OR (o.state='POOL' AND $3::boolean))
       ORDER BY o.created_at DESC LIMIT 500`,
         [user.role === 'manager', user.id, user.role === 'attendant' && user.active],
       )
@@ -658,7 +668,7 @@ export class CRM {
       appointments,
       attributions: attributions.slice(0, 20),
       attributions_has_more: attributions.length > 20,
-      can_edit: canEdit,
+      can_edit: canEdit && !row.non_commercial_reason,
     };
   }
   async update(
@@ -686,6 +696,7 @@ export class CRM {
       ).rows[0];
       if (!row || (user.role !== 'manager' && row.owner_id !== user.id))
         throw new DomainError('NOT_FOUND', 'Lead não encontrado neste perfil.', 404);
+      assertCommercial(row);
       if (row.version !== input.version)
         throw new DomainError(
           'VERSION_CONFLICT',
@@ -823,6 +834,7 @@ export class CRM {
       ).rows[0];
       if (!row || (user.role !== 'manager' && row.owner_id !== user.id))
         throw new DomainError('NOT_FOUND', 'Lead não encontrado.', 404);
+      assertCommercial(row);
       if (row.version !== input.expected_version)
         throw new DomainError('VERSION_CONFLICT', 'O lead mudou. Reabra a ficha.');
       if (row.state === 'CANCELLED')
@@ -954,14 +966,16 @@ export class CRM {
         if (!selection) break;
         const next = selection.selected;
         await tx.query(
-          `UPDATE opportunities SET state='RESERVED',reserved_to=$2,expires_at=$3,version=version+1 WHERE id=$1`,
+          `UPDATE opportunities SET state='RESERVED',reserved_to=$2,expires_at=$3,reservation_origin=$4,version=version+1 WHERE id=$1`,
           [
             row.id,
             next.id,
             new Date((await this.now(tx)).getTime() + input.timeout_minutes * 60_000),
+            selection.compensationId ? 'compensation' : 'rotation',
           ],
         );
-        last = next.queue_position!;
+        await useCompensation(tx, selection.compensationId, row.id, await this.now(tx));
+        if (!selection.compensationId) last = next.queue_position!;
         await this.audit(
           tx,
           row.id,

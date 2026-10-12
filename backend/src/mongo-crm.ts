@@ -1,3 +1,4 @@
+import { nextCompensation, useCompensation, assertCommercial } from './lead-quality.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { enqueuePushEvent } from './push-store.js';
 import { assertManualLeadAccess } from './manual-leads.js';
@@ -202,6 +203,8 @@ export class MongoOperations {
       { role: 'attendant', active: true, queue_enabled: true },
       { id: 1 },
     );
+    const compensation = await nextCompensation(tx, users);
+    if (compensation) return compensation;
     const selection = selectWeightedParticipant(users, last);
     if (!selection) return;
     for (const [id, credit] of selection.credits)
@@ -350,6 +353,10 @@ export class MongoOperations {
           : (input.source_evidence ?? 'Informada manualmente; sem vínculo verificado com anúncio'),
         state: assignedOwner ? 'CLAIMED' : next ? 'RESERVED' : 'PENDING',
         reserved_to: next?.id ?? null,
+        reservation_origin: next ? (selection?.compensationId ? 'compensation' : 'rotation') : null,
+        claim_mode: null,
+        accepted_by: null,
+        non_commercial_reason: null,
         owner_id: assignedOwner ?? null,
         created_at: now,
         expires_at: next ? new Date(now.getTime() + settings.timeout_minutes * 60_000) : null,
@@ -374,7 +381,8 @@ export class MongoOperations {
         version: 1,
       });
       await finishProspect(tx, prospect, input.identity, id, prospectOwner ?? null, now);
-      if (next)
+      await useCompensation(tx, selection?.compensationId, id, now);
+      if (next && !selection?.compensationId)
         await tx.update(
           'distribution_settings',
           { id: 1 },
@@ -425,6 +433,7 @@ export class MongoOperations {
         next
           ? {
               reserved_to: next.id,
+              reservation_origin: selection.compensationId ? 'compensation' : 'rotation',
               queue_weight: next.queue_weight,
               total_active_weight: selection!.totalWeight,
             }
@@ -524,7 +533,16 @@ export class MongoOperations {
       await tx.update(
         'opportunities',
         { id, version },
-        { $set: { state: 'CLAIMED', owner_id: user.id, claimed_at: now }, $inc: { version: 1 } },
+        {
+          $set: {
+            state: 'CLAIMED',
+            owner_id: user.id,
+            claimed_at: now,
+            claim_mode: mode,
+            accepted_by: user.id,
+          },
+          $inc: { version: 1 },
+        },
       );
       await this.audit(
         tx,
@@ -605,7 +623,7 @@ export class MongoOperations {
       await this.actor(tx, user);
       const rows = await tx.many<Opportunity>(
         'opportunities',
-        this.visible(user),
+        { ...this.visible(user), non_commercial_reason: null },
         { created_at: -1 },
         500,
       );
@@ -749,7 +767,7 @@ export class MongoOperations {
         appointments,
         attributions: attributions.slice(0, 20),
         attributions_has_more: attributions.length > 20,
-        can_edit: canEdit,
+        can_edit: canEdit && !row.non_commercial_reason,
       };
     }, true);
   }
@@ -759,6 +777,7 @@ export class MongoOperations {
       const row = await tx.one<Opportunity>('opportunities', { id });
       if (!row || (user.role !== 'manager' && row.owner_id !== user.id))
         throw new DomainError('NOT_FOUND', 'Lead não encontrado.', 404);
+      assertCommercial(row);
       if (row.version !== input.version)
         throw new DomainError('VERSION_CONFLICT', 'O cadastro mudou.');
       const { hasScheduled } = await this.prepareAttendance(tx, id, input.attendance);
@@ -850,6 +869,7 @@ export class MongoOperations {
       const row = await tx.one<Opportunity>('opportunities', { id });
       if (!row || (user.role !== 'manager' && row.owner_id !== user.id))
         throw new DomainError('NOT_FOUND', 'Lead não encontrado.', 404);
+      assertCommercial(row);
       if (row.version !== input.expected_version)
         throw new DomainError('VERSION_CONFLICT', 'O lead mudou.');
       if (row.state === 'CANCELLED')
@@ -978,12 +998,14 @@ export class MongoOperations {
             $set: {
               state: 'RESERVED',
               reserved_to: next.id,
+              reservation_origin: selection.compensationId ? 'compensation' : 'rotation',
               expires_at: new Date((await this.now(tx)).getTime() + input.timeout_minutes * 60_000),
             },
             $inc: { version: 1 },
           },
         );
-        last = next.queue_position!;
+        await useCompensation(tx, selection.compensationId, row.id, await this.now(tx));
+        if (!selection.compensationId) last = next.queue_position!;
         await this.audit(
           tx,
           row.id,
@@ -1060,6 +1082,9 @@ export class MongoOperations {
           reserved_to: null,
           expires_at: null,
           claimed_at: null,
+          claim_mode: 'transfer',
+          accepted_by: null,
+          reservation_origin: null,
           needs_review: false,
         },
         $inc: { version: 1 },
@@ -1136,6 +1161,11 @@ export class MongoOperations {
             );
           for (const row of owned)
             await this.assign(tx, row, replacement!, actor, `Desativação: ${input.reason}`);
+          await tx.update(
+            'lead_compensations',
+            { user_id: id, status: 'pending' },
+            { $set: { status: 'revoked' } },
+          );
           await tx.remove('sessions', { user_id: id });
         }
         await tx.update(
@@ -1211,6 +1241,13 @@ export class MongoOperations {
         await tx.remove('message_shortcuts', { user_id: id });
         await tx.remove('instagram_prospects', { owner_id: id });
         await tx.remove('lead_notification_mutes', { user_id: id });
+        await tx.remove('lead_compensations', { user_id: id });
+        await tx.update(
+          'opportunities',
+          { non_commercial_by: id },
+          { $set: { non_commercial_by: null } },
+        );
+        await tx.update('opportunities', { accepted_by: id }, { $set: { accepted_by: null } });
         await tx.remove('users', { id });
         const settings = (await tx.one('distribution_settings', { id: 1 }))!;
         const remaining = await tx.many<QueueUser>(
@@ -1318,6 +1355,7 @@ export class MongoOperations {
         const row = await tx.one<Opportunity>('opportunities', { id });
         if (!row || (actor.role !== 'manager' && row.owner_id !== actor.id))
           throw new DomainError('NOT_FOUND', 'Lead não encontrado neste perfil.', 404);
+        assertCommercial(row);
         if (row.version !== input.expected_version)
           throw new DomainError('VERSION_CONFLICT', 'A ficha mudou. Reabra antes de salvar.');
         if (input.procedure_date && !isValidDateOnly(input.procedure_date))

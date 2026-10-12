@@ -2,13 +2,7 @@ import { z } from 'zod';
 import type { Document } from 'mongodb';
 import type { Database } from './db.js';
 import type { MongoStore, MongoTx } from './mongo-store.js';
-import {
-  DomainError,
-  isSaleStage,
-  normalizeStage,
-  requireManager,
-  type User,
-} from './types.js';
+import { DomainError, isSaleStage, normalizeStage, requireManager, type User } from './types.js';
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 const reportKinds = ['reservation.expired', 'opportunity.claimed', 'opportunity.updated'];
@@ -34,6 +28,7 @@ export const reportsQuery = z
 
 type ReportUser = Pick<User, 'id' | 'name' | 'active' | 'role'>;
 interface ReportOpportunity {
+  non_commercial_reason?: string | null;
   id: string;
   name: string;
   source: string;
@@ -150,7 +145,7 @@ async function sqlData(db: Database, start: Date, end: Date): Promise<ReportData
         "SELECT id,name,active,role FROM users WHERE role='attendant' ORDER BY queue_position NULLS LAST,name",
       )
     ).rows;
-    const opportunitySql = `SELECT o.id,c.name,o.source,o.stage,o.state,o.reserved_to,o.owner_id,
+    const opportunitySql = `SELECT o.non_commercial_reason,o.id,c.name,o.source,o.stage,o.state,o.reserved_to,o.owner_id,
       o.created_at,o.claimed_at,o.next_action FROM opportunities o
       JOIN contacts c ON c.id=o.contact_id`;
     const periodOpportunities = (
@@ -222,6 +217,7 @@ async function mongoOpportunities(tx: MongoTx, filter: Document) {
           $project: {
             _id: 0,
             id: 1,
+            non_commercial_reason: 1,
             name: '$contact.name',
             source: 1,
             stage: 1,
@@ -323,6 +319,32 @@ function userRanking(map: Map<string, Bucket>, users: Map<string, ReportUser>, a
 }
 
 function buildReport(data: ReportData, from: string, to: string) {
+  const discarded = data.periodOpportunities.filter((row) => row.non_commercial_reason);
+  const quality = {
+    total_entries: data.periodOpportunities.length,
+    non_commercial: discarded.length,
+    commercial: data.periodOpportunities.length - discarded.length,
+    reasons: Object.fromEntries(
+      ['ADVERTISING', 'JOB_SEEKER', 'NON_COMMERCIAL_MENTION', 'POLITICAL_VIDEO'].map((reason) => [
+        reason,
+        discarded.filter((row) => row.non_commercial_reason === reason).length,
+      ]),
+    ),
+  };
+  const excluded = new Set(
+    [...data.periodOpportunities, ...data.referencedOpportunities]
+      .filter((row) => row.non_commercial_reason)
+      .map((row) => row.id),
+  );
+  data = {
+    ...data,
+    periodOpportunities: data.periodOpportunities.filter((row) => !excluded.has(row.id)),
+    referencedOpportunities: data.referencedOpportunities.filter((row) => !excluded.has(row.id)),
+    events: data.events.filter(
+      (event) => !event.opportunity_id || !excluded.has(event.opportunity_id),
+    ),
+  };
+
   const users = new Map(data.users.map((user) => [user.id, user]));
   const opportunities = new Map(
     [...data.periodOpportunities, ...data.referencedOpportunities].map((row) => [row.id, row]),
@@ -444,6 +466,7 @@ function buildReport(data: ReportData, from: string, to: string) {
     ['DECLINED', 'Declinado', (row: ReportOpportunity) => row.stage === 'DECLINED'],
   ] as const;
   return {
+    quality,
     period: { from, to, days: (dateNumber(to) - dateNumber(from)) / dayMs + 1 },
     leads: leadNames,
     unanswered_by_user: userRanking(unanswered, users),

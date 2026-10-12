@@ -128,7 +128,7 @@ export async function enqueuePushEvent(
   )
     return;
   const lead = await pushOpportunity(tx, opportunityId);
-  if (!lead) return;
+  if (!lead || lead.non_commercial_reason) return;
   // Instagram persists a separate, deduplicated event for each received message.
   if (kind === 'lead.repeated' && lead.channel === 'instagram') return;
   await putPush(tx, {

@@ -1,3 +1,4 @@
+import { nextCompensation } from './lead-quality.js';
 import type { Database } from './db.js';
 import type { MongoStore } from './mongo-store.js';
 import { DomainError, type User } from './types.js';
@@ -17,6 +18,7 @@ function personalStatus(
   participants: QueueStatusParticipant[],
   lastPosition: number,
   userId: string,
+  priority?: string,
 ): PersonalQueueStatus {
   const eligible = participants.filter(
     (participant) =>
@@ -24,7 +26,7 @@ function personalStatus(
   );
   const order = previewWeightedOrder(eligible, lastPosition);
   const participating = order.includes(userId);
-  return { participating, next: participating && order[0] === userId };
+  return { participating, next: participating && (priority ?? order[0]) === userId };
 }
 
 export async function personalQueueStatus(
@@ -60,7 +62,12 @@ export async function personalQueueStatus(
           queue_credit: 1,
         })
         .toArray();
-      return personalStatus(participants, settings?.last_position ?? 0, user.id);
+      return personalStatus(
+        participants,
+        settings?.last_position ?? 0,
+        user.id,
+        (await nextCompensation(tx, participants))?.selected.id,
+      );
     }, true);
 
   return db.transaction(async (tx) => {
@@ -74,6 +81,11 @@ export async function personalQueueStatus(
            AND u.queue_position IS NOT NULL`,
       )
     ).rows;
-    return personalStatus(participants, participants[0]?.last_position ?? 0, user.id);
+    return personalStatus(
+      participants,
+      participants[0]?.last_position ?? 0,
+      user.id,
+      (await nextCompensation(tx, participants))?.selected.id,
+    );
   });
 }

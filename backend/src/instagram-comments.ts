@@ -1,3 +1,4 @@
+import { assertCommercial } from './lead-quality.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
@@ -213,7 +214,7 @@ export class InstagramComments {
                   [config.accountId, event.sender_id],
                 )
               ).rows[0];
-        if (!sibling) {
+        if (!sibling?.conversation_id) {
           const identity = await one(tx, 'contact_identities', {
             provider: 'instagram',
             channel_account_id: config.accountId,
@@ -479,19 +480,17 @@ export class InstagramComments {
     const owners = new Map(reservations.map((row) => [row.username, row]));
     return {
       configured: true,
-      comments: rows
-        .slice(0, 30)
-        .map((row) => ({
-          ...row,
-          can_claim:
-            user.role === 'attendant' &&
-            !prospectBlocksComment(
-              owners.get(row.username.toLowerCase()),
-              user.id,
-              time,
-              row.sender_id,
-            ),
-        })),
+      comments: rows.slice(0, 30).map((row) => ({
+        ...row,
+        can_claim:
+          user.role === 'attendant' &&
+          !prospectBlocksComment(
+            owners.get(row.username.toLowerCase()),
+            user.id,
+            time,
+            row.sender_id,
+          ),
+      })),
       next_cursor:
         rows.length > 30 ? `${new Date(rows[29].received_at).toISOString()}|${rows[29].id}` : null,
     };
@@ -528,6 +527,7 @@ export class InstagramComments {
       if (!comment) throw new DomainError('NOT_FOUND', 'Comentário não encontrado.', 404);
       if (comment.opportunity_id) {
         const lead = await one(tx, 'opportunities', { id: comment.opportunity_id });
+        if (lead) assertCommercial(lead);
         if (lead?.owner_id === user.id && lead.state === 'CLAIMED')
           return { opportunity_id: lead.id, conversation_id: comment.conversation_id };
         throw new DomainError(
@@ -588,6 +588,7 @@ export class InstagramComments {
             ).rows[0];
       let lead = existing;
       if (lead) {
+        assertCommercial(lead);
         if (lead.state === 'CANCELLED')
           throw new DomainError(
             'LEAD_CLOSED',
@@ -609,6 +610,9 @@ export class InstagramComments {
             reserved_to: null,
             state: 'CLAIMED',
             expires_at: null,
+            ...(lead.state !== 'CLAIMED'
+              ? { claim_mode: 'pool', accepted_by: user.id, reservation_origin: null }
+              : {}),
             claimed_at: lead.claimed_at ?? time,
             version: lead.version + 1,
           },
@@ -617,6 +621,10 @@ export class InstagramComments {
         lead = {
           id: randomUUID(),
           contact_id: contact.id,
+          claim_mode: 'pool',
+          accepted_by: user.id,
+          reservation_origin: null,
+          non_commercial_reason: null,
           interest: '',
           unit: 'A definir',
           source: 'Comentário do Instagram',

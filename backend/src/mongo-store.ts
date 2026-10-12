@@ -135,6 +135,62 @@ export async function initializeMongo(db: MongoStore) {
       { source: 'Instagram — origem não identificada' },
       { $set: { source: 'Instagram — origem orgânica' } },
     );
+  await db.collection('opportunities').updateMany({ claim_mode: { $exists: false } }, [
+    {
+      $set: {
+        non_commercial_reason: { $ifNull: ['$non_commercial_reason', null] },
+        non_commercial_by: { $ifNull: ['$non_commercial_by', null] },
+        non_commercial_at: { $ifNull: ['$non_commercial_at', null] },
+        reservation_origin: {
+          $cond: [
+            {
+              $and: [
+                { $ne: [{ $ifNull: ['$reserved_to', null] }, null] },
+                { $ne: [{ $ifNull: ['$expires_at', null] }, null] },
+              ],
+            },
+            'rotation',
+            null,
+          ],
+        },
+        claim_mode: {
+          $cond: [
+            {
+              $and: [
+                { $eq: ['$state', 'CLAIMED'] },
+                { $ne: [{ $ifNull: ['$claimed_at', null] }, null] },
+                { $ne: [{ $ifNull: ['$expires_at', null] }, null] },
+                { $ne: [{ $ifNull: ['$reserved_to', null] }, null] },
+              ],
+            },
+            {
+              $cond: [
+                {
+                  $and: [
+                    { $eq: ['$owner_id', '$reserved_to'] },
+                    { $lt: ['$claimed_at', '$expires_at'] },
+                  ],
+                },
+                'reservation',
+                'pool',
+              ],
+            },
+            null,
+          ],
+        },
+        accepted_by: { $ifNull: ['$owner_id', null] },
+      },
+    },
+  ]);
+  await db
+    .collection('lead_compensations')
+    .createIndex({ source_opportunity_id: 1 }, { unique: true });
+  await db
+    .collection('lead_compensations')
+    .createIndex({ status: 1, created_at: 1, source_opportunity_id: 1 });
+  await db
+    .collection('opportunities')
+    .createIndex({ non_commercial_reason: 1, owner_id: 1, created_at: -1 });
   const stageMigration = {
     TO_QUALIFY: 'CONSULTATION_NOT_SCHEDULED',
     EVALUATION_SCHEDULED: 'FOLLOW_UP',

@@ -1,3 +1,4 @@
+import { assertCommercial } from './lead-quality.js';
 import { randomUUID } from 'node:crypto';
 import { commandFingerprint, matchesCommandFingerprint } from './command-fingerprint.js';
 import { CRM } from './crm.js';
@@ -162,6 +163,10 @@ export class Operations extends CRM {
               `Desativação de conta: ${input.reason}`,
             );
           }
+          await tx.query(
+            "UPDATE lead_compensations SET status='revoked' WHERE user_id=$1 AND status='pending'",
+            [id],
+          );
           await tx.query('DELETE FROM sessions WHERE user_id=$1', [id]);
         }
         await tx.query(
@@ -267,7 +272,7 @@ export class Operations extends CRM {
     // Transfer is an administrative assignment, not an attendant's acceptance.
     await tx.query(
       `UPDATE opportunities SET state='CLAIMED',owner_id=$2,reserved_to=NULL,expires_at=NULL,
-      claimed_at=NULL,needs_review=false,version=version+1 WHERE id=$1`,
+      claimed_at=NULL,claim_mode='transfer',accepted_by=NULL,reservation_origin=NULL,needs_review=false,version=version+1 WHERE id=$1`,
       [row.id, target.id],
     );
     await this.audit(
@@ -421,6 +426,7 @@ export class Operations extends CRM {
         ).rows[0];
         if (!row || (actor.role !== 'manager' && row.owner_id !== actor.id))
           throw new DomainError('NOT_FOUND', 'Lead não encontrado neste perfil.', 404);
+        assertCommercial(row);
         if (row.version !== input.expected_version)
           throw new DomainError('VERSION_CONFLICT', 'A ficha mudou. Reabra antes de salvar.');
         if (input.procedure_date && !isValidDateOnly(input.procedure_date))

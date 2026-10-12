@@ -204,10 +204,14 @@ test('relatório abre lista do anúncio só no clique e solicita atualização e
         eligible_spend: 300,
         cpl: 20,
         instagram_leads: 15,
+        instagram_entries: 18,
+        non_commercial_leads: 3,
         identified_paid_leads: 15,
+        identified_paid_non_commercial_leads: 3,
         matched_attributed_leads: 15,
         unmatched_attributed_leads: 0,
         unattributed_or_organic_leads: 0,
+        unattributed_or_organic_non_commercial_leads: 0,
         coverage_complete: true,
         total: 1,
         ads: [
@@ -219,6 +223,7 @@ test('relatório abre lista do anúncio só no clique e solicita atualização e
             spend: 300,
             currency: 'BRL',
             attributed_leads: 15,
+            non_commercial_leads: 3,
             scheduled: 5,
             attended: 4,
             sales: 1,
@@ -241,6 +246,7 @@ test('relatório abre lista do anúncio só no clique e solicita atualização e
             id: '10000000-0000-4000-8000-000000000001',
             name: 'João teste',
             owner_name: 'Consultor teste',
+            non_commercial_reason: 'ADVERTISING',
           },
         ],
         next_cursor: null,
@@ -257,8 +263,14 @@ test('relatório abre lista do anúncio só no clique e solicita atualização e
   await page.goto('/#reports');
   await expect(page.getByText('Resultado Carlos', { exact: true })).toBeVisible();
   expect(lists).toBe(0);
-  await page.getByRole('button', { name: 'Ver 15 leads de Resultado Carlos' }).click();
+  await expect(
+    page.getByText('Entradas não comerciais').locator('..').getByText('3'),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Ver 18 entradas de Resultado Carlos' }).click();
   await expect(page.getByRole('dialog').getByText('João teste')).toBeVisible();
+  await expect(
+    page.getByRole('dialog').getByText('Não comercial · Vendas e propagandas'),
+  ).toBeVisible();
   // Development StrictMode can start then abort the first mount request.
   expect(lists).toBeGreaterThanOrEqual(1);
   expect(lists).toBeLessThanOrEqual(2);

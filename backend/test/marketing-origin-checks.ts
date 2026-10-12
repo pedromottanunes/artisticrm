@@ -108,6 +108,7 @@ export async function checkMarketingOrigins(db: MarketingDB) {
   const second = await crm.ingest(lead('two', '111'), 'marketing-second', null);
   const organic = await crm.ingest(lead('organic'), 'marketing-organic', null);
   await crm.ingest(lead('other', '222'), 'marketing-other', null);
+  const nonCommercial = await crm.ingest(lead('non-commercial', '111'), 'marketing-dirty', null);
   const replay = await crm.ingest(lead('one', '111'), 'marketing-first', null);
   assert.equal(replay.id, first.id);
   now = new Date(now.getTime() + 1000);
@@ -130,6 +131,11 @@ export async function checkMarketingOrigins(db: MarketingDB) {
         },
       },
     );
+    await db.update(
+      'opportunities',
+      { id: nonCommercial.id },
+      { $set: { non_commercial_reason: 'ADVERTISING', non_commercial_at: now } },
+    );
     await db.insert('appointments', {
       id: randomUUID(),
       opportunity_id: second.id,
@@ -150,6 +156,10 @@ export async function checkMarketingOrigins(db: MarketingDB) {
     await db.query(
       `UPDATE opportunities SET consultation_status='ATTENDED',stage='CLOSED_WITHOUT_DATE',sale_completed_at=$2,total_value_cents=100000,contract_status='signed' WHERE id=$1`,
       [first.id, now],
+    );
+    await db.query(
+      "UPDATE opportunities SET non_commercial_reason='ADVERTISING',non_commercial_at=$2 WHERE id=$1",
+      [nonCommercial.id, now],
     );
     const actor = (await db.query('SELECT id FROM users LIMIT 1')).rows[0];
     await db.query(
@@ -181,9 +191,13 @@ export async function checkMarketingOrigins(db: MarketingDB) {
   assert.equal(report.eligible_spend, 30); // Includes eligible ads without conversions.
   assert.equal(report.cpl, 15); // 30 / 2 eligible acquisitions, not 110 / all Instagram contacts.
   assert.equal(report.identified_paid_leads, 3);
+  assert.equal(report.identified_paid_non_commercial_leads, 1);
+  assert.equal(report.non_commercial_leads, 1);
+  assert.equal(report.instagram_entries, 5);
   assert.equal(report.unattributed_or_organic_leads, 1);
   const ad = report.ads.find((row) => row.ad_id === '111')!;
   assert.equal(ad.attributed_leads, 2);
+  assert.equal(ad.non_commercial_leads, 1);
   assert.equal(ad.scheduled, 1);
   assert.equal(ad.attended, 1); // Manual attendance without a scheduled appointment remains valid.
   assert.equal(ad.sales, 1);
@@ -205,11 +219,18 @@ export async function checkMarketingOrigins(db: MarketingDB) {
     marketing.store.ads = readAds;
   }
   const leads = await marketing.leads('2026-09-23', '2026-09-23', '111');
-  assert.deepEqual(leads.items.map((row) => row.id).sort(), [first.id, second.id].sort());
+  assert.deepEqual(
+    leads.items.map((row) => row.id).sort(),
+    [first.id, second.id, nonCommercial.id].sort(),
+  );
+  assert.equal(
+    leads.items.find((row) => row.id === nonCommercial.id)?.non_commercial_reason,
+    'ADVERTISING',
+  );
   assert.equal(leads.next_cursor, null);
   assert.equal(
     (await marketing.leads('2026-09-23', '2026-09-23', '111', leads.items[0].id)).items.length,
-    1,
+    2,
   );
   assert.equal((await marketing.leads('2026-09-22', '2026-09-22', '111')).items.length, 0);
   const partial = await marketing.report('2026-09-22', '2026-09-23');

@@ -1,3 +1,4 @@
+import { qualityInput, qualityDetails, setLeadQuality } from './lead-quality.js';
 import Fastify, { LogController } from 'fastify';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
@@ -381,14 +382,28 @@ export async function buildApp(
   });
   app.get('/api/v1/opportunities/:id', async (request) => {
     const detail = await crm.detail(request.user, idParams.parse(request.params).id);
-    const ids = detail.can_edit
-      ? [detail.acquisition?.ad_id, ...detail.attributions.map((a) => a.source_id)].filter(
-          (id): id is string => typeof id === 'string' && !!id,
-        )
-      : [];
+    const ids =
+      detail.can_edit || detail.non_commercial_reason
+        ? [detail.acquisition?.ad_id, ...detail.attributions.map((a) => a.source_id)].filter(
+            (id): id is string => typeof id === 'string' && !!id,
+          )
+        : [];
     const ads = await metaMarketingRuntime.marketing.names(ids).catch(() => []);
     return { ...detail, marketing_ads: ads };
   });
+  app.get('/api/v1/opportunities/:id/quality', async (request) => {
+    const detail = await crm.detail(request.user, idParams.parse(request.params).id);
+    return qualityDetails(db, detail, request.user);
+  });
+  app.put('/api/v1/opportunities/:id/quality', async (request) =>
+    setLeadQuality(
+      db,
+      request.user,
+      idParams.parse(request.params).id,
+      qualityInput.parse(request.body),
+      options.clock ? async () => options.clock!() : undefined,
+    ),
+  );
   app.get('/api/v1/opportunities/:id/acquisition-performance', async (request) => {
     requireManager(request.user);
     const detail = await crm.detail(request.user, idParams.parse(request.params).id);
@@ -770,7 +785,7 @@ export async function buildApp(
   app.get('/api/v1/conversations', async (request) => {
     const query = z
       .object({
-        view: z.enum(['mine', 'reserved', 'pool', 'all']).optional(),
+        view: z.enum(['mine', 'reserved', 'pool', 'all', 'non_commercial']).optional(),
         revision: z
           .string()
           .regex(/^[a-f0-9]{64}$/)

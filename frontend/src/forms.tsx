@@ -1,3 +1,4 @@
+import { LeadQualityControl } from './lead-quality';
 import { useEffect, useState, useRef, useId, type FormEvent } from 'react';
 import {
   ArrowRight,
@@ -449,6 +450,13 @@ export function LeadDetail({
       }
     >
       <div className="detail-summary">
+        {detail.state === 'CLAIMED' && (detail.can_edit || detail.non_commercial_reason) && (
+          <LeadQualityControl
+            leadId={detail.id}
+            reason={detail.non_commercial_reason}
+            disabled={!connected || saving}
+          />
+        )}
         <Badge state={detail.state} />
         {detail.consultation_status !== 'UNDEFINED' && (
           <span className={`consultation-badge is-${detail.consultation_status.toLowerCase()}`}>
@@ -464,7 +472,7 @@ export function LeadDetail({
           ...(detail.can_edit && detail.state !== 'CANCELLED'
             ? [{ id: 'agendar', label: 'Agendar consulta', step: 2 }]
             : []),
-          ...(detail.can_edit
+          ...(detail.can_edit || detail.non_commercial_reason
             ? [
                 { id: 'avaliacoes', label: 'Consultas', step: 3 },
                 { id: 'historico', label: 'Histórico', step: 4 },
@@ -787,7 +795,7 @@ export function LeadDetail({
           )}
           {!confirmSale && (
             <div className="modal-actions commercial-actions">
-              {!isManager && detail.state === 'CLAIMED' && detail.can_edit && (
+              {!isManager && detail.state === 'CLAIMED' && (
                 <button
                   className="button outline lead-secondary-action"
                   type="button"
@@ -834,7 +842,8 @@ export function LeadDetail({
                   </button>
                 </div>
               ) : (
-                !isManager && (
+                !isManager &&
+                ['RESERVED', 'POOL'].includes(detail.state) && (
                   <button
                     type="button"
                     className="button gold"

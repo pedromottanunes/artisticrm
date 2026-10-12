@@ -1,3 +1,4 @@
+import { qualityReasons } from './lead-quality';
 import { useEffect, useState } from 'react';
 import { ArrowUpRight, Search } from 'lucide-react';
 import {
@@ -12,7 +13,8 @@ import {
 import { Empty, Source } from './components';
 
 const categories: { id: LeadListCategory; label: string }[] = [
-  { id: 'ALL', label: 'Todos' },
+  { id: 'ALL', label: 'Comerciais' },
+  { id: 'NON_COMMERCIAL', label: 'Não comerciais' },
   { id: 'NOT_SCHEDULED', label: 'Não agendados' },
   { id: 'SCHEDULED', label: 'Agendados' },
   { id: 'ATTENDED', label: 'Compareceram' },
@@ -230,7 +232,11 @@ export function LeadLists({
                       {consultationStatusLabels[lead.consultation_status]}
                     </span>
                   )}
-                  <span className="stage-pill">{stages[lead.stage] ?? lead.stage}</span>
+                  <span className="stage-pill">
+                    {lead.non_commercial_reason
+                      ? qualityReasons[lead.non_commercial_reason]
+                      : (stages[lead.stage] ?? lead.stage)}
+                  </span>
                 </span>
                 {isManager && (
                   <span className="lead-list-owner">

@@ -76,7 +76,7 @@ before(async () => {
 
 beforeEach(async () => {
   await db.query(
-    'TRUNCATE meta_marketing_daily_insights,meta_marketing_accounts,meta_marketing_sync_state,meta_marketing_ad_jobs,meta_marketing_ads,meta_marketing_ad_versions,meta_marketing_daily_coverage,meta_marketing_control,lead_notification_mutes,conversation_reads,messages,instagram_webhook_inbox,conversations,contact_identities,channel_accounts,push_records,whatsapp_inbox,claims,appointments,lead_attributions,inbound_events,audit_events,opportunities,contacts,sessions',
+    'TRUNCATE meta_marketing_daily_insights,meta_marketing_accounts,meta_marketing_sync_state,meta_marketing_ad_jobs,meta_marketing_ads,meta_marketing_ad_versions,meta_marketing_daily_coverage,meta_marketing_control,lead_notification_mutes,conversation_reads,messages,instagram_webhook_inbox,conversations,contact_identities,channel_accounts,push_records,whatsapp_inbox,claims,appointments,lead_attributions,inbound_events,audit_events,lead_compensations,opportunities,contacts,sessions',
   );
   await db.query('UPDATE distribution_settings SET last_position=0,timeout_minutes=10');
 });

@@ -1,3 +1,4 @@
+import { qualityReasons } from './lead-quality';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   AlarmClock,
@@ -25,6 +26,12 @@ interface ReportRanking {
   average_minutes?: number;
 }
 interface ReportOverview {
+  quality?: {
+    total_entries: number;
+    non_commercial: number;
+    commercial: number;
+    reasons: Record<string, number>;
+  };
   period: { from: string; to: string; days: number };
   leads: Record<string, { id: string; name: string }>;
   unanswered_by_user: ReportRanking[];
@@ -57,10 +64,14 @@ interface MetaAdsReport {
   currency: string | null;
   spend: number;
   instagram_leads: number;
+  instagram_entries: number;
+  non_commercial_leads: number;
   identified_paid_leads: number;
+  identified_paid_non_commercial_leads: number;
   matched_attributed_leads: number;
   unmatched_attributed_leads: number;
   unattributed_or_organic_leads: number;
+  unattributed_or_organic_non_commercial_leads: number;
   cpl: number | null;
   eligible_spend: number;
   coverage_complete: boolean;
@@ -78,6 +89,7 @@ interface MetaAdsReport {
     currency: string | null;
     clicks: number;
     attributed_leads: number;
+    non_commercial_leads: number;
     scheduled: number;
     attended: number;
     no_show: number;
@@ -98,6 +110,7 @@ interface MetaAdsReport {
     reach: number | null;
     clicks: number;
     attributed_leads: number;
+    non_commercial_leads: number;
     cpl: number | null;
   }[];
   last_sync: string | null;
@@ -218,6 +231,11 @@ export function ManagerReports({
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    const changed = () => setRevision((value) => value + 1);
+    window.addEventListener('artisti-lead-quality', changed);
+    return () => window.removeEventListener('artisti-lead-quality', changed);
+  }, []);
   const [selected, setSelected] = useState<{ title: string; ids: string[] } | null>(null);
   const [metaStatus, setMetaStatus] = useState<MetaMarketingStatus | null>(null);
   const [metaAds, setMetaAds] = useState<MetaAdsReport | null>(null);
@@ -417,6 +435,19 @@ export function ManagerReports({
 
       {report && (
         <>
+          {report.quality && (
+            <section className="panel quality-report" aria-label="Qualidade das entradas">
+              <strong>
+                {report.quality.total_entries} entradas · {report.quality.commercial} leads
+                comerciais · {report.quality.non_commercial} não comerciais
+              </strong>
+              <p>
+                {Object.entries(report.quality.reasons)
+                  .map(([reason, count]) => `${qualityReasons[reason]}: ${count}`)
+                  .join(' · ')}
+              </p>
+            </section>
+          )}
           <section
             className={`reports-overview ${busy ? 'is-updating' : ''}`}
             aria-label="Resumo dos relatórios"
@@ -550,13 +581,18 @@ export function ManagerReports({
                 </article>
                 <article>
                   <MessageSquareReply size={18} />
-                  <span>Leads pelo Instagram</span>
-                  <strong>{metaAds.instagram_leads}</strong>
+                  <span>Entradas pelo Instagram</span>
+                  <strong>{metaAds.instagram_entries}</strong>
                 </article>
                 <article>
                   <TrendingUp size={18} />
-                  <span>Leads ligados ao anúncio</span>
+                  <span>Leads comerciais ligados ao anúncio</span>
                   <strong>{metaAds.matched_attributed_leads}</strong>
+                </article>
+                <article>
+                  <MessageSquareReply size={18} />
+                  <span>Entradas não comerciais</span>
+                  <strong>{metaAds.non_commercial_leads}</strong>
                 </article>
                 <article>
                   <CircleDollarSign size={18} />
@@ -565,11 +601,15 @@ export function ManagerReports({
                 </article>
               </div>
               <p className="meta-ads-note">
-                {metaAds.identified_paid_leads} lead(s) chegaram com evidência de anúncio;{' '}
-                {metaAds.unmatched_attributed_leads} aguardam identificação e{' '}
-                {metaAds.unattributed_or_organic_leads} ficaram como Orgânica. CPL considera somente
-                anúncios identificados como destino exclusivo Instagram Direct; investimento
-                elegível: {money(metaAds.eligible_spend, metaAds.currency)}.
+                {metaAds.identified_paid_leads} lead(s) comerciais e{' '}
+                {metaAds.identified_paid_non_commercial_leads} entrada(s) não comerciais chegaram
+                com evidência de anúncio; {metaAds.unmatched_attributed_leads} leads comerciais
+                aguardam identificação. Como origem orgânica ficaram{' '}
+                {metaAds.unattributed_or_organic_leads} comerciais e{' '}
+                {metaAds.unattributed_or_organic_non_commercial_leads} não comerciais. CPL e
+                conversões consideram somente leads comerciais de anúncios identificados como
+                destino exclusivo Instagram Direct; investimento elegível:{' '}
+                {money(metaAds.eligible_spend, metaAds.currency)}.
               </p>
               {!metaAds.coverage_complete && (
                 <p className="meta-ads-note">
@@ -594,7 +634,8 @@ export function ManagerReports({
                       <tr>
                         <th>Anúncio / campanha</th>
                         <th>Investimento</th>
-                        <th>Leads atribuídos</th>
+                        <th>Entradas atribuídas</th>
+                        <th>Não comerciais</th>
                         <th>Agendaram</th>
                         <th>Compareceram</th>
                         <th>Vendas</th>
@@ -627,19 +668,20 @@ export function ManagerReports({
                           </td>
                           <td>{money(ad.spend, ad.currency || metaAds.currency)}</td>
                           <td>
-                            {ad.attributed_leads ? (
+                            {ad.attributed_leads + ad.non_commercial_leads ? (
                               <button
                                 type="button"
                                 className="meta-lead-count"
-                                aria-label={`Ver ${ad.attributed_leads} leads de ${ad.ad_name}`}
+                                aria-label={`Ver ${ad.attributed_leads + ad.non_commercial_leads} entradas de ${ad.ad_name}`}
                                 onClick={() => setSelectedAd(ad)}
                               >
-                                {ad.attributed_leads}
+                                {ad.attributed_leads + ad.non_commercial_leads}
                               </button>
                             ) : (
                               0
                             )}
                           </td>
+                          <td>{ad.non_commercial_leads}</td>
                           <td>{ad.scheduled}</td>
                           <td>{ad.attended}</td>
                           <td>{ad.sales}</td>

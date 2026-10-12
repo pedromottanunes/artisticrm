@@ -1,3 +1,4 @@
+import { assertCommercial } from './lead-quality.js';
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -191,6 +192,7 @@ interface NormalizedInstagramEvent {
 }
 
 interface ConversationContext {
+  non_commercial_reason?: string | null;
   id: string;
   opportunity_id: string;
   contact_id: string;
@@ -1174,6 +1176,7 @@ export class InstagramCentral {
                 private_reply_comment_id: 1,
                 private_reply_message_id: 1,
                 private_reply_started_at: 1,
+                non_commercial_reason: '$opportunity.non_commercial_reason',
                 state: '$opportunity.state',
                 owner_id: '$opportunity.owner_id',
                 reserved_to: '$opportunity.reserved_to',
@@ -1190,7 +1193,7 @@ export class InstagramCentral {
           await db.query<ConversationContext>(
             `SELECT cv.id,cv.opportunity_id,cv.contact_id,cv.last_message_at,cv.last_inbound_at,
                     cv.private_reply_comment_id,cv.private_reply_message_id,cv.private_reply_started_at,
-                    o.state,o.owner_id,o.reserved_to,
+                    o.non_commercial_reason,o.state,o.owner_id,o.reserved_to,
                     COALESCE(cv.instagram_recipient_id,ci.external_user_id) AS external_user_id
              FROM conversations cv
              JOIN opportunities o ON o.id=cv.opportunity_id
@@ -1208,11 +1211,13 @@ export class InstagramCentral {
     return context;
   }
 
-  async list(user: User, view: 'mine' | 'reserved' | 'pool' | 'all' = 'mine') {
+  async list(user: User, view: 'mine' | 'reserved' | 'pool' | 'all' | 'non_commercial' = 'mine') {
     if (!this.config) return { configured: false, conversations: [] as Record<string, unknown>[] };
     if (view === 'all' && user.role !== 'manager')
       throw new DomainError('FORBIDDEN', 'Visão completa restrita à gestão.', 403);
     const db = this.crm.db;
+    const archived = view === 'non_commercial';
+    if (archived) view = user.role === 'manager' ? 'all' : 'mine';
     const opportunityFilter =
       user.role === 'manager'
         ? view === 'all'
@@ -1241,7 +1246,6 @@ export class InstagramCentral {
             ? [
                 { $match: { channel_account_id: account.id } },
                 { $sort: { last_message_at: -1, id: 1 } },
-                { $limit: 100 },
                 {
                   $lookup: {
                     from: 'opportunities',
@@ -1253,12 +1257,18 @@ export class InstagramCentral {
                 { $unwind: '$opportunity' },
               ]
             : [
-                { $match: opportunityFilter },
+                {
+                  $match: {
+                    ...opportunityFilter,
+                    non_commercial_reason: archived ? { $ne: null } : null,
+                  },
+                },
                 {
                   $project: {
                     _id: 0,
                     opportunity: {
                       id: '$id',
+                      non_commercial_reason: '$non_commercial_reason',
                       state: '$state',
                       owner_id: '$owner_id',
                       reserved_to: '$reserved_to',
@@ -1287,6 +1297,7 @@ export class InstagramCentral {
                   },
                 },
               ]),
+          { $match: { 'opportunity.non_commercial_reason': archived ? { $ne: null } : null } },
           { $sort: { last_message_at: -1, id: 1 } },
           { $limit: 100 },
           {
@@ -1328,6 +1339,7 @@ export class InstagramCentral {
               contact_name: { $ifNull: ['$contact.name', 'Contato Instagram'] },
               instagram_username: { $ifNull: ['$identity.username', ''] },
               profile_picture_url: { $ifNull: ['$identity.profile_picture_url', ''] },
+              non_commercial_reason: '$opportunity.non_commercial_reason',
               state: '$opportunity.state',
               owner_id: '$opportunity.owner_id',
               reserved_to: '$opportunity.reserved_to',
@@ -1367,8 +1379,9 @@ export class InstagramCentral {
             owner_id: conversation.owner_id,
             reserved_to: conversation.reserved_to,
             last_message_at: conversation.last_message_at,
-            unread: unread.has(String(conversation.id)),
-            notifications_muted: muted.has(String(conversation.opportunity_id)),
+            non_commercial_reason: conversation.non_commercial_reason ?? null,
+            unread: !archived && unread.has(String(conversation.id)),
+            notifications_muted: archived || muted.has(String(conversation.opportunity_id)),
             messaging_mode: mode,
             can_send:
               conversation.state === 'CLAIMED' &&
@@ -1420,7 +1433,7 @@ export class InstagramCentral {
            AND i.provider='instagram' AND i.channel_account_id=ca.external_account_id
            ORDER BY i.username DESC LIMIT 1) ci ON TRUE
           WHERE ca.provider='instagram' AND ca.external_account_id=$1
-            AND (${visibility})
+            AND o.non_commercial_reason IS ${archived ? 'NOT NULL' : 'NULL'} AND (${visibility})
           ORDER BY cv.last_message_at DESC,cv.id LIMIT 100`,
         visibility.includes('$2') ? [this.config.accountId, user.id] : [this.config.accountId],
       )
@@ -1452,8 +1465,9 @@ export class InstagramCentral {
           owner_id: row.owner_id,
           reserved_to: row.reserved_to,
           last_message_at: row.conversation_last_message_at,
-          unread: unread.has(row.conversation_id),
-          notifications_muted: muted.has(row.id),
+          non_commercial_reason: row.non_commercial_reason ?? null,
+          unread: !archived && unread.has(row.conversation_id),
+          notifications_muted: archived || muted.has(row.id),
           messaging_mode: mode,
           can_send:
             row.state === 'CLAIMED' &&
@@ -1571,23 +1585,24 @@ export class InstagramCentral {
     const db = this.crm.db;
     if (db.kind === 'mongo')
       await db.atomic(async (tx) => {
-        const lead = await tx.one<{ owner_id: string | null }>('opportunities', {
+        const lead = await tx.one<Opportunity>('opportunities', {
           id: context.opportunity_id,
         });
         if (!lead || lead.owner_id !== user.id)
           throw new DomainError('FORBIDDEN', 'Este lead não está mais vinculado a você.', 403);
+        assertCommercial(lead);
         await setLeadNotificationMuted(tx, user.id, context.opportunity_id, muted);
       });
     else
       await db.transaction(async (tx) => {
         const lead = (
-          await tx.query<{ owner_id: string | null }>(
-            'SELECT owner_id FROM opportunities WHERE id=$1 FOR UPDATE',
-            [context.opportunity_id],
-          )
+          await tx.query<Opportunity>('SELECT * FROM opportunities WHERE id=$1 FOR UPDATE', [
+            context.opportunity_id,
+          ])
         ).rows[0];
         if (!lead || lead.owner_id !== user.id)
           throw new DomainError('FORBIDDEN', 'Este lead não está mais vinculado a você.', 403);
+        assertCommercial(lead);
         await setLeadNotificationMuted(tx, user.id, context.opportunity_id, muted);
       });
     return { notifications_muted: muted };

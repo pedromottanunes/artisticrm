@@ -87,6 +87,12 @@ export async function deleteLeadData(
         ]),
       ],
     });
+    await tx.remove('lead_compensations', { source_opportunity_id: id });
+    await tx.update(
+      'lead_compensations',
+      { replacement_opportunity_id: id },
+      { $set: { replacement_opportunity_id: null } },
+    );
     await tx.remove('claims', { 'response.id': id });
     await tx.remove('instagram_comments', { opportunity_id: id });
     await tx.remove('instagram_prospects', { opportunity_id: id });

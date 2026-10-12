@@ -14,6 +14,12 @@ export interface User {
   must_change_password: boolean;
 }
 export interface Opportunity {
+  non_commercial_reason?: string | null;
+  non_commercial_by?: string | null;
+  non_commercial_at?: string | Date | null;
+  claim_mode?: string | null;
+  accepted_by?: string | null;
+  reservation_origin?: string | null;
   acquisition?: import('./meta-acquisition.js').Acquisition | null;
   id: string;
   contact_id: string;

@@ -48,6 +48,7 @@ export function QueuePosition({
       if (!document.hidden) void load();
     };
     void load();
+    window.addEventListener('artisti-lead-quality', resume);
     window.addEventListener('focus', resume);
     window.addEventListener('online', resume);
     document.addEventListener('visibilitychange', resume);
@@ -56,6 +57,7 @@ export function QueuePosition({
       sequence += 1;
       controller?.abort();
       window.clearTimeout(timer);
+      window.removeEventListener('artisti-lead-quality', resume);
       window.removeEventListener('focus', resume);
       window.removeEventListener('online', resume);
       document.removeEventListener('visibilitychange', resume);

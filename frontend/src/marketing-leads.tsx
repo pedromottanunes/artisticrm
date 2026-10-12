@@ -2,9 +2,15 @@ import { useEffect, useState } from 'react';
 import { ArrowUpRight } from 'lucide-react';
 import { api, ApiError } from './api';
 import { Modal } from './components';
+import { qualityReasons } from './lead-quality';
 
 interface LeadPage {
-  items: { id: string; name: string; owner_name: string | null }[];
+  items: {
+    id: string;
+    name: string;
+    owner_name: string | null;
+    non_commercial_reason: string | null;
+  }[];
   next_cursor: string | null;
 }
 
@@ -47,7 +53,7 @@ export function MarketingLeads({
   return (
     <Modal
       title={ad.ad_name}
-      description="Leads atribuídos no período selecionado"
+      description="Entradas atribuídas no período; contatos não comerciais exibem o motivo do selo."
       onClose={onClose}
     >
       <div className="report-lead-list" aria-busy={busy}>
@@ -67,6 +73,11 @@ export function MarketingLeads({
                 {lead.name}
                 <small className="marketing-lead-owner">
                   {lead.owner_name || 'Ainda não assumido'}
+                </small>
+                <small className="marketing-lead-owner">
+                  {lead.non_commercial_reason
+                    ? `Não comercial · ${qualityReasons[lead.non_commercial_reason] ?? lead.non_commercial_reason}`
+                    : 'Lead comercial'}
                 </small>
               </span>
               <span>

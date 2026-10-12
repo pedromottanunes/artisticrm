@@ -77,6 +77,7 @@ export async function agendaPage(
                 },
               },
               { $unwind: '$opportunity' },
+              { $match: { 'opportunity.non_commercial_reason': null } },
               ...(user.role === 'manager' ? [] : [{ $match: { 'opportunity.owner_id': user.id } }]),
               { $limit: 51 },
               {
@@ -109,7 +110,8 @@ export async function agendaPage(
           await db.query<AgendaRow>(
             `SELECT a.id,a.opportunity_id,a.starts_at,a.unit,a.status,a.version,c.name,o.owner_id
         FROM appointments a JOIN opportunities o ON o.id=a.opportunity_id JOIN contacts c ON c.id=o.contact_id
-        WHERE ($1::boolean OR o.owner_id=$2) AND a.starts_at >= $3 AND a.starts_at < $4
+        WHERE o.non_commercial_reason IS NULL
+          AND ($1::boolean OR o.owner_id=$2) AND a.starts_at >= $3 AND a.starts_at < $4
           AND ($5::timestamptz IS NULL OR (a.starts_at,a.id)>($5::timestamptz,$6::uuid))
         ORDER BY a.starts_at,a.id LIMIT 51`,
             [user.role === 'manager', user.id, from, to, cursor?.at ?? null, cursor?.id ?? null],

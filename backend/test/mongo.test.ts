@@ -1,3 +1,4 @@
+import { checkLeadQuality } from './lead-quality-checks.js';
 import { before, after, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac, randomUUID } from 'node:crypto';
@@ -84,7 +85,13 @@ before(
     // A real, isolated mongod replica set: tests never use an Atlas URI or a live database.
     replica = await MongoMemoryReplSet.create({
       binary: { version: '8.0.12' },
-      replSet: { count: 1, storageEngine: 'wiredTiger' },
+      replSet: {
+        count: 1,
+        storageEngine: 'wiredTiger',
+        // These tests advance an injected business clock. The real-time TTL monitor
+        // would randomly delete their historical sessions/receipts between assertions.
+        args: ['--setParameter', 'ttlMonitorEnabled=false'],
+      },
     });
     db = await openMongo(replica.getUri(), database);
     await initializeMongo(db);
@@ -1543,3 +1550,6 @@ test(
     }
   },
 );
+
+test('Lead quality: compensation, pool, archive, notifications and restoration (Mongo)', () =>
+  checkLeadQuality(db, manager, users));

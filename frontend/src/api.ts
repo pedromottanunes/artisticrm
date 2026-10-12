@@ -41,6 +41,7 @@ export interface MessageShortcut {
   updated_at: string;
 }
 export interface Lead {
+  non_commercial_reason?: string | null;
   acquisition?: {
     kind: 'paid' | 'organic' | 'manual';
     ad_id: string | null;
@@ -118,6 +119,7 @@ export interface MetaAttribution {
   received_at: string;
 }
 export interface ConversationSummary {
+  non_commercial_reason?: string | null;
   id: string;
   opportunity_id: string;
   contact_name: string;
@@ -161,6 +163,7 @@ export type ConsultationStatus =
   'UNDEFINED' | 'NOT_SCHEDULED' | 'SCHEDULED' | 'ATTENDED' | 'NO_SHOW' | 'CANCELLED';
 export type ContractStatus = 'awaiting' | 'signed' | 'not_signed';
 export type LeadListCategory =
+  | 'NON_COMMERCIAL'
   | 'ALL'
   | 'NOT_SCHEDULED'
   | 'SCHEDULED'
@@ -171,6 +174,7 @@ export type LeadListCategory =
   | 'CLOSED'
   | 'DECLINED';
 export interface LeadListRow {
+  non_commercial_reason?: string | null;
   id: string;
   name: string;
   source: string;

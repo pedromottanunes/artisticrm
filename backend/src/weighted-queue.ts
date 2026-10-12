@@ -6,6 +6,7 @@ export interface WeightedQueueParticipant {
 }
 
 export interface WeightedQueueSelection<T extends WeightedQueueParticipant> {
+  compensationId?: string;
   selected: T;
   credits: Map<string, number>;
   totalWeight: number;

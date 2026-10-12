@@ -108,6 +108,7 @@ export function App() {
   const [notifications, setNotifications] = useState(false);
   const [whatsappUrl, setWhatsappUrl] = useState('');
   const [inboxTargetId, setInboxTargetId] = useState(readInboxTarget);
+  const [inboxTargetArchived, setInboxTargetArchived] = useState(false);
   const [busyId, setBusyId] = useState('');
   const [poolCounts, setPoolCounts] = useState({ leads: 0, comments: 0 });
   const [now, setNow] = useState(Date.now());
@@ -116,6 +117,7 @@ export function App() {
   const requestSeq = useRef(0);
   const claims = useRef(new Map<string, { key: string; version: number; mode: string }>());
   const detailSeq = useRef(0);
+  const qualityTransition = useRef('');
   const refreshRequest = useRef<
     { epoch: number; controller: AbortController; promise: Promise<void> } | undefined
   >(undefined);
@@ -192,15 +194,65 @@ export function App() {
     if (!detail || !data || data.user.role === 'manager') return;
     const current = data.opportunities.find((l) => l.id === detail.id);
     if (
-      !current ||
-      current.owner_id !== detail.owner_id ||
-      current.reserved_to !== detail.reserved_to
+      (!current && qualityTransition.current !== detail.id && !detail.non_commercial_reason) ||
+      (current &&
+        (current.owner_id !== detail.owner_id || current.reserved_to !== detail.reserved_to))
     ) {
       detailSeq.current++;
       setDetail(null);
       setWhatsappUrl('');
     }
   }, [data, detail]);
+  useEffect(() => {
+    const changed = (event: Event) => {
+      if (event instanceof CustomEvent && event.detail?.message) setNotice(event.detail.message);
+      const changedLeadId =
+        event instanceof CustomEvent && typeof event.detail?.leadId === 'string'
+          ? event.detail.leadId
+          : '';
+      const openLeadId = detail?.id ?? '';
+      const refreshes: Promise<unknown>[] = [refresh(), refreshPoolCounts(true)];
+      setLeadRevision((value) => value + 1);
+      if (openLeadId && changedLeadId === openLeadId) {
+        qualityTransition.current = openLeadId;
+        setWhatsappUrl('');
+        const sequence = ++detailSeq.current;
+        const epoch = generation.current;
+        const detailRefresh = api<Detail>(`/opportunities/${openLeadId}`)
+          .then((value) => {
+            if (sequence === detailSeq.current && epoch === generation.current) setDetail(value);
+          })
+          .catch((error) => {
+            if (sequence !== detailSeq.current || epoch !== generation.current) return;
+            if (
+              qualityTransition.current === openLeadId ||
+              (error instanceof ApiError && [401, 403, 404].includes(error.status))
+            )
+              setDetail(null);
+          });
+        refreshes.push(detailRefresh);
+      }
+      void Promise.allSettled(refreshes).then(() => {
+        if (qualityTransition.current === openLeadId) qualityTransition.current = '';
+      });
+    };
+    const storage = (event: StorageEvent) => {
+      if (event.key !== 'artisti-lead-quality') return;
+      let leadId = '';
+      try {
+        leadId = String(JSON.parse(event.newValue ?? '{}').leadId ?? '');
+      } catch {
+        /* Value written by an older tab. */
+      }
+      window.dispatchEvent(new CustomEvent('artisti-lead-quality', { detail: { leadId } }));
+    };
+    window.addEventListener('artisti-lead-quality', changed);
+    window.addEventListener('storage', storage);
+    return () => {
+      window.removeEventListener('artisti-lead-quality', changed);
+      window.removeEventListener('storage', storage);
+    };
+  }, [detail?.id, refresh, refreshPoolCounts]);
   useEffect(() => {
     void refresh();
     return () => refreshRequest.current?.controller.abort();
@@ -260,16 +312,17 @@ export function App() {
     // These pages have their own focused requests or only change after an explicit action.
     // Avoid transferring the complete workspace while the attendant is using the chat.
     if (
-      page === 'inbox' ||
-      page === 'agenda' ||
-      page === 'comments' ||
-      page === 'lists' ||
-      page === 'reports' ||
-      page === 'meta' ||
-      page === 'google' ||
-      page === 'contracts' ||
-      page === 'settings' ||
-      (data.user.role === 'manager' && page === 'central')
+      !detail &&
+      (page === 'inbox' ||
+        page === 'agenda' ||
+        page === 'comments' ||
+        page === 'lists' ||
+        page === 'reports' ||
+        page === 'meta' ||
+        page === 'google' ||
+        page === 'contracts' ||
+        page === 'settings' ||
+        (data.user.role === 'manager' && page === 'central'))
     )
       return;
     const pollingIntervalMs =
@@ -292,7 +345,7 @@ export function App() {
       window.removeEventListener('online', focus);
       document.removeEventListener('visibilitychange', visible);
     };
-  }, [data?.user.id, page, refresh]);
+  }, [data?.user.id, detail?.id, page, refresh]);
   useEffect(() => {
     const id = setInterval(() => {
       if (!document.hidden)
@@ -310,7 +363,10 @@ export function App() {
     window.location.hash = next;
     window.scrollTo(0, 0);
   };
-  const consumeInboxTarget = useCallback(() => setInboxTargetId(''), []);
+  const consumeInboxTarget = useCallback(() => {
+    setInboxTargetId('');
+    setInboxTargetArchived(false);
+  }, []);
   const openDetail = async (id: string, history = false) => {
     const sequence = ++detailSeq.current;
     const epoch = generation.current;
@@ -347,6 +403,7 @@ export function App() {
       detailSeq.current++;
       setDetail(null);
       setInboxTargetId(lead.id);
+      setInboxTargetArchived(Boolean(lead.non_commercial_reason));
       navigate('inbox');
       return;
     }
@@ -720,6 +777,7 @@ export function App() {
               user={data.user}
               connected={connected}
               targetOpportunityId={inboxTargetId}
+              targetArchived={inboxTargetArchived}
               onTargetConsumed={consumeInboxTarget}
               onOpenLead={(id) => void openDetail(id)}
               onNotice={setNotice}

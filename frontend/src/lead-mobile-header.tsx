@@ -64,7 +64,7 @@ export function LeadMobileHeader({
           {saving ? 'Salvando…' : 'Salvar'}
         </button>
       )}
-      {editable && (
+      {(editable || canConverse) && (
         <details
           ref={menu}
           className="lead-mobile-menu"
@@ -94,28 +94,32 @@ export function LeadMobileHeader({
                 Abrir conversa
               </button>
             )}
-            <button
-              type="button"
-              disabled={!hasSale || saving}
-              onClick={() => {
-                closeMenu();
-                onCopy();
-              }}
-            >
-              <Copy size={18} />
-              {copied ? 'Copiado!' : 'Copiar para WhatsApp'}
-            </button>
-            <button
-              type="button"
-              disabled={!connected || saving}
-              onClick={() => {
-                closeMenu();
-                onSale();
-              }}
-            >
-              <Save size={18} />
-              {hasSale ? 'Atualizar venda' : 'Registrar venda'}
-            </button>
+            {editable && (
+              <>
+                <button
+                  type="button"
+                  disabled={!hasSale || saving}
+                  onClick={() => {
+                    closeMenu();
+                    onCopy();
+                  }}
+                >
+                  <Copy size={18} />
+                  {copied ? 'Copiado!' : 'Copiar para WhatsApp'}
+                </button>
+                <button
+                  type="button"
+                  disabled={!connected || saving}
+                  onClick={() => {
+                    closeMenu();
+                    onSale();
+                  }}
+                >
+                  <Save size={18} />
+                  {hasSale ? 'Atualizar venda' : 'Registrar venda'}
+                </button>
+              </>
+            )}
           </div>
         </details>
       )}

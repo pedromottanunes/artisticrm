@@ -1,3 +1,4 @@
+import { LeadQualityControl, qualityReasons } from './lead-quality';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   AlertTriangle,
@@ -432,6 +433,7 @@ export function InstagramInbox({
   user,
   connected,
   targetOpportunityId,
+  targetArchived,
   onTargetConsumed,
   onOpenLead,
   onNotice,
@@ -441,12 +443,14 @@ export function InstagramInbox({
   user: User;
   connected: boolean;
   targetOpportunityId: string;
+  targetArchived: boolean;
   onTargetConsumed: () => void;
   onOpenLead: (id: string) => void;
   onNotice: (message: string) => void;
   onConnectionChange: (connected: boolean) => void;
   onSessionExpired: () => void;
 }) {
+  const [archive, setArchive] = useState(targetArchived);
   const [configured, setConfigured] = useState(true);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [selectedId, setSelectedId] = useState('');
@@ -702,7 +706,7 @@ export function InstagramInbox({
       const request = signalWithTimeout(controller.signal, 20_000);
       const sequence = ++listSequence.current;
       try {
-        const view = user.role === 'manager' ? 'all' : 'mine';
+        const view = archive ? 'non_commercial' : user.role === 'manager' ? 'all' : 'mine';
         const revision = listCache.current?.revision;
         const response = await api<ListResponse | { unchanged: true; revision: string }>(
           `/conversations?view=${view}${revision ? `&revision=${revision}` : ''}`,
@@ -801,7 +805,15 @@ export function InstagramInbox({
         if (sequence === listSequence.current) setLoading(false);
       }
     },
-    [handleError, loadThread, onConnectionChange, onTargetConsumed, targetOpportunityId, user.role],
+    [
+      archive,
+      handleError,
+      loadThread,
+      onConnectionChange,
+      onTargetConsumed,
+      targetOpportunityId,
+      user.role,
+    ],
   );
 
   useEffect(() => {
@@ -810,6 +822,22 @@ export function InstagramInbox({
       if (!document.hidden) void refresh(true);
     }, 5000);
     return () => window.clearInterval(timer);
+  }, [refresh]);
+
+  useEffect(() => {
+    if (!targetOpportunityId) return;
+    listCache.current = null;
+    setArchive(targetArchived);
+  }, [targetArchived, targetOpportunityId]);
+
+  useEffect(() => {
+    const changed = () => {
+      listCache.current = null;
+      loadedThreadVersion.current.clear();
+      void refresh(false, true);
+    };
+    window.addEventListener('artisti-lead-quality', changed);
+    return () => window.removeEventListener('artisti-lead-quality', changed);
   }, [refresh]);
 
   const latestMessageId = thread?.messages.at(-1)?.id;
@@ -950,7 +978,9 @@ export function InstagramInbox({
 
   const selectedConversation = conversations.find((item) => item.id === selectedId);
   const canControlNotifications =
-    user.role === 'attendant' && selectedConversation?.owner_id === user.id;
+    user.role === 'attendant' &&
+    selectedConversation?.owner_id === user.id &&
+    !selectedConversation?.non_commercial_reason;
   const toggleNotifications = async () => {
     const conversation = conversations.find((item) => item.id === selectedIdRef.current);
     if (
@@ -1042,6 +1072,28 @@ export function InstagramInbox({
             <RefreshCw size={17} />
           </button>
         </header>
+        <div className="quality-tabs" role="group" aria-label="Tipo de atendimento">
+          <button
+            type="button"
+            aria-pressed={!archive}
+            onClick={() => {
+              listCache.current = null;
+              setArchive(false);
+            }}
+          >
+            Ativos
+          </button>
+          <button
+            type="button"
+            aria-pressed={archive}
+            onClick={() => {
+              listCache.current = null;
+              setArchive(true);
+            }}
+          >
+            Não comerciais
+          </button>
+        </div>
         <div className="inbox-conversations">
           {conversations.map((conversation) => (
             <button
@@ -1110,6 +1162,15 @@ export function InstagramInbox({
                 </div>
               </div>
               <div className="thread-actions">
+                {selectedConversation?.state === 'CLAIMED' &&
+                  (user.role === 'manager' || selectedConversation.owner_id === user.id) && (
+                    <LeadQualityControl
+                      key={thread.opportunity_id}
+                      leadId={thread.opportunity_id}
+                      reason={selectedConversation.non_commercial_reason}
+                      disabled={!connected || sending}
+                    />
+                  )}
                 {canControlNotifications && (
                   <button
                     type="button"
@@ -1146,6 +1207,12 @@ export function InstagramInbox({
                 </button>
               </div>
             </header>
+            {selectedConversation?.non_commercial_reason && (
+              <div className="quality-archive-note" role="status">
+                {qualityReasons[selectedConversation.non_commercial_reason]} · Silenciado
+                automaticamente. Mensagens continuam disponíveis sem notificações.
+              </div>
+            )}
             <div ref={messageListRef} className="thread-messages" aria-live="polite">
               {thread.messages.map((message) => (
                 <article

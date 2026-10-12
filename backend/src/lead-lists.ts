@@ -6,6 +6,7 @@ import type { User } from './types.js';
 
 export const leadListCategories = [
   'ALL',
+  'NON_COMMERCIAL',
   'NOT_SCHEDULED',
   'SCHEDULED',
   'ATTENDED',
@@ -43,6 +44,7 @@ interface LeadListRow {
 
 const sqlCategory: Record<LeadListCategory, string> = {
   ALL: 'TRUE',
+  NON_COMMERCIAL: 'o.non_commercial_reason IS NOT NULL',
   NOT_SCHEDULED: "o.consultation_status IN ('UNDEFINED','NOT_SCHEDULED')",
   SCHEDULED: "o.consultation_status='SCHEDULED'",
   ATTENDED: "o.consultation_status='ATTENDED'",
@@ -55,6 +57,8 @@ const sqlCategory: Record<LeadListCategory, string> = {
 
 function mongoCategory(category: LeadListCategory): Document {
   switch (category) {
+    case 'NON_COMMERCIAL':
+      return { non_commercial_reason: { $ne: null } };
     case 'NOT_SCHEDULED':
       return { consultation_status: { $in: ['UNDEFINED', 'NOT_SCHEDULED'] } };
     case 'SCHEDULED':
@@ -83,9 +87,11 @@ function emptyCounts() {
 
 function mongoCountGroup(): Document {
   const sumWhen = (condition: Document) => ({ $sum: { $cond: [condition, 1, 0] } });
-  return {
+  const commercial = { $eq: [{ $ifNull: ['$non_commercial_reason', null] }, null] };
+  const group: Document = {
     _id: null,
-    ALL: { $sum: 1 },
+    ALL: sumWhen(commercial),
+    NON_COMMERCIAL: sumWhen({ $not: [commercial] }),
     NOT_SCHEDULED: sumWhen({
       $in: ['$consultation_status', ['UNDEFINED', 'NOT_SCHEDULED']],
     }),
@@ -99,6 +105,11 @@ function mongoCountGroup(): Document {
     CLOSED: sumWhen({ $in: ['$stage', ['CLOSED_WITH_DATE', 'CLOSED_WITHOUT_DATE']] }),
     DECLINED: sumWhen({ $eq: ['$stage', 'DECLINED'] }),
   };
+  for (const category of leadListCategories) {
+    if (category !== 'ALL' && category !== 'NON_COMMERCIAL')
+      group[category].$sum.$cond[0] = { $and: [commercial, group[category].$sum.$cond[0]] };
+  }
+  return group;
 }
 
 export async function leadListsPage(
@@ -155,7 +166,10 @@ export async function leadListsPage(
       counts[category] = Number(countResult?.[category] ?? 0);
     const total = counts[query.category];
     const page = Math.min(query.page, Math.max(1, Math.ceil(total / pageSize)));
-    const categoryFilter = mongoCategory(query.category);
+    const categoryFilter = {
+      ...mongoCategory(query.category),
+      ...(query.category === 'NON_COMMERCIAL' ? {} : { non_commercial_reason: null }),
+    };
 
     // Without a text search, filter, order and paginate before joining contacts.
     // At most 30 documents reach the lookup instead of the consultant's whole list.
@@ -182,6 +196,7 @@ export async function leadListsPage(
               reserved_to: 1,
               state: 1,
               next_action: 1,
+              non_commercial_reason: 1,
             },
           },
         ],
@@ -206,15 +221,16 @@ export async function leadListsPage(
     const countRow = (
       await tx.query<Record<string, string>>(
         `SELECT
-           count(*) AS "ALL",
-           count(*) FILTER (WHERE ${sqlCategory.NOT_SCHEDULED}) AS "NOT_SCHEDULED",
-           count(*) FILTER (WHERE ${sqlCategory.SCHEDULED}) AS "SCHEDULED",
-           count(*) FILTER (WHERE ${sqlCategory.ATTENDED}) AS "ATTENDED",
-           count(*) FILTER (WHERE ${sqlCategory.NO_SHOW}) AS "NO_SHOW",
-           count(*) FILTER (WHERE ${sqlCategory.FOLLOW_UP}) AS "FOLLOW_UP",
-           count(*) FILTER (WHERE ${sqlCategory.CONTRACT_PENDING}) AS "CONTRACT_PENDING",
-           count(*) FILTER (WHERE ${sqlCategory.CLOSED}) AS "CLOSED",
-           count(*) FILTER (WHERE ${sqlCategory.DECLINED}) AS "DECLINED"
+           count(*) FILTER (WHERE o.non_commercial_reason IS NULL) AS "ALL",
+           count(*) FILTER (WHERE o.non_commercial_reason IS NOT NULL) AS "NON_COMMERCIAL",
+           count(*) FILTER (WHERE o.non_commercial_reason IS NULL AND ${sqlCategory.NOT_SCHEDULED}) AS "NOT_SCHEDULED",
+           count(*) FILTER (WHERE o.non_commercial_reason IS NULL AND ${sqlCategory.SCHEDULED}) AS "SCHEDULED",
+           count(*) FILTER (WHERE o.non_commercial_reason IS NULL AND ${sqlCategory.ATTENDED}) AS "ATTENDED",
+           count(*) FILTER (WHERE o.non_commercial_reason IS NULL AND ${sqlCategory.NO_SHOW}) AS "NO_SHOW",
+           count(*) FILTER (WHERE o.non_commercial_reason IS NULL AND ${sqlCategory.FOLLOW_UP}) AS "FOLLOW_UP",
+           count(*) FILTER (WHERE o.non_commercial_reason IS NULL AND ${sqlCategory.CONTRACT_PENDING}) AS "CONTRACT_PENDING",
+           count(*) FILTER (WHERE o.non_commercial_reason IS NULL AND ${sqlCategory.CLOSED}) AS "CLOSED",
+           count(*) FILTER (WHERE o.non_commercial_reason IS NULL AND ${sqlCategory.DECLINED}) AS "DECLINED"
          FROM opportunities o ${countJoin} WHERE ${where}`,
         filterParams,
       )
@@ -227,9 +243,9 @@ export async function leadListsPage(
     const rows = (
       await tx.query<LeadListRow>(
         `SELECT o.id,c.name,o.source,o.stage,o.consultation_status,
-                o.owner_id,o.reserved_to,o.state,o.next_action
+                o.owner_id,o.reserved_to,o.state,o.next_action,o.non_commercial_reason
          FROM opportunities o JOIN contacts c ON c.id=o.contact_id
-         WHERE ${where} AND (${sqlCategory[query.category]})
+         WHERE ${where} AND (${sqlCategory[query.category]}) ${query.category === 'NON_COMMERCIAL' ? '' : 'AND o.non_commercial_reason IS NULL'}
          ORDER BY o.created_at DESC,o.id DESC
          LIMIT $${limitParameter} OFFSET $${limitParameter + 1}`,
         [...filterParams, pageSize, (page - 1) * pageSize],
