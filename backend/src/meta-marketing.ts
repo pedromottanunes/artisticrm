@@ -19,6 +19,8 @@ import {
   shiftedDate,
 } from './meta-marketing-reports.js';
 
+const HISTORICAL_ACQUISITION_START = '2026-10-01';
+
 export interface MetaMarketingConfig {
   accessToken: string;
   adAccountId: string;
@@ -211,11 +213,18 @@ export class MetaMarketing {
       throw new DomainError('META_MARKETING_DISABLED', 'Marketing API não configurada.', 503);
     const now = this.clock();
     const control = await this.store.control();
-    if (Date.parse(control.last_manual_at ?? '') > now.getTime() - 300_000)
-      return { queued: true, already_requested: true };
     const to = input.to ?? marketingDate(now, control.timezone || this.config.timeZone);
     const from = input.from ?? shiftedDate(to, 1 - (input.days ?? 7));
     marketingPeriod(from, to, control.timezone || this.config.timeZone || 'America/Sao_Paulo', now);
+    const manualAt = Date.parse(control.last_manual_at ?? '');
+    if (manualAt > now.getTime() - 300_000)
+      return {
+        queued: Boolean(control.requested_from),
+        already_requested: true,
+        requested_from: control.requested_from || null,
+        requested_to: control.requested_to || null,
+        retry_after: new Date(manualAt + 300_000).toISOString(),
+      };
     const queued = await this.store.request(
       {
         requested_at: now.toISOString(),
@@ -228,7 +237,25 @@ export class MetaMarketing {
       },
       now,
     );
-    return { queued: true, already_requested: !queued };
+    if (queued)
+      return {
+        queued: true,
+        already_requested: false,
+        requested_from: from,
+        requested_to: to,
+        retry_after: null,
+      };
+    const latest = await this.store.control();
+    const latestManualAt = Date.parse(latest.last_manual_at ?? '');
+    return {
+      queued: Boolean(latest.requested_from),
+      already_requested: true,
+      requested_from: latest.requested_from || null,
+      requested_to: latest.requested_to || null,
+      retry_after: Number.isFinite(latestManualAt)
+        ? new Date(latestManualAt + 300_000).toISOString()
+        : null,
+    };
   }
 
   async run() {
@@ -287,6 +314,23 @@ export class MetaMarketing {
         );
         control = await this.store.control();
       }
+      const timeZone = control.timezone || config.timeZone || 'America/Sao_Paulo';
+      const today = marketingDate(now, timeZone);
+      if (today >= HISTORICAL_ACQUISITION_START) {
+        const historicalPeriod = marketingPeriod(
+          HISTORICAL_ACQUISITION_START,
+          today,
+          timeZone,
+          now,
+        );
+        await this.store.backfillAcquisitions(
+          now,
+          lease,
+          historicalPeriod.start,
+          now,
+          config.instagramAccountId,
+        );
+      }
       await this.store.backfill(now, lease);
       for (const job of await this.store.dueAds(now, config.instagramAccountId)) {
         try {
@@ -306,7 +350,6 @@ export class MetaMarketing {
         }
       }
       let result = { rows_synced: 0 };
-      const today = marketingDate(now, control.timezone || config.timeZone);
       const weekDue =
         !control.last_week_sync || Date.parse(control.last_week_sync) <= now.getTime() - 86_400_000;
       const monthDue =
@@ -370,13 +413,21 @@ export class MetaMarketing {
       last_error: control.last_error || state?.last_error || null,
       rows_synced: state?.rows_synced ?? 0,
       queued: Boolean(control.requested_from),
+      requested_from: control.requested_from || null,
+      requested_to: control.requested_to || null,
       next_sync_at: control.next_sync_at ?? null,
       paused_until: control.pause_until ?? null,
       timezone: control.timezone ?? null,
     };
   }
 
-  async report(from: string, to: string, page = 1, focusAd?: string) {
+  async report(
+    from: string,
+    to: string,
+    page = 1,
+    focusAd?: string,
+    adGroup: 'with_leads' | 'without_leads' | 'all' = 'all',
+  ) {
     const result = await marketingReport(
       this.store,
       this.config,
@@ -385,6 +436,7 @@ export class MetaMarketing {
       this.clock(),
       page,
       focusAd,
+      adGroup,
     );
     result.last_sync = (await this.status()).last_completed_at as string | Date | null;
     return result;

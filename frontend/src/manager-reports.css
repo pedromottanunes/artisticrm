@@ -188,6 +188,14 @@
 .reports-section-heading h2 {
   font-size: 15px;
 }
+.meta-ads-heading > div {
+  min-width: 0;
+}
+.meta-ads-heading p {
+  margin-top: 2px;
+  color: #7f93a5;
+  font-size: 12px;
+}
 .meta-ads-heading > .button {
   margin-left: auto;
 }
@@ -196,6 +204,9 @@
   border: 1px solid var(--line);
   border-radius: 9px;
   background: #0c1d2c;
+}
+.meta-ads-panel {
+  overflow: hidden;
 }
 .meta-ads-disabled {
   padding: 20px;
@@ -226,6 +237,28 @@
   border: 1px solid var(--line);
   border-radius: 9px;
 }
+.meta-ads-updated {
+  min-height: 42px;
+  padding: 10px 17px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  color: #879caf;
+  font-size: 12px;
+}
+.meta-ads-updated svg {
+  flex: 0 0 auto;
+  color: var(--teal);
+}
+.meta-ads-note {
+  padding: 11px 14px;
+  border: 1px solid #4ba7aa33;
+  border-radius: 8px;
+  color: #91a5b6;
+  background: #228c900d;
+  font-size: 12px;
+}
 .meta-ads-summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -244,7 +277,7 @@
   border-right: 0;
 }
 .meta-ads-summary svg {
-  grid-row: 1 / 3;
+  grid-row: 1 / 4;
   color: var(--gold);
 }
 .meta-ads-summary span {
@@ -258,46 +291,272 @@
   color: #dbe3ea;
   font-size: 17px;
 }
-.meta-ads-note {
-  padding: 14px 17px;
-  border-bottom: 1px solid var(--line);
-  color: #879caf;
-  font-size: 12px;
-  line-height: 1.7;
-}
-.meta-ads-table-wrap {
-  overflow-x: auto;
-}
-.meta-ads-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-.meta-ads-table th,
-.meta-ads-table td {
-  padding: 12px 17px;
-  border-bottom: 1px solid var(--line);
-  text-align: right;
+.meta-ads-summary small {
+  overflow: hidden;
+  color: #6f8799;
+  font-size: 10px;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.meta-ads-table th {
-  color: #758ba0;
+.meta-origin-breakdown {
+  margin: 16px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #102334;
+}
+.meta-origin-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.meta-origin-heading h3,
+.meta-ads-list-heading h3 {
+  color: #dbe3ea;
+  font-size: 14px;
+}
+.meta-origin-heading p,
+.meta-ads-list-heading p {
+  margin-top: 3px;
+  color: #879caf;
+  font-size: 12px;
+}
+.meta-origin-heading > span {
+  color: #768c9f;
+  font-size: 11px;
+  text-align: right;
+}
+.meta-origin-bar {
+  height: 12px;
+  margin: 15px 0 13px;
+  display: flex;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #ffffff0b;
+}
+.meta-origin-bar i {
+  min-width: 0;
+  height: 100%;
+}
+.meta-origin-bar .identified,
+.meta-origin-legend .identified > i {
+  background: #4aa689;
+}
+.meta-origin-bar .pending,
+.meta-origin-legend .pending > i {
+  background: #d6a456;
+}
+.meta-origin-bar .unattributed,
+.meta-origin-legend .unattributed > i {
+  background: #637b8c;
+}
+.meta-origin-legend {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+.meta-origin-legend > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+}
+.meta-origin-legend > div > i {
+  width: 9px;
+  height: 9px;
+  margin-top: 4px;
+  border-radius: 50%;
+}
+.meta-origin-legend p {
+  min-width: 0;
+}
+.meta-origin-legend strong,
+.meta-origin-legend span {
+  display: block;
+}
+.meta-origin-legend strong {
+  color: #cbd6df;
+  font-size: 12px;
   font-weight: 500;
 }
-.meta-ads-table td {
-  color: #bdcad5;
+.meta-origin-legend span {
+  margin-top: 3px;
+  color: #7c92a4;
+  font-size: 11px;
+  line-height: 1.5;
 }
-.meta-ads-table th:first-child,
-.meta-ads-table td:first-child {
-  max-width: 430px;
+.meta-origin-empty {
+  padding-top: 14px;
+  color: #7f93a5;
+  font-size: 12px;
+}
+.meta-ads-sync-note {
+  margin: 0 16px 12px;
+  padding: 11px 13px;
+  border: 1px solid #d6a45633;
+  border-radius: 8px;
+  color: #b8a174;
+  background: #d6a4560c;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.meta-ads-sync-note.warning {
+  border-color: #b15e4a55;
+  color: #d69a89;
+  background: #a0442e10;
+}
+.meta-ads-list-heading {
+  padding: 16px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.meta-ad-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+.meta-ad-tabs button {
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: #91a5b6;
+  background: transparent;
+  font-size: 11px;
+}
+.meta-ad-tabs button[aria-pressed='true'] {
+  border-color: #4ba7aa;
+  color: #b7e6e6;
+  background: #228c901d;
+}
+.meta-ad-tabs button:focus-visible,
+.meta-ad-result-actions .button:focus-visible,
+.meta-ad-origin-actions a:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+.meta-ads-results {
+  display: grid;
+}
+.meta-ad-result {
+  min-width: 0;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: minmax(230px, 0.9fr) minmax(520px, 1.8fr) minmax(150px, auto);
+  align-items: center;
+  gap: 18px;
+  border-bottom: 1px solid var(--line);
+}
+.meta-ad-identity {
+  min-width: 0;
+}
+.meta-ad-source {
+  display: inline-flex;
+  min-height: 23px;
+  padding: 3px 7px;
+  align-items: center;
+  border-radius: 999px;
+  color: #b8a174;
+  background: #d6a45612;
+  font-size: 10px;
+}
+.meta-ad-source.confirmed {
+  color: #82cbb3;
+  background: #4aa68917;
+}
+.meta-ad-identity h3 {
+  margin-top: 8px;
   overflow: hidden;
-  text-align: left;
+  color: #dce5ec;
+  font-size: 13px;
+  font-weight: 500;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.meta-ad-identity p,
+.meta-ad-identity small {
+  display: block;
+  overflow: hidden;
+  color: #8ca0b1;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.meta-ad-identity p {
+  margin-top: 3px;
+}
+.meta-ad-identity small {
+  margin-top: 2px;
+  color: #6f8799;
+}
+.meta-ad-origin-actions {
+  min-height: 20px;
+  margin-top: 7px;
+  font-size: 11px;
+}
+.meta-ad-origin-actions a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--teal);
+}
+.meta-ad-origin-actions span {
+  color: #6f8799;
+}
+.meta-ad-metrics {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(105px, 1fr));
+  gap: 9px;
+}
+.meta-ad-metrics > div {
+  min-width: 0;
+  padding: 9px 10px;
+  border-radius: 7px;
+  background: #ffffff08;
+}
+.meta-ad-metrics dt {
+  overflow: hidden;
+  color: #748b9e;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.meta-ad-metrics dd {
+  margin: 3px 0 0;
+  color: #dbe5ec;
+  font-size: 13px;
+  font-weight: 500;
+}
+.meta-ad-metrics small {
+  display: block;
+  margin-top: 2px;
+  color: #778d9f;
+  font-size: 9px;
+}
+.meta-ad-result-actions {
+  display: grid;
+  justify-items: stretch;
+  gap: 6px;
+  color: #6f8799;
+  font-size: 10px;
+  text-align: center;
+}
+.meta-ad-result-actions .button {
+  white-space: nowrap;
 }
 .meta-ads-panel > footer {
-  padding: 11px 17px;
+  padding: 13px 17px;
   color: #70869a;
   font-size: 11px;
+  line-height: 1.55;
 }
 .reports-pair,
 .reports-charts {
@@ -395,6 +654,13 @@
   .reports-overview {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .meta-ad-result {
+    grid-template-columns: minmax(220px, 0.8fr) minmax(460px, 1.7fr);
+  }
+  .meta-ad-result-actions {
+    grid-column: 1 / -1;
+    justify-items: end;
+  }
 }
 @media (max-width: 700px) {
   .reports-filter,
@@ -439,6 +705,30 @@
   }
   .meta-ads-summary article:nth-child(-n + 2) {
     border-bottom: 1px solid var(--line);
+  }
+  .meta-origin-heading,
+  .meta-ads-list-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .meta-origin-heading > span {
+    text-align: left;
+  }
+  .meta-origin-legend {
+    grid-template-columns: 1fr;
+  }
+  .meta-ad-tabs {
+    justify-content: flex-start;
+  }
+  .meta-ad-result {
+    grid-template-columns: 1fr;
+  }
+  .meta-ad-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .meta-ad-result-actions {
+    grid-column: auto;
+    justify-items: stretch;
   }
   .report-average div {
     align-items: flex-start;

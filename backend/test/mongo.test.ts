@@ -38,6 +38,7 @@ test('Mongo: migração preserva campos e não reabre atendimentos duplicados', 
 import { checkProspects } from './prospect-checks.js';
 import { checkManualLeads } from './manual-lead-checks.js';
 import { checkMarketingOrigins } from './marketing-origin-checks.js';
+import { checkHistoricalAcquisitionBackfill } from './historical-acquisition-checks.js';
 import { prospectRegressions } from './prospect-regression-checks.js';
 import { checkPersonalQueueStatus } from './queue-status-checks.js';
 import {
@@ -69,6 +70,9 @@ test('sessões persistentes: deploy, renovação, concorrência e revogação (M
   checkPersistentSessions(db, users[0].email, password));
 test('origem, catálogo textual, funil, limites persistidos e retomada (Mongo)', async () => {
   await checkMarketingOrigins(db);
+});
+test('reconstroi somente a origem historica comprovada (Mongo)', async () => {
+  await checkHistoricalAcquisitionBackfill(db);
 });
 for (const [name, check] of prospectRegressions)
   test(`${name} (Mongo)`, async () => {

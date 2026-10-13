@@ -5,6 +5,7 @@ import { CRM } from '../src/crm.js';
 import { seedDemo, DEMO_PASSWORD } from '../src/seed.js';
 import { buildApp } from '../src/app.js';
 import { checkMarketingOrigins } from './marketing-origin-checks.js';
+import { checkHistoricalAcquisitionBackfill } from './historical-acquisition-checks.js';
 import {
   MetaMarketing,
   metaMarketingConfig,
@@ -85,6 +86,10 @@ after(async () => db.close());
 
 test('origem, catálogo textual, funil, limites persistidos e retomada (SQL)', async () => {
   await checkMarketingOrigins(db);
+});
+
+test('reconstroi somente a origem historica comprovada (SQL)', async () => {
+  await checkHistoricalAcquisitionBackfill(db);
 });
 
 test('Marketing API fica desligada por padrão e configuração parcial falha fechada', () => {
@@ -310,6 +315,21 @@ test('rotas de Marketing API são exclusivas da gestão', async () => {
     });
     assert.equal(report.statusCode, 200);
     assert.ok(!report.body.includes(config.accessToken));
+    const filtered = await app.inject({
+      url: '/api/v1/reports/meta-ads?from=2026-09-23&to=2026-09-23&ad_group=with_leads',
+      headers: manager,
+    });
+    assert.equal(filtered.statusCode, 200);
+    assert.ok('ad_groups' in filtered.json());
+    assert.equal(
+      (
+        await app.inject({
+          url: '/api/v1/reports/meta-ads?from=2026-09-23&to=2026-09-23&ad_group=invalid',
+          headers: manager,
+        })
+      ).statusCode,
+      400,
+    );
   } finally {
     await app.close();
   }

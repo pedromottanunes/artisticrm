@@ -174,7 +174,25 @@ export async function checkMarketingOrigins(db: MarketingDB) {
   assert.deepEqual(await disabled.run(), { rows_synced: 0 });
 
   const marketing = new MetaMarketing(db, config, request, () => now);
-  await marketing.requestSync({ from: '2026-09-23', to: '2026-09-23' });
+  const accepted = await marketing.requestSync({ from: '2026-09-23', to: '2026-09-23' });
+  assert.deepEqual(accepted, {
+    queued: true,
+    already_requested: false,
+    requested_from: '2026-09-23',
+    requested_to: '2026-09-23',
+    retry_after: null,
+  });
+  const duplicate = await marketing.requestSync({ from: '2026-09-23', to: '2026-09-23' });
+  assert.equal(duplicate.already_requested, true);
+  assert.equal(duplicate.requested_from, '2026-09-23');
+  assert.equal(duplicate.requested_to, '2026-09-23');
+  const otherPeriod = await marketing.requestSync({ from: '2026-09-22', to: '2026-09-22' });
+  assert.equal(otherPeriod.already_requested, true);
+  assert.equal(otherPeriod.requested_from, '2026-09-23');
+  assert.equal(otherPeriod.requested_to, '2026-09-23');
+  await assert.rejects(marketing.requestSync({ from: '2026-09-23', to: '2026-09-22' }), {
+    code: 'INVALID_PERIOD',
+  });
   assert.equal(calls.length, 0);
   await marketing.run();
   await marketing.run(); // Enrich the zero-lead ad discovered in Insights.
@@ -204,6 +222,26 @@ export async function checkMarketingOrigins(db: MarketingDB) {
   assert.equal(ad.sales_value, 1000);
   assert.equal(ad.roas, 50);
   assert.equal(report.ads.find((row) => row.ad_id === '222')!.cpl, null);
+  assert.deepEqual(report.ad_groups, { with_leads: 2, without_leads: 1, all: 3 });
+  const withLeads = await marketing.report('2026-09-23', '2026-09-23', 1, undefined, 'with_leads');
+  assert.deepEqual(
+    withLeads.ads.map((row) => row.ad_id),
+    ['111', '222'],
+  );
+  assert.equal(withLeads.total, 2);
+  const withoutLeads = await marketing.report(
+    '2026-09-23',
+    '2026-09-23',
+    1,
+    undefined,
+    'without_leads',
+  );
+  assert.deepEqual(
+    withoutLeads.ads.map((row) => row.ad_id),
+    ['333'],
+  );
+  assert.equal(withoutLeads.total, 1);
+  assert.equal(calls.length, beforeReads);
   assert.equal(report.campaigns[0].reach, null);
   const readAds = marketing.store.ads.bind(marketing.store);
   try {

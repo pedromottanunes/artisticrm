@@ -40,12 +40,46 @@ export interface MarketingControl {
   timezone?: string;
   backfill_cursor?: string;
   backfill_complete?: boolean;
+  acquisition_backfill_cursor?: string;
+  acquisition_backfill_complete?: boolean;
   creative_retry_at?: string;
   failures?: number;
   report_revision?: string;
 }
 export const parsedJson = <T>(value: unknown): T =>
   (typeof value === 'string' ? JSON.parse(value) : value) as T;
+
+interface HistoricalAttributionRow {
+  attribution_id: string;
+  opportunity_id: string;
+  external_id: string;
+  source_id: string | null;
+  attribution_received_at: Date | string;
+  opportunity_channel?: string | null;
+  opportunity_acquisition?: unknown;
+  opportunity_created_at?: Date | string | null;
+  inbound_opportunity_id?: string | null;
+  inbound_received_at?: Date | string | null;
+  inbox_opportunity_id?: string | null;
+  instagram_account_id?: string | null;
+  event?: unknown;
+}
+
+function sourceEventAt(event: unknown) {
+  try {
+    const parsed = parsedJson<{ lead?: { source_event_at?: unknown } }>(event);
+    return typeof parsed?.lead?.source_event_at === 'string'
+      ? parsed.lead.source_event_at
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function sameInstant(...values: (Date | string | null | undefined)[]) {
+  const times = values.map((value) => new Date(value ?? Number.NaN).getTime());
+  return times.every(Number.isFinite) && times.every((value) => value === times[0]);
+}
 
 export class MarketingStore {
   constructor(
@@ -399,6 +433,193 @@ export class MarketingStore {
       { backfill_cursor: rows.at(-1)?.source_id ?? cursor, backfill_complete: rows.length < 25 },
       lease,
     );
+  }
+
+  // One-time, bounded reconstruction for leads received before acquisition snapshots existed.
+  // It only accepts an attribution tied to the exact event that created the opportunity.
+  async backfillAcquisitions(
+    now: Date,
+    lease: string,
+    from: Date,
+    to: Date,
+    expectedInstagramAccountId?: string,
+  ) {
+    const control = await this.control();
+    if (control.acquisition_backfill_complete) return { scanned: 0, attributed: 0 };
+    const cursor = control.acquisition_backfill_cursor ?? '';
+    let rows: HistoricalAttributionRow[];
+    if (this.db.kind === 'mongo') {
+      const attributions = await this.db
+        .collection('lead_attributions')
+        .find(
+          {
+            channel: 'instagram',
+            source_type: 'ad',
+            id: { $gt: cursor },
+          },
+          { projection: { _id: 0 } },
+        )
+        .sort({ id: 1 })
+        .limit(25)
+        .maxTimeMS(5000)
+        .toArray();
+      const opportunityIds = attributions.map((row) => row.opportunity_id as string);
+      const externalIds = attributions.map((row) => row.external_id as string);
+      const [opportunities, inboundEvents, inboxEvents] = attributions.length
+        ? await Promise.all([
+            this.db
+              .collection('opportunities')
+              .find(
+                { id: { $in: opportunityIds } },
+                {
+                  projection: {
+                    _id: 0,
+                    id: 1,
+                    channel: 1,
+                    acquisition: 1,
+                    created_at: 1,
+                  },
+                },
+              )
+              .maxTimeMS(5000)
+              .toArray(),
+            this.db
+              .collection('inbound_events')
+              .find(
+                { external_id: { $in: externalIds } },
+                { projection: { _id: 0, external_id: 1, opportunity_id: 1, received_at: 1 } },
+              )
+              .maxTimeMS(5000)
+              .toArray(),
+            this.db
+              .collection('instagram_webhook_inbox')
+              .find(
+                { event_id: { $in: externalIds } },
+                {
+                  projection: {
+                    _id: 0,
+                    event_id: 1,
+                    opportunity_id: 1,
+                    instagram_account_id: 1,
+                    event: 1,
+                  },
+                },
+              )
+              .maxTimeMS(5000)
+              .toArray(),
+          ])
+        : [[], [], []];
+      const opportunityById = new Map(opportunities.map((row) => [row.id as string, row]));
+      const inboundById = new Map(inboundEvents.map((row) => [row.external_id as string, row]));
+      const inboxById = new Map(inboxEvents.map((row) => [row.event_id as string, row]));
+      rows = attributions.map((attribution) => {
+        const opportunity = opportunityById.get(attribution.opportunity_id as string);
+        const inbound = inboundById.get(attribution.external_id as string);
+        const inbox = inboxById.get(attribution.external_id as string);
+        return {
+          attribution_id: attribution.id as string,
+          opportunity_id: attribution.opportunity_id as string,
+          external_id: attribution.external_id as string,
+          source_id: (attribution.source_id as string | null | undefined) ?? null,
+          attribution_received_at: attribution.received_at as Date,
+          opportunity_channel: (opportunity?.channel as string | undefined) ?? null,
+          opportunity_acquisition: opportunity?.acquisition,
+          opportunity_created_at: (opportunity?.created_at as Date | undefined) ?? null,
+          inbound_opportunity_id: (inbound?.opportunity_id as string | undefined) ?? null,
+          inbound_received_at: (inbound?.received_at as Date | undefined) ?? null,
+          inbox_opportunity_id: (inbox?.opportunity_id as string | undefined) ?? null,
+          instagram_account_id: (inbox?.instagram_account_id as string | undefined) ?? null,
+          event: inbox?.event,
+        };
+      });
+    } else {
+      rows = (
+        await this.db.query<HistoricalAttributionRow>(
+          `SELECT a.id::text AS attribution_id,a.opportunity_id::text,a.external_id,a.source_id,
+             a.received_at AS attribution_received_at,o.channel AS opportunity_channel,
+             o.acquisition AS opportunity_acquisition,o.created_at AS opportunity_created_at,
+             e.opportunity_id::text AS inbound_opportunity_id,e.received_at AS inbound_received_at,
+             w.opportunity_id::text AS inbox_opportunity_id,w.instagram_account_id,w.event
+           FROM lead_attributions a
+           LEFT JOIN opportunities o ON o.id=a.opportunity_id
+           LEFT JOIN inbound_events e ON e.external_id=a.external_id
+           LEFT JOIN instagram_webhook_inbox w ON w.event_id=a.external_id
+           WHERE a.channel='instagram' AND a.source_type='ad'
+             AND a.id>COALESCE(NULLIF($1,'')::uuid,'00000000-0000-0000-0000-000000000000'::uuid)
+           ORDER BY a.id LIMIT 25`,
+          [cursor],
+        )
+      ).rows;
+    }
+
+    let attributed = 0;
+    await this.transaction(async (tx) => {
+      await this.assertLease(tx, lease, now);
+      for (const row of rows) {
+        const createdAt = new Date(row.opportunity_created_at ?? Number.NaN);
+        if (
+          row.opportunity_channel !== 'instagram' ||
+          row.opportunity_acquisition != null ||
+          !Number.isFinite(createdAt.getTime()) ||
+          createdAt < from ||
+          createdAt >= to ||
+          row.inbound_opportunity_id !== row.opportunity_id ||
+          row.inbox_opportunity_id !== row.opportunity_id ||
+          !sameInstant(
+            row.opportunity_created_at,
+            row.inbound_received_at,
+            row.attribution_received_at,
+          ) ||
+          !row.source_id ||
+          !/^[a-zA-Z0-9_-]{1,100}$/.test(row.source_id) ||
+          !row.instagram_account_id ||
+          !/^\d+$/.test(row.instagram_account_id) ||
+          (expectedInstagramAccountId && row.instagram_account_id !== expectedInstagramAccountId)
+        )
+          continue;
+        const receivedAt = new Date(row.attribution_received_at);
+        const providerAt = new Date(sourceEventAt(row.event) ?? Number.NaN);
+        const useProviderTime =
+          Number.isFinite(providerAt.getTime()) &&
+          providerAt.getTime() <= receivedAt.getTime() + 300_000;
+        const acquisition = {
+          kind: 'paid',
+          ad_id: row.source_id,
+          channel_account_id: row.instagram_account_id,
+          event_id: row.external_id,
+          occurred_at: (useProviderTime ? providerAt : receivedAt).toISOString(),
+          time_basis: useProviderTime ? 'provider' : 'received',
+          rule_version: 1,
+        };
+        const updated =
+          tx instanceof MongoTx
+            ? await tx.collection('opportunities').updateOne(
+                {
+                  id: row.opportunity_id,
+                  channel: 'instagram',
+                  acquisition: null,
+                  created_at: { $gte: from, $lt: to },
+                },
+                { $set: { acquisition } },
+                { session: tx.session },
+              )
+            : await tx.query(
+                `UPDATE opportunities SET acquisition=$2::jsonb
+                 WHERE id=$1 AND channel='instagram' AND acquisition IS NULL
+                   AND created_at>=$3 AND created_at<$4 RETURNING id`,
+                [row.opportunity_id, JSON.stringify(acquisition), from, to],
+              );
+        if ('modifiedCount' in updated ? updated.modifiedCount : updated.rows.length) attributed++;
+      }
+    });
+    await this.patch(
+      {
+        acquisition_backfill_cursor: rows.at(-1)?.attribution_id ?? cursor,
+        acquisition_backfill_complete: rows.length < 25,
+      },
+      lease,
+    );
+    return { scanned: rows.length, attributed };
   }
 
   async covered(from: string, to: string): Promise<number> {

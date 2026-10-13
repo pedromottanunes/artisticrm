@@ -764,10 +764,17 @@ export async function buildApp(
         from: z.string().date(),
         to: z.string().date(),
         page: z.coerce.number().int().min(1).max(20).default(1),
+        ad_group: z.enum(['with_leads', 'without_leads', 'all']).default('all'),
       })
       .strict()
       .parse(request.query);
-    return metaMarketingRuntime.marketing.report(query.from, query.to, query.page);
+    return metaMarketingRuntime.marketing.report(
+      query.from,
+      query.to,
+      query.page,
+      undefined,
+      query.ad_group,
+    );
   });
   app.get('/api/v1/reports/meta-ads/leads', async (request) => {
     requireManager(request.user);

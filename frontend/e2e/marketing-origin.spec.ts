@@ -193,12 +193,17 @@ test('relatório abre lista do anúncio só no clique e solicita atualização e
   page,
 }) => {
   await login(page, 'cadu');
+  let selectedPeriod = { from: '', to: '' };
   await page.route('**/api/v1/meta-marketing/status', (route) =>
     route.fulfill({ json: { configured: true, state: 'idle' } }),
   );
-  await page.route('**/api/v1/reports/meta-ads?*', (route) =>
-    route.fulfill({
+  await page.route('**/api/v1/reports/meta-ads?*', (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    expect(params.get('ad_group')).toBe('with_leads');
+    selectedPeriod = { from: params.get('from')!, to: params.get('to')! };
+    return route.fulfill({
       json: {
+        period: selectedPeriod,
         currency: 'BRL',
         spend: 300,
         eligible_spend: 300,
@@ -214,11 +219,15 @@ test('relatório abre lista do anúncio só no clique e solicita atualização e
         unattributed_or_organic_non_commercial_leads: 0,
         coverage_complete: true,
         total: 1,
+        page_size: 50,
+        ad_groups: { with_leads: 1, without_leads: 0, all: 1 },
         ads: [
           {
             ad_id: '111',
             ad_name: 'Resultado Carlos',
             campaign_name: 'Campanha clínica',
+            adset_name: 'Direct Florianópolis',
+            post_url: 'https://www.instagram.com/p/CARLOS/',
             scope: 'instagram_direct',
             spend: 300,
             currency: 'BRL',
@@ -233,8 +242,8 @@ test('relatório abre lista do anúncio só no clique e solicita atualização e
           },
         ],
       },
-    }),
-  );
+    });
+  });
   let lists = 0;
   await page.route('**/api/v1/reports/meta-ads/leads?*', (route) => {
     lists++;
@@ -254,19 +263,25 @@ test('relatório abre lista do anúncio só no clique e solicita atualização e
     });
   });
   await page.route('**/api/v1/meta-marketing/sync', (route) => {
-    expect(route.request().postDataJSON()).toMatchObject({
-      from: expect.any(String),
-      to: expect.any(String),
+    expect(route.request().postDataJSON()).toEqual(selectedPeriod);
+    return route.fulfill({
+      status: 202,
+      json: {
+        queued: true,
+        already_requested: false,
+        requested_from: selectedPeriod.from,
+        requested_to: selectedPeriod.to,
+        retry_after: null,
+      },
     });
-    return route.fulfill({ status: 202, json: { queued: true } });
   });
   await page.goto('/#reports');
   await expect(page.getByText('Resultado Carlos', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Período analisado:/)).toBeVisible();
   expect(lists).toBe(0);
-  await expect(
-    page.getByText('Entradas não comerciais').locator('..').getByText('3'),
-  ).toBeVisible();
-  await page.getByRole('button', { name: 'Ver 18 entradas de Resultado Carlos' }).click();
+  await expect(page.getByText('3 contatos não comerciais ficam fora do custo')).toBeVisible();
+  await expect(page.getByText('15 · Anúncio identificado')).toBeVisible();
+  await page.getByRole('button', { name: 'Ver 18 contatos de Resultado Carlos' }).click();
   await expect(page.getByRole('dialog').getByText('João teste')).toBeVisible();
   await expect(
     page.getByRole('dialog').getByText('Não comercial · Vendas e propagandas'),
@@ -275,6 +290,7 @@ test('relatório abre lista do anúncio só no clique e solicita atualização e
   expect(lists).toBeGreaterThanOrEqual(1);
   expect(lists).toBeLessThanOrEqual(2);
   await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: 'Sincronizar anúncios' }).click();
-  await expect(page.getByText(/Atualização agendada/)).toBeVisible();
+  await page.getByRole('button', { name: 'Atualizar dados' }).click();
+  await expect(page.getByText(/Atualização de .* agendada/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Atualização em andamento' })).toBeDisabled();
 });

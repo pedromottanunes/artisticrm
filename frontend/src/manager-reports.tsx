@@ -56,7 +56,43 @@ interface MetaMarketingStatus {
   last_error: string | null;
   rows_synced: number;
   queued?: boolean;
+  requested_from?: string | null;
+  requested_to?: string | null;
   paused_until?: string | null;
+}
+
+interface MetaMarketingSyncRequest {
+  queued: boolean;
+  already_requested: boolean;
+  requested_from: string | null;
+  requested_to: string | null;
+  retry_after: string | null;
+}
+
+type MetaAdGroup = 'with_leads' | 'without_leads' | 'all';
+
+interface MetaAdReportRow {
+  ad_id: string;
+  ad_name: string;
+  campaign_name: string;
+  adset_name: string;
+  post_url: string | null;
+  scope: string;
+  spend: number;
+  currency: string | null;
+  clicks: number;
+  attributed_leads: number;
+  non_commercial_leads: number;
+  scheduled: number;
+  attended: number;
+  no_show: number;
+  sales: number;
+  signed: number;
+  sales_value: number | null;
+  cpl: number | null;
+  cost_per_scheduled: number | null;
+  cost_per_sale: number | null;
+  roas: number | null;
 }
 
 interface MetaAdsReport {
@@ -78,29 +114,9 @@ interface MetaAdsReport {
   limited: boolean;
   total: number;
   page: number;
-  ads: {
-    ad_id: string;
-    ad_name: string;
-    campaign_name: string;
-    adset_name: string;
-    post_url: string | null;
-    scope: string;
-    spend: number;
-    currency: string | null;
-    clicks: number;
-    attributed_leads: number;
-    non_commercial_leads: number;
-    scheduled: number;
-    attended: number;
-    no_show: number;
-    sales: number;
-    signed: number;
-    sales_value: number | null;
-    cpl: number | null;
-    cost_per_scheduled: number | null;
-    cost_per_sale: number | null;
-    roas: number | null;
-  }[];
+  page_size?: number;
+  ad_groups?: Record<MetaAdGroup, number>;
+  ads: MetaAdReportRow[];
   campaigns: {
     campaign_id: string;
     campaign_name: string;
@@ -214,6 +230,96 @@ function HorizontalChart({
   );
 }
 
+function MetaAdResult({
+  ad,
+  currency,
+  coverageComplete,
+  onLeads,
+}: {
+  ad: MetaAdReportRow;
+  currency: string | null;
+  coverageComplete: boolean;
+  onLeads: (ad: MetaAdReportRow) => void;
+}) {
+  const contacts = ad.attributed_leads + ad.non_commercial_leads;
+  const direct = ad.scope === 'instagram_direct';
+  const cpl =
+    ad.cpl !== null
+      ? money(ad.cpl, ad.currency || currency)
+      : !coverageComplete
+        ? 'Calculando'
+        : direct && ad.attributed_leads === 0
+          ? 'Sem leads'
+          : 'Não se aplica';
+  return (
+    <article className="meta-ad-result">
+      <div className="meta-ad-identity">
+        <span className={`meta-ad-source ${contacts ? 'confirmed' : ''}`}>
+          {contacts
+            ? 'Anúncio identificado'
+            : direct
+              ? 'Anúncio para o Direct'
+              : 'Fora do cálculo de custo'}
+        </span>
+        <h3>{ad.ad_name}</h3>
+        <p>{ad.campaign_name || 'Campanha ainda não identificada'}</p>
+        {ad.adset_name && <small>{ad.adset_name}</small>}
+        <div className="meta-ad-origin-actions">
+          {ad.post_url ? (
+            <a href={ad.post_url} target="_blank" rel="noopener noreferrer">
+              Ver post no Instagram <ArrowUpRight size={13} />
+            </a>
+          ) : (
+            <span>Publicação ainda não localizada</span>
+          )}
+        </div>
+      </div>
+      <dl className="meta-ad-metrics">
+        <div>
+          <dt>Investido</dt>
+          <dd>{money(ad.spend, ad.currency || currency)}</dd>
+        </div>
+        <div>
+          <dt>Leads comerciais</dt>
+          <dd>{ad.attributed_leads}</dd>
+          {ad.non_commercial_leads > 0 && <small>+ {ad.non_commercial_leads} não comerciais</small>}
+        </div>
+        <div>
+          <dt>Custo médio por lead</dt>
+          <dd>{cpl}</dd>
+        </div>
+        <div>
+          <dt>Agendaram</dt>
+          <dd>{ad.scheduled}</dd>
+        </div>
+        <div>
+          <dt>Compareceram</dt>
+          <dd>{ad.attended}</dd>
+        </div>
+        <div>
+          <dt>Vendas</dt>
+          <dd>{ad.sales}</dd>
+          <small>{money(ad.sales_value, 'BRL')} registrado</small>
+        </div>
+      </dl>
+      <div className="meta-ad-result-actions">
+        {contacts > 0 ? (
+          <button
+            type="button"
+            className="button outline compact"
+            aria-label={`Ver ${contacts} contatos de ${ad.ad_name}`}
+            onClick={() => onLeads(ad)}
+          >
+            Ver {contacts} contato{contacts === 1 ? '' : 's'}
+          </button>
+        ) : (
+          <span>Nenhum lead atribuído neste período</span>
+        )}
+      </div>
+    </article>
+  );
+}
+
 export function ManagerReports({
   onOpen,
   onConnectionChange,
@@ -243,6 +349,8 @@ export function ManagerReports({
   const [metaSyncing, setMetaSyncing] = useState(false);
   const [metaError, setMetaError] = useState('');
   const [metaPage, setMetaPage] = useState(1);
+  const [metaAdGroup, setMetaAdGroup] = useState<MetaAdGroup>('with_leads');
+  const [metaReportRevision, setMetaReportRevision] = useState(0);
   const [metaNotice, setMetaNotice] = useState('');
   const [selectedAd, setSelectedAd] = useState<{ ad_id: string; ad_name: string } | null>(null);
 
@@ -291,25 +399,49 @@ export function ManagerReports({
   useEffect(() => {
     let disposed = false;
     const controller = new AbortController();
-    setMetaBusy(true);
-    setMetaAds(null);
     void api<MetaMarketingStatus>('/meta-marketing/status', { signal: controller.signal })
-      .then(async (status) => {
+      .then((status) => {
         if (disposed) return;
         setMetaStatus(status);
         if (!status.configured) {
           setMetaAds(null);
           setMetaError('');
+          setMetaBusy(false);
+        }
+      })
+      .catch((loadError) => {
+        if (disposed || controller.signal.aborted) return;
+        setMetaBusy(false);
+        if (loadError instanceof ApiError && loadError.status === 401) {
+          void onSessionExpired();
           return;
         }
-        const result = await api<MetaAdsReport>(
-          `/reports/meta-ads?${new URLSearchParams({ ...query, page: String(metaPage) }).toString()}`,
-          { signal: controller.signal },
-        );
-        if (!disposed) {
-          setMetaAds(result);
-          setMetaError('');
-        }
+        setMetaError((loadError as Error).message);
+      });
+    return () => {
+      disposed = true;
+      controller.abort();
+    };
+  }, [revision, onSessionExpired]);
+
+  useEffect(() => {
+    if (!metaStatus?.configured) return;
+    let disposed = false;
+    const controller = new AbortController();
+    setMetaBusy(true);
+    setMetaAds(null);
+    void api<MetaAdsReport>(
+      `/reports/meta-ads?${new URLSearchParams({
+        ...query,
+        page: String(metaPage),
+        ad_group: metaAdGroup,
+      }).toString()}`,
+      { signal: controller.signal },
+    )
+      .then((result) => {
+        if (disposed) return;
+        setMetaAds(result);
+        setMetaError('');
       })
       .catch((loadError) => {
         if (disposed || controller.signal.aborted) return;
@@ -326,7 +458,56 @@ export function ManagerReports({
       disposed = true;
       controller.abort();
     };
-  }, [query, revision, metaPage, onSessionExpired]);
+  }, [
+    query,
+    revision,
+    metaReportRevision,
+    metaPage,
+    metaAdGroup,
+    metaStatus?.configured,
+    onSessionExpired,
+  ]);
+
+  const metaUpdatePending = Boolean(
+    metaStatus?.configured && (metaStatus.queued || metaStatus.state === 'syncing'),
+  );
+
+  useEffect(() => {
+    if (!metaUpdatePending) return;
+    let disposed = false;
+    let timer: number | undefined;
+    let controller: AbortController | undefined;
+    const poll = async () => {
+      controller = new AbortController();
+      try {
+        const status = await api<MetaMarketingStatus>('/meta-marketing/status', {
+          signal: controller.signal,
+        });
+        if (disposed) return;
+        setMetaStatus(status);
+        if (!status.queued && status.state !== 'syncing') {
+          setMetaNotice(
+            'Atualização concluída. O relatório já está usando os dados mais recentes.',
+          );
+          setMetaReportRevision((value) => value + 1);
+          return;
+        }
+      } catch (loadError) {
+        if (disposed || controller.signal.aborted) return;
+        if (loadError instanceof ApiError && loadError.status === 401) {
+          void onSessionExpired();
+          return;
+        }
+      }
+      timer = window.setTimeout(() => void poll(), 60_000);
+    };
+    timer = window.setTimeout(() => void poll(), 60_000);
+    return () => {
+      disposed = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+      controller?.abort();
+    };
+  }, [metaUpdatePending, onSessionExpired]);
 
   const apply = (event: FormEvent) => {
     event.preventDefault();
@@ -350,28 +531,38 @@ export function ManagerReports({
   const maxDaily = Math.max(1, ...(report?.same_day_interactions.map((item) => item.count) ?? []));
   const received = report?.funnel[0]?.count ?? 0;
   const syncMetaAds = async () => {
-    const days = Math.min(
-      31,
-      Math.max(
-        1,
-        Math.round(
-          (new Date(`${query.to}T12:00:00`).getTime() -
-            new Date(`${query.from}T12:00:00`).getTime()) /
-            86_400_000,
-        ) + 1,
-      ),
-    );
     setMetaSyncing(true);
     setMetaError('');
     try {
-      await api('/meta-marketing/sync', {
+      const result = await api<MetaMarketingSyncRequest>('/meta-marketing/sync', {
         method: 'POST',
-        body: JSON.stringify({ days, from: query.from, to: query.to }),
+        body: JSON.stringify({ from: query.from, to: query.to }),
       });
-      setMetaNotice(
-        'Atualização agendada. Os dados serão sincronizados em segundo plano; atualize o relatório em alguns minutos.',
+      setMetaStatus((status) =>
+        status
+          ? {
+              ...status,
+              queued: result.queued,
+              requested_from: result.requested_from,
+              requested_to: result.requested_to,
+            }
+          : status,
       );
-      setRevision((value) => value + 1);
+      const selectedPeriod = `${shortDate(query.from)} a ${shortDate(query.to)}`;
+      const queuedPeriod =
+        result.requested_from && result.requested_to
+          ? `${shortDate(result.requested_from)} a ${shortDate(result.requested_to)}`
+          : null;
+      const samePeriod = result.requested_from === query.from && result.requested_to === query.to;
+      setMetaNotice(
+        !result.already_requested
+          ? `Atualização de ${selectedPeriod} agendada. O relatório será recarregado quando ela terminar.`
+          : result.queued && samePeriod
+            ? `O período de ${selectedPeriod} já está sendo atualizado. Nenhuma nova chamada foi feita à Meta.`
+            : result.queued && queuedPeriod
+              ? `Já existe uma atualização de ${queuedPeriod} em andamento. O período selecionado não gerou outra chamada à Meta.`
+              : `Os dados foram atualizados recentemente. Para proteger a API da Meta, aguarde alguns minutos antes de solicitar outra atualização.`,
+      );
     } catch (syncError) {
       if (syncError instanceof ApiError && syncError.status === 401) {
         await onSessionExpired();
@@ -530,16 +721,23 @@ export function ManagerReports({
 
           <div className="reports-section-heading meta-ads-heading">
             <Megaphone size={17} />
-            <h2>Meta Ads + Instagram Direct</h2>
+            <div>
+              <h2>Origem dos leads do Instagram</h2>
+              <p>Veja quais anúncios trouxeram contatos e o que aconteceu depois.</p>
+            </div>
             {metaStatus?.configured && (
               <button
                 className="button outline compact"
                 type="button"
-                disabled={metaSyncing}
+                disabled={metaSyncing || metaUpdatePending}
                 onClick={() => void syncMetaAds()}
               >
                 <RefreshCw size={14} />
-                {metaSyncing ? 'Sincronizando' : 'Sincronizar anúncios'}
+                {metaSyncing
+                  ? 'Solicitando'
+                  : metaUpdatePending
+                    ? 'Atualização em andamento'
+                    : 'Atualizar dados'}
               </button>
             )}
           </div>
@@ -573,132 +771,191 @@ export function ManagerReports({
           ) : null}
           {metaAds ? (
             <section className="meta-ads-panel">
+              <div className="meta-ads-updated">
+                <CheckCircle2 size={15} />
+                <span>
+                  Período analisado: {shortDate(metaAds.period.from)} a{' '}
+                  {shortDate(metaAds.period.to)} ·{' '}
+                  {metaStatus?.queued || metaStatus?.state === 'syncing'
+                    ? `Atualização em andamento${
+                        metaStatus.requested_from && metaStatus.requested_to
+                          ? ` para ${shortDate(metaStatus.requested_from)} a ${shortDate(metaStatus.requested_to)}`
+                          : ''
+                      }, sem interromper o atendimento.`
+                    : metaAds.last_sync
+                      ? `Dados atualizados em ${new Date(metaAds.last_sync).toLocaleString('pt-BR')}.`
+                      : 'Aguardando a primeira atualização.'}
+                </span>
+              </div>
               <div className="meta-ads-summary">
                 <article>
                   <CircleDollarSign size={18} />
-                  <span>Investimento total da conta</span>
-                  <strong>{money(metaAds.spend, metaAds.currency)}</strong>
+                  <span>Investido em anúncios para o Direct</span>
+                  <strong>{money(metaAds.eligible_spend, metaAds.currency)}</strong>
+                  <small>Conta toda: {money(metaAds.spend, metaAds.currency)}</small>
                 </article>
                 <article>
                   <MessageSquareReply size={18} />
-                  <span>Entradas pelo Instagram</span>
-                  <strong>{metaAds.instagram_entries}</strong>
+                  <span>Leads que vieram de anúncio</span>
+                  <strong>{metaAds.identified_paid_leads}</strong>
+                  <small>{metaAds.matched_attributed_leads} ligados ao anúncio exato</small>
                 </article>
                 <article>
                   <TrendingUp size={18} />
-                  <span>Leads comerciais ligados ao anúncio</span>
+                  <span>Anúncio exato identificado</span>
                   <strong>{metaAds.matched_attributed_leads}</strong>
-                </article>
-                <article>
-                  <MessageSquareReply size={18} />
-                  <span>Entradas não comerciais</span>
-                  <strong>{metaAds.non_commercial_leads}</strong>
+                  <small>{metaAds.unmatched_attributed_leads} ainda aguardam identificação</small>
                 </article>
                 <article>
                   <CircleDollarSign size={18} />
-                  <span>CPL atribuído</span>
-                  <strong>{money(metaAds.cpl, metaAds.currency)}</strong>
+                  <span>Custo médio por lead</span>
+                  <strong>
+                    {metaAds.coverage_complete
+                      ? money(metaAds.cpl, metaAds.currency)
+                      : 'Calculando'}
+                  </strong>
+                  <small>Somente anúncios confirmados para o Direct</small>
                 </article>
               </div>
-              <p className="meta-ads-note">
-                {metaAds.identified_paid_leads} lead(s) comerciais e{' '}
-                {metaAds.identified_paid_non_commercial_leads} entrada(s) não comerciais chegaram
-                com evidência de anúncio; {metaAds.unmatched_attributed_leads} leads comerciais
-                aguardam identificação. Como origem orgânica ficaram{' '}
-                {metaAds.unattributed_or_organic_leads} comerciais e{' '}
-                {metaAds.unattributed_or_organic_non_commercial_leads} não comerciais. CPL e
-                conversões consideram somente leads comerciais de anúncios identificados como
-                destino exclusivo Instagram Direct; investimento elegível:{' '}
-                {money(metaAds.eligible_spend, metaAds.currency)}.
-              </p>
+              <section
+                className="meta-origin-breakdown"
+                aria-label="De onde vieram os leads comerciais"
+              >
+                <div className="meta-origin-heading">
+                  <div>
+                    <h3>De onde vieram os {metaAds.instagram_leads} leads comerciais?</h3>
+                    <p>
+                      O CRM separa origem confirmada de contatos sem referência enviada pela Meta.
+                    </p>
+                  </div>
+                  <span>
+                    {metaAds.non_commercial_leads} contatos não comerciais ficam fora do custo
+                  </span>
+                </div>
+                {metaAds.instagram_leads > 0 ? (
+                  <>
+                    <div
+                      className="meta-origin-bar"
+                      role="img"
+                      aria-label={`${metaAds.matched_attributed_leads} com anúncio identificado, ${metaAds.unmatched_attributed_leads} vindos de anúncio ainda não identificado e ${metaAds.unattributed_or_organic_leads} sem referência de anúncio`}
+                    >
+                      <i
+                        className="identified"
+                        style={{
+                          width: `${(metaAds.matched_attributed_leads / metaAds.instagram_leads) * 100}%`,
+                        }}
+                      />
+                      <i
+                        className="pending"
+                        style={{
+                          width: `${(metaAds.unmatched_attributed_leads / metaAds.instagram_leads) * 100}%`,
+                        }}
+                      />
+                      <i
+                        className="unattributed"
+                        style={{
+                          width: `${(metaAds.unattributed_or_organic_leads / metaAds.instagram_leads) * 100}%`,
+                        }}
+                      />
+                    </div>
+                    <div className="meta-origin-legend">
+                      <div className="identified">
+                        <i />
+                        <p>
+                          <strong>{metaAds.matched_attributed_leads} · Anúncio identificado</strong>
+                          <span>Sabemos exatamente qual anúncio trouxe o lead.</span>
+                        </p>
+                      </div>
+                      <div className="pending">
+                        <i />
+                        <p>
+                          <strong>
+                            {metaAds.unmatched_attributed_leads} · Identificação pendente
+                          </strong>
+                          <span>Sabemos que foi pago, mas ainda falta ligar ao anúncio.</span>
+                        </p>
+                      </div>
+                      <div className="unattributed">
+                        <i />
+                        <p>
+                          <strong>
+                            {metaAds.unattributed_or_organic_leads} · Sem referência de anúncio
+                          </strong>
+                          <span>Pode ser orgânico ou uma atribuição não enviada pela Meta.</span>
+                        </p>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <p className="meta-origin-empty">Nenhum lead comercial neste período.</p>
+                )}
+              </section>
               {!metaAds.coverage_complete && (
-                <p className="meta-ads-note">
-                  Período parcialmente sincronizado. Custos médios ficam indisponíveis até completar
-                  a consulta.
+                <p className="meta-ads-sync-note">
+                  A atualização deste período ainda está terminando. Os custos médios aparecerão
+                  automaticamente quando todos os dias forem consultados.
                 </p>
               )}
               {metaAds.limited && (
-                <p className="meta-ads-note">
-                  O volume excedeu o limite deste relatório. Reduza o período para obter os totais
+                <p className="meta-ads-sync-note warning">
+                  Há dados demais para este período. Escolha um intervalo menor para ver os totais
                   completos.
                 </p>
               )}
-              <p className="meta-ads-note">
-                Resultados atuais dos leads adquiridos no período. Valores de vendas registradas não
-                representam pagamentos recebidos.
-              </p>
+              <div className="meta-ads-list-heading">
+                <div>
+                  <h3>Desempenho por anúncio</h3>
+                  <p>Comece pelos anúncios que realmente trouxeram contatos.</p>
+                </div>
+                <div
+                  className="meta-ad-tabs"
+                  role="group"
+                  aria-label="Filtrar anúncios por resultado"
+                >
+                  {(
+                    [
+                      ['with_leads', 'Trouxeram leads'],
+                      ['without_leads', 'Não trouxeram leads'],
+                      ['all', 'Todos'],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-pressed={metaAdGroup === value}
+                      onClick={() => {
+                        setMetaAdGroup(value);
+                        setMetaPage(1);
+                      }}
+                    >
+                      {label}
+                      {metaAds.ad_groups ? ` (${metaAds.ad_groups[value]})` : ''}
+                    </button>
+                  ))}
+                </div>
+              </div>
               {metaAds.ads?.length ? (
-                <div className="meta-ads-table-wrap">
-                  <table className="meta-ads-table">
-                    <thead>
-                      <tr>
-                        <th>Anúncio / campanha</th>
-                        <th>Investimento</th>
-                        <th>Entradas atribuídas</th>
-                        <th>Não comerciais</th>
-                        <th>Agendaram</th>
-                        <th>Compareceram</th>
-                        <th>Vendas</th>
-                        <th>Valor registrado</th>
-                        <th>CPL</th>
-                        <th>Custo / venda</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {metaAds.ads.map((ad) => (
-                        <tr key={ad.ad_id}>
-                          <td>
-                            <strong>{ad.ad_name}</strong>
-                            <br />
-                            <small>{ad.campaign_name || 'Campanha pendente'}</small>
-                            {ad.post_url && (
-                              <>
-                                <br />
-                                <a href={ad.post_url} target="_blank" rel="noopener noreferrer">
-                                  Abrir publicação <ArrowUpRight size={12} />
-                                </a>
-                              </>
-                            )}
-                            {ad.scope !== 'instagram_direct' && (
-                              <>
-                                <br />
-                                <small>Destino não exclusivo ou pendente</small>
-                              </>
-                            )}
-                          </td>
-                          <td>{money(ad.spend, ad.currency || metaAds.currency)}</td>
-                          <td>
-                            {ad.attributed_leads + ad.non_commercial_leads ? (
-                              <button
-                                type="button"
-                                className="meta-lead-count"
-                                aria-label={`Ver ${ad.attributed_leads + ad.non_commercial_leads} entradas de ${ad.ad_name}`}
-                                onClick={() => setSelectedAd(ad)}
-                              >
-                                {ad.attributed_leads + ad.non_commercial_leads}
-                              </button>
-                            ) : (
-                              0
-                            )}
-                          </td>
-                          <td>{ad.non_commercial_leads}</td>
-                          <td>{ad.scheduled}</td>
-                          <td>{ad.attended}</td>
-                          <td>{ad.sales}</td>
-                          <td>{money(ad.sales_value, 'BRL')}</td>
-                          <td>{money(ad.cpl, ad.currency || metaAds.currency)}</td>
-                          <td>{money(ad.cost_per_sale, ad.currency || metaAds.currency)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="meta-ads-results">
+                  {metaAds.ads.map((ad) => (
+                    <MetaAdResult
+                      key={ad.ad_id}
+                      ad={ad}
+                      currency={metaAds.currency}
+                      coverageComplete={metaAds.coverage_complete}
+                      onLeads={setSelectedAd}
+                    />
+                  ))}
                 </div>
               ) : (
                 <p className="report-empty-line">
-                  Nenhum anúncio encontrado no período selecionado.
+                  {metaAdGroup === 'with_leads'
+                    ? 'Nenhum anúncio trouxe leads neste período.'
+                    : metaAdGroup === 'without_leads'
+                      ? 'Todos os anúncios deste período possuem algum contato atribuído.'
+                      : 'Nenhum anúncio encontrado no período selecionado.'}
                 </p>
               )}
-              {metaAds.total > 50 && (
+              {metaAds.total > (metaAds.page_size ?? 50) && (
                 <div className="reports-filter">
                   <button
                     className="button outline compact"
@@ -709,12 +966,12 @@ export function ManagerReports({
                     Anterior
                   </button>
                   <span>
-                    Página {metaPage} de {Math.ceil(metaAds.total / 50)}
+                    Página {metaPage} de {Math.ceil(metaAds.total / (metaAds.page_size ?? 50))}
                   </span>
                   <button
                     className="button outline compact"
                     type="button"
-                    disabled={metaPage * 50 >= metaAds.total || metaBusy}
+                    disabled={metaPage * (metaAds.page_size ?? 50) >= metaAds.total || metaBusy}
                     onClick={() => setMetaPage((page) => page + 1)}
                   >
                     Próxima
@@ -722,10 +979,8 @@ export function ManagerReports({
                 </div>
               )}
               <footer>
-                Última sincronização:{' '}
-                {metaAds.last_sync
-                  ? new Date(metaAds.last_sync).toLocaleString('pt-BR')
-                  : 'ainda não realizada'}
+                O custo por lead é a média do anúncio no período, não o preço individual de cada
+                pessoa. Valores de vendas são registros comerciais e não comprovantes de pagamento.
               </footer>
             </section>
           ) : null}

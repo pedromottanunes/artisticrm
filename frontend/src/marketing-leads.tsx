@@ -53,7 +53,7 @@ export function MarketingLeads({
   return (
     <Modal
       title={ad.ad_name}
-      description="Entradas atribuídas no período; contatos não comerciais exibem o motivo do selo."
+      description="Contatos ligados a este anúncio no período. Os não comerciais mostram o motivo do selo."
       onClose={onClose}
     >
       <div className="report-lead-list" aria-busy={busy}>

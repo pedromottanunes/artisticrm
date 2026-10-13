@@ -298,6 +298,7 @@ export async function marketingReport(
   now: Date,
   page = 1,
   focusAd?: string,
+  adGroup: 'with_leads' | 'without_leads' | 'all' = 'all',
 ) {
   const control = await store.control();
   const timeZone = control.timezone || config?.timeZone || 'America/Sao_Paulo';
@@ -421,6 +422,28 @@ export async function marketingReport(
   const matched = rows
     .filter((row) => catalog.has(row.ad_id) || costs.has(row.ad_id))
     .reduce((sum, row) => sum + row.attributed_leads, 0);
+  const hasLeads = (row: (typeof rows)[number]) =>
+    row.attributed_leads + row.non_commercial_leads > 0;
+  const adGroups = {
+    with_leads: rows.filter(hasLeads).length,
+    without_leads: rows.filter((row) => !hasLeads(row)).length,
+    all: rows.length,
+  };
+  const visibleRows = (
+    focusAd
+      ? rows.filter((row) => row.ad_id === focusAd)
+      : adGroup === 'with_leads'
+        ? rows.filter(hasLeads)
+        : adGroup === 'without_leads'
+          ? rows.filter((row) => !hasLeads(row))
+          : rows
+  ).sort((a, b) =>
+    adGroup === 'with_leads' && !focusAd
+      ? b.attributed_leads +
+          b.non_commercial_leads -
+          (a.attributed_leads + a.non_commercial_leads) || b.spend - a.spend
+      : b.spend - a.spend || a.ad_id.localeCompare(b.ad_id),
+  );
   const currencies = new Set(spendRows.map((row) => row.currency).filter(Boolean));
   return {
     period: { from, to },
@@ -448,11 +471,10 @@ export async function marketingReport(
       complete && eligibleLeads && currencies.size <= 1
         ? eligibleMicros / 1_000_000 / eligibleLeads
         : null,
+    ad_groups: adGroups,
     campaigns: [...campaigns.values()].slice(0, 50),
-    ads: focusAd
-      ? rows.filter((row) => row.ad_id === focusAd)
-      : rows.slice((page - 1) * 50, page * 50),
-    total: rows.length,
+    ads: focusAd ? visibleRows : visibleRows.slice((page - 1) * 50, page * 50),
+    total: visibleRows.length,
     page,
     page_size: 50,
     limited,
