@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { test } from 'node:test';
+import { MessageChannel, type MessagePort } from 'node:worker_threads';
 
 const source = readFileSync(new URL('../../frontend/public/sw.js', import.meta.url), 'utf8');
-function harness() {
+function harness(acknowledgement: 'handled' | 'unavailable' | 'timeout' | 'throw' = 'handled') {
   const handlers = new Map<string, (event: any) => void>();
   const shown: any[] = [];
   const notices: any[] = [];
@@ -14,13 +15,21 @@ function harness() {
     url: 'https://crm.example.test/',
     visibilityState: 'visible',
     focused,
-    postMessage: (data: unknown) => notices.push({ i, data }),
+    postMessage: (data: unknown, ports: MessagePort[]) => {
+      notices.push({ i, data });
+      if (acknowledgement === 'throw') throw new Error('Client closed');
+      if (acknowledgement !== 'timeout')
+        ports[0].postMessage({ handled: acknowledgement === 'handled' });
+    },
     navigate: async (url: string) => navigated.push(url),
     focus: async () => {},
   }));
   runInNewContext(source, {
     URL,
     encodeURIComponent,
+    MessageChannel,
+    setTimeout,
+    clearTimeout,
     self: {
       addEventListener: (name: string, handler: (event: any) => void) =>
         handlers.set(name, handler),
@@ -66,6 +75,16 @@ test('push worker: a nova versao assume o controle sem esperar o PWA ser fechado
   await worker.dispatch('install', {});
   assert.equal(worker.skipWaitingCalls(), 1);
 });
+for (const response of ['unavailable', 'timeout', 'throw'] as const)
+  test(`push worker: OS sound survives foreground ${response}`, async () => {
+    const worker = harness(response);
+    await worker.dispatch('push', {
+      data: { json: () => ({ page: 'mine', tag: 'fallback', userId: 'user-a' }) },
+    });
+    assert.equal(worker.shown.length, 1);
+    assert.equal(worker.shown[0].silent, false);
+    assert.deepEqual(Array.from(worker.shown[0].vibrate), [200, 100, 200]);
+  });
 test('push worker: lead, pool and message use one custom foreground sound recipient', async () => {
   const worker = harness();
   const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';

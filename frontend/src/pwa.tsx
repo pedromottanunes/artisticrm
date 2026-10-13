@@ -14,6 +14,51 @@ type InstallEvent = Event & {
 };
 let installPrompt: InstallEvent | null = null;
 let worker: Promise<ServiceWorkerRegistration | undefined> | undefined;
+let reconciliation: { key: string; promise: Promise<boolean> } | undefined;
+type PushConfig = { enabled: boolean; publicKey: string | null };
+type DeviceStatus = {
+  userId: string;
+  config?: PushConfig;
+  subscribed?: boolean;
+  permission: NotificationPermission;
+  error?: string;
+};
+const publishDeviceStatus = (status: Omit<DeviceStatus, 'permission'>) => {
+  window.dispatchEvent(
+    new CustomEvent<DeviceStatus>('artisti-push-status', {
+      detail: {
+        ...status,
+        permission: 'Notification' in window ? Notification.permission : 'default',
+      },
+    }),
+  );
+};
+const deviceChecks = new Map<string, Promise<boolean>>();
+function checkDevicePush(userId: string): Promise<boolean> {
+  const pending = deviceChecks.get(userId);
+  if (pending) return pending;
+  const check = (async () => {
+    let config: PushConfig | undefined;
+    try {
+      config = await api<PushConfig>('/push/config', { signal: AbortSignal.timeout(20_000) });
+      const subscribed = config.enabled && (await reconcileDevicePush(userId, config.publicKey));
+      publishDeviceStatus({ userId, config, subscribed });
+      return true;
+    } catch {
+      publishDeviceStatus({
+        userId,
+        config,
+        error:
+          'Não foi possível verificar as notificações. O CRM tentará novamente automaticamente.',
+      });
+      return false;
+    } finally {
+      deviceChecks.delete(userId);
+    }
+  })();
+  deviceChecks.set(userId, check);
+  return check;
+}
 window.addEventListener('beforeinstallprompt', (event) => {
   event.preventDefault();
   installPrompt = event as InstallEvent;
@@ -23,9 +68,9 @@ window.addEventListener('appinstalled', () => {
   installPrompt = null;
   window.dispatchEvent(new Event('artisti-install'));
 });
-export function registerDeviceWorker() {
-  if (!('serviceWorker' in navigator) || !window.isSecureContext) return Promise.resolve(undefined);
-  return (worker ??= navigator.serviceWorker
+export async function registerDeviceWorker() {
+  if (!('serviceWorker' in navigator) || !window.isSecureContext) return undefined;
+  worker ??= navigator.serviceWorker
     .register('/sw.js', { updateViaCache: 'none' })
     .then(async (registration) => {
       // Initial installation finishes before the user can subscribe. A failed install
@@ -44,7 +89,10 @@ export function registerDeviceWorker() {
         if (timeout) clearTimeout(timeout);
       }
     })
-    .catch(() => undefined));
+    .catch(() => undefined);
+  const registration = await worker;
+  if (!registration) worker = undefined;
+  return registration;
 }
 const installed = () =>
   matchMedia('(display-mode: standalone)').matches ||
@@ -52,19 +100,52 @@ const installed = () =>
 const ios = () =>
   /iPad|iPhone|iPod/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-export async function disconnectPush(localOnly = false) {
+async function disconnectPush() {
   if (!('serviceWorker' in navigator)) return;
   const registration = await navigator.serviceWorker.getRegistration('/');
   const subscription = await registration?.pushManager?.getSubscription();
   if (subscription) {
-    if (!localOnly)
-      await api('/push/subscriptions', {
+    // Either side is enough to stop delivery. Attempt both so a transient API
+    // failure cannot leave the browser subscription active.
+    const [server, browser] = await Promise.allSettled([
+      api('/push/subscriptions', {
         method: 'DELETE',
         body: JSON.stringify({ endpoint: subscription.endpoint }),
-      });
-    await subscription.unsubscribe();
+        signal: AbortSignal.timeout(20_000),
+      }),
+      subscription.unsubscribe(),
+    ]);
+    const stoppedOnServer = server.status === 'fulfilled';
+    const stoppedInBrowser = browser.status === 'fulfilled' && browser.value === true;
+    if (!stoppedOnServer && !stoppedInBrowser)
+      throw server.status === 'rejected'
+        ? server.reason
+        : browser.status === 'rejected'
+          ? browser.reason
+          : new Error('Não foi possível desativar as notificações neste aparelho.');
   }
 }
+const optOutKey = (userId: string) => `artisti-push-opt-out:${userId}`;
+const temporaryOptOut = new Map<string, boolean>();
+const optedOut = (userId: string) => {
+  if (temporaryOptOut.has(userId)) return temporaryOptOut.get(userId)!;
+  try {
+    return localStorage.getItem(optOutKey(userId)) === 'true';
+  } catch {
+    return false;
+  }
+};
+const setOptedOut = (userId: string, value: boolean) => {
+  try {
+    if (value) localStorage.setItem(optOutKey(userId), 'true');
+    else localStorage.removeItem(optOutKey(userId));
+    temporaryOptOut.delete(userId);
+  } catch {
+    // Keep the explicit choice for this page even when storage is unavailable.
+    // A false value must also override an older, persisted opt-out.
+    temporaryOptOut.set(userId, value);
+  }
+};
 const subscriptionKey = (subscription: PushSubscription) =>
   subscription.options.applicationServerKey
     ? btoa(String.fromCharCode(...new Uint8Array(subscription.options.applicationServerKey)))
@@ -72,14 +153,60 @@ const subscriptionKey = (subscription: PushSubscription) =>
         .replace(/\//g, '_')
         .replace(/=+$/, '')
     : '';
-async function bindExisting(publicKey: string | null) {
-  if (!publicKey || !('Notification' in window) || Notification.permission !== 'granted')
+const publicKeyBytes = (publicKey: string) =>
+  Uint8Array.from(atob(publicKey.replace(/-/g, '+').replace(/_/g, '/')), (char) =>
+    char.charCodeAt(0),
+  );
+async function reconcileDevicePush(userId: string, publicKey: string | null): Promise<boolean> {
+  if (
+    !publicKey ||
+    optedOut(userId) ||
+    !('Notification' in window) ||
+    !('PushManager' in window) ||
+    !('serviceWorker' in navigator) ||
+    !window.isSecureContext ||
+    Notification.permission !== 'granted'
+  )
     return false;
-  const registration = await registerDeviceWorker();
-  const subscription = await registration?.pushManager?.getSubscription();
-  if (!subscription || subscriptionKey(subscription) !== publicKey) return false;
-  await api('/push/subscriptions', { method: 'POST', body: JSON.stringify(subscription.toJSON()) });
-  return true;
+  const key = `${userId}:${publicKey}`;
+  if (reconciliation?.key === key) return reconciliation.promise;
+  if (reconciliation) {
+    try {
+      await reconciliation.promise;
+    } catch {
+      /* A new reconciliation still gets its own attempt. */
+    }
+    return reconcileDevicePush(userId, publicKey);
+  }
+  const promise = (async () => {
+    const registration = await registerDeviceWorker();
+    if (!registration?.active)
+      throw new Error('O serviço de notificações ainda não está disponível.');
+    let subscription = await registration.pushManager.getSubscription();
+    if (subscription && subscriptionKey(subscription) !== publicKey) {
+      await subscription.unsubscribe();
+      subscription = null;
+    }
+    // Permission was already granted by the user. Recreate a lost browser
+    // subscription without asking for the same permission again.
+    subscription ??= await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: publicKeyBytes(publicKey),
+    });
+    if (optedOut(userId)) return false;
+    await api('/push/subscriptions', {
+      method: 'POST',
+      body: JSON.stringify(subscription.toJSON()),
+      signal: AbortSignal.timeout(20_000),
+    });
+    return true;
+  })();
+  reconciliation = { key, promise };
+  try {
+    return await promise;
+  } finally {
+    if (reconciliation?.promise === promise) reconciliation = undefined;
+  }
 }
 export function PushBinding({ userId }: { userId: string }) {
   useEffect(() => {
@@ -89,17 +216,25 @@ export function PushBinding({ userId }: { userId: string }) {
     };
     const receive = (event: MessageEvent) => {
       const value = event.data;
+      const reply = (handled: boolean) => event.ports?.[0]?.postMessage({ handled });
       if (
         value?.type !== 'artisti-push' ||
         value.userId !== userId ||
         typeof value.tag !== 'string' ||
         document.hidden ||
-        seen.has(value.tag)
-      )
+        (typeof value.soundDeadline === 'number' && Date.now() >= value.soundDeadline)
+      ) {
+        reply(false);
         return;
-      seen.add(value.tag);
-      if (seen.size > 200) seen.delete(seen.values().next().value!);
-      if (soundEnabled(userId)) playNotificationSound();
+      }
+      // Explicit mute and already-handled retries must stay silent. Otherwise,
+      // let the worker fall back to OS sound when Web Audio cannot play.
+      const handled = seen.has(value.tag) || !soundEnabled(userId) || playNotificationSound();
+      if (handled) {
+        seen.add(value.tag);
+        if (seen.size > 200) seen.delete(seen.values().next().value!);
+      }
+      reply(handled);
     };
     window.addEventListener('pointerdown', unlock);
     window.addEventListener('keydown', unlock);
@@ -112,15 +247,69 @@ export function PushBinding({ userId }: { userId: string }) {
   }, [userId]);
   useEffect(() => {
     let disposed = false;
-    void api<{ enabled: boolean; publicKey: string | null }>('/push/config')
-      .then((value) => {
-        if (!disposed && value.enabled) return bindExisting(value.publicKey);
-      })
-      .catch(() => {
-        /* The device panel exposes a retry; never block the workspace. */
-      });
+    let checking = false;
+    let lastCheck = 0;
+    let pendingRepair = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let retryDelay = 15_000;
+    const statusChanged = (event: Event) => {
+      const status = (event as CustomEvent<DeviceStatus>).detail;
+      if (disposed || status.userId !== userId) return;
+      if (status.error) {
+        if (retry === undefined) {
+          retry = setTimeout(() => {
+            retry = undefined;
+            void repair(true);
+          }, retryDelay);
+          retryDelay = Math.min(retryDelay * 2, 60_000);
+        }
+      } else {
+        clearTimeout(retry);
+        retry = undefined;
+        lastCheck = Date.now();
+        retryDelay = 15_000;
+      }
+    };
+    const repair = async (force = false) => {
+      if (disposed) return;
+      if (checking) {
+        pendingRepair ||= force;
+        return;
+      }
+      if (!force && Date.now() - lastCheck < 60_000) return;
+      clearTimeout(retry);
+      retry = undefined;
+      checking = true;
+      try {
+        await checkDevicePush(userId);
+      } finally {
+        checking = false;
+        if (!disposed && pendingRepair) {
+          pendingRepair = false;
+          void repair(true);
+        }
+      }
+    };
+    const resume = () => {
+      if (!document.hidden) void repair();
+    };
+    const workerReady = () => void repair(true);
+    window.addEventListener('artisti-push-status', statusChanged);
+    void repair(true);
+    const timer = window.setInterval(() => void repair(true), 6 * 60 * 60_000);
+    window.addEventListener('focus', resume);
+    window.addEventListener('online', workerReady);
+    document.addEventListener('visibilitychange', resume);
+    navigator.serviceWorker?.addEventListener('controllerchange', workerReady);
     return () => {
       disposed = true;
+      window.clearInterval(timer);
+      clearTimeout(retry);
+      window.removeEventListener('artisti-push-status', statusChanged);
+      window.removeEventListener('focus', resume);
+      window.removeEventListener('online', workerReady);
+      document.removeEventListener('visibilitychange', resume);
+      navigator.serviceWorker?.removeEventListener('controllerchange', workerReady);
     };
   }, [userId]);
   return null;
@@ -130,8 +319,10 @@ export function DevicePanel({ userId }: { userId: string }) {
   const [isInstalled, setInstalled] = useState(installed);
   const [canInstall, setCanInstall] = useState(!!installPrompt);
   const [subscribed, setSubscribed] = useState(false);
+  const [checking, setChecking] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [verificationError, setVerificationError] = useState('');
   const [notice, setNotice] = useState('');
   const [audible, setAudible] = useState(() => soundEnabled(userId));
   useEffect(() => {
@@ -157,23 +348,22 @@ export function DevicePanel({ userId }: { userId: string }) {
       setCanInstall(!!installPrompt);
     };
     window.addEventListener('artisti-install', change);
-    void (async () => {
-      try {
-        const value = await api<{ enabled: boolean; publicKey: string | null }>('/push/config');
-        if (disposed) return;
-        setConfig(value);
-        const bound = value.enabled && (await bindExisting(value.publicKey));
-        if (!disposed) setSubscribed(bound);
-      } catch {
-        if (!disposed)
-          setError(
-            'Não foi possível consultar as notificações. Feche e reabra esta área para tentar novamente.',
-          );
-      }
-    })();
+    const update = (event: Event) => {
+      const status = (event as CustomEvent<DeviceStatus>).detail;
+      if (disposed || status.userId !== userId) return;
+      if (status.config) setConfig(status.config);
+      setPermission(status.permission);
+      if (status.subscribed !== undefined) setSubscribed(status.subscribed);
+      setVerificationError(status.error ?? '');
+      setChecking(false);
+    };
+    window.addEventListener('artisti-push-status', update);
+    setChecking(true);
+    void checkDevicePush(userId);
     return () => {
       disposed = true;
       window.removeEventListener('artisti-install', change);
+      window.removeEventListener('artisti-push-status', update);
     };
   }, [userId]);
   const enable = async () => {
@@ -188,36 +378,14 @@ export function DevicePanel({ userId }: { userId: string }) {
       const allowed = await permissionRequest;
       setPermission(allowed);
       if (allowed !== 'granted') return;
-      const registration = await registerDeviceWorker();
-      if (!registration?.active)
+      setOptedOut(userId, false);
+      const bound = await reconcileDevicePush(userId, config.publicKey);
+      if (!bound)
         throw new Error(
           'A instalação ainda está sendo preparada. Tente novamente em alguns segundos.',
         );
-      const bytes = Uint8Array.from(
-        atob(config.publicKey.replace(/-/g, '+').replace(/_/g, '/')),
-        (char) => char.charCodeAt(0),
-      );
-      let subscription = await registration.pushManager.getSubscription();
-      if (
-        subscription &&
-        subscription.options.applicationServerKey &&
-        btoa(String.fromCharCode(...new Uint8Array(subscription.options.applicationServerKey)))
-          .replace(/\+/g, '-')
-          .replace(/\//g, '_')
-          .replace(/=+$/, '') !== config.publicKey
-      ) {
-        await subscription.unsubscribe();
-        subscription = null;
-      }
-      subscription ??= await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: bytes,
-      });
-      await api('/push/subscriptions', {
-        method: 'POST',
-        body: JSON.stringify(subscription.toJSON()),
-      });
       setSubscribed(true);
+      publishDeviceStatus({ userId, config, subscribed: true });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -240,8 +408,21 @@ export function DevicePanel({ userId }: { userId: string }) {
         });
         setNotice('Teste colocado na fila. Aguarde a notificação neste aparelho.');
       } else {
-        await disconnectPush();
-        setSubscribed(false);
+        const previouslyOptedOut = optedOut(userId);
+        setOptedOut(userId, true);
+        try {
+          if (reconciliation) await reconciliation.promise.catch(() => false);
+          await disconnectPush();
+          setSubscribed(false);
+          publishDeviceStatus({ userId, config, subscribed: false });
+        } catch (disableError) {
+          // A check started during the disable attempt can publish the temporary
+          // opt-out. Let it finish before restoring and rechecking the real state.
+          await deviceChecks.get(userId);
+          setOptedOut(userId, previouslyOptedOut);
+          await checkDevicePush(userId);
+          throw disableError;
+        }
       }
     } catch (e) {
       setError((e as Error).message);
@@ -293,7 +474,9 @@ export function DevicePanel({ userId }: { userId: string }) {
         </p>
       ) : !supported ? (
         <p>Este navegador não oferece notificações push. Use um navegador atualizado.</p>
-      ) : !config ? (
+      ) : verificationError ? (
+        <p role="status">{verificationError}</p>
+      ) : !config || checking ? (
         <p>Consultando notificações…</p>
       ) : !config.enabled ? (
         <p>Notificações aguardam ativação pela gestão. Acompanhe os leads com o CRM aberto.</p>
@@ -355,9 +538,17 @@ export function DevicePanel({ userId }: { userId: string }) {
         fechado, o som do push depende do aparelho e do modo silencioso.
       </p>
       <p>
-        Os avisos incluem cada nova mensagem, leads, atribuições, consultas e vendas. Sair da conta
-        desativa os avisos deste aparelho.
+        Os avisos incluem cada nova mensagem, leads, atribuições, consultas e vendas. Ao entrar
+        novamente neste aparelho, o CRM restabelece os avisos automaticamente. Use “Desativar” para
+        desligá-los neste aparelho.
       </p>
+      {temporaryOptOut.has(userId) && (
+        <p role="status">
+          Não foi possível salvar sua preferência de notificações. Ela será respeitada enquanto esta
+          página estiver aberta. Ao recarregar ou reabrir o CRM, confira essa configuração
+          novamente.
+        </p>
+      )}
       {error && (
         <p className="form-error" role="alert">
           {error}

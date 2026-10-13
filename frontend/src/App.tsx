@@ -37,7 +37,7 @@ import { AttendantLeads } from './attendant-leads';
 import { QueuePosition } from './queue-position';
 import { Team, PasswordChange } from './operations';
 import { MobileNavigation } from './mobile-navigation';
-import { DevicePanel, disconnectPush, PushBinding } from './pwa';
+import { DevicePanel, PushBinding } from './pwa';
 import { ShortcutsPage } from './shortcuts';
 import { CommentPool } from './comment-pool';
 import { Agenda } from './agenda';
@@ -444,8 +444,6 @@ export function App() {
   const logout = async () => {
     try {
       await api('/auth/logout', { method: 'POST', body: '{}' });
-      // Server revocation is authoritative; browser cleanup must not block logout.
-      void disconnectPush(true).catch(() => {});
       generation.current++;
       detailSeq.current++;
       setData(null);

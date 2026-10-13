@@ -7,9 +7,14 @@ const demoSessions = new Map<string, Awaited<ReturnType<BrowserContext['cookies'
 test('push no aparelho: permissão somente por toque, teste e desativação', async ({ page }) => {
   const publicKey = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 1)]).toString('base64url');
   const calls: string[] = [];
+  let finishFailedDisable!: () => void;
+  const failedDisable = new Promise<void>((resolve) => {
+    finishFailedDisable = resolve;
+  });
   await page.addInitScript(() => {
     let permission: NotificationPermission = 'default';
     let active = false;
+    let unsubscribeAttempts = 0;
     const events: string[] = [];
     (window as Window & { pushTestEvents?: string[] }).pushTestEvents = events;
     Object.defineProperty(Notification, 'permission', {
@@ -20,6 +25,8 @@ test('push no aparelho: permissão somente por toque, teste e desativação', as
       value: async () => {
         events.push('permission');
         permission = 'granted';
+        navigator.serviceWorker.dispatchEvent(new Event('controllerchange'));
+        await new Promise((resolve) => setTimeout(resolve, 0));
         return permission;
       },
       configurable: true,
@@ -32,6 +39,11 @@ test('push no aparelho: permissão somente por toque, teste e desativação', as
         keys: { p256dh: 'test', auth: 'test' },
       }),
       unsubscribe: async () => {
+        unsubscribeAttempts++;
+        if (unsubscribeAttempts === 1) {
+          events.push('unsubscribe-failed');
+          return false;
+        }
         active = false;
         events.push('unsubscribe');
         return true;
@@ -42,6 +54,7 @@ test('push no aparelho: permissão somente por toque, teste e desativação', as
       pushManager: {
         getSubscription: async () => (active ? sub : null),
         subscribe: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 20));
           active = true;
           events.push('subscribe');
           return sub;
@@ -59,8 +72,15 @@ test('push no aparelho: permissão somente por toque, teste e desativação', as
   await page.route('**/api/v1/push/config', (route) =>
     route.fulfill({ json: { enabled: true, publicKey } }),
   );
-  await page.route('**/api/v1/push/subscriptions', (route) => {
+  await page.route('**/api/v1/push/subscriptions', async (route) => {
     calls.push(route.request().method());
+    if (
+      route.request().method() === 'DELETE' &&
+      calls.filter((call) => call === 'DELETE').length === 1
+    ) {
+      await failedDisable;
+      return route.fulfill({ status: 503, json: { message: 'Falha planejada no teste.' } });
+    }
     return route.fulfill({ json: { ok: true } });
   });
   await page.route('**/api/v1/push/test', (route) => {
@@ -84,10 +104,269 @@ test('push no aparelho: permissão somente por toque, teste e desativação', as
   expect(await events()).toEqual(['permission', 'subscribe']);
   await page.getByRole('button', { name: 'Testar aviso' }).click();
   await expect(page.getByText('Teste colocado na fila.', { exact: false })).toBeVisible();
-  await page.getByRole('button', { name: 'Desativar', exact: true }).click();
+  await page.getByRole('button', { name: 'Central de avisos', exact: true }).click();
+  const enabled = page.getByText('Notificações ativadas neste aparelho', { exact: true });
+  await expect(enabled).toHaveCount(2);
+  await page.getByRole('dialog').getByRole('button', { name: 'Desativar', exact: true }).click();
+  await expect.poll(() => calls.includes('DELETE')).toBe(true);
+  // An automatic check sees the temporary opt-out while DELETE is still pending.
+  // If both ways of disabling fail, both panels must recover their true state.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        window.addEventListener('artisti-push-status', () => resolve(), { once: true });
+        window.dispatchEvent(new Event('online'));
+      }),
+  );
+  finishFailedDisable();
+  await expect(page.getByText('Falha planejada no teste.', { exact: true })).toBeVisible();
+  await expect(enabled).toHaveCount(2);
+  await page.getByRole('dialog').getByRole('button', { name: 'Desativar', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Ativar notificações', includeHidden: true }),
+  ).toHaveCount(2);
+  expect(calls.filter((call) => call !== 'POST')).toEqual(['test', 'DELETE', 'DELETE']);
+  expect(await events()).toEqual(['permission', 'subscribe', 'unsubscribe-failed', 'unsubscribe']);
+});
+
+test('push no aparelho: mantém a desativação e avisa quando não pode salvar a preferência', async ({
+  page,
+}) => {
+  const publicKey = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 1)]).toString('base64url');
+  const calls: string[] = [];
+  await page.addInitScript(() => {
+    let active = false;
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key.startsWith('artisti-push-opt-out:'))
+        throw new DOMException('Armazenamento indisponível no teste.', 'QuotaExceededError');
+      return setItem.call(this, key, value);
+    };
+    Object.defineProperty(Notification, 'permission', { get: () => 'granted' });
+    const subscription = {
+      endpoint: 'https://fcm.googleapis.com/fcm/send/storage-test',
+      options: { applicationServerKey: new Uint8Array([4, ...Array(64).fill(1)]).buffer },
+      toJSON: () => ({ endpoint: 'https://fcm.googleapis.com/fcm/send/storage-test' }),
+      unsubscribe: async () => {
+        active = false;
+        return true;
+      },
+    };
+    const registration = {
+      active: {},
+      pushManager: {
+        getSubscription: async () => (active ? subscription : null),
+        subscribe: async () => {
+          active = true;
+          return subscription;
+        },
+      },
+    };
+    Object.defineProperty(navigator.serviceWorker, 'register', { value: async () => registration });
+    Object.defineProperty(navigator.serviceWorker, 'getRegistration', {
+      value: async () => registration,
+    });
+    Object.defineProperty(navigator.serviceWorker, 'ready', {
+      get: () => Promise.resolve(registration),
+    });
+  });
+  await page.route('**/api/v1/push/config', (route) =>
+    route.fulfill({ json: { enabled: true, publicKey } }),
+  );
+  await page.route('**/api/v1/push/subscriptions', (route) => {
+    calls.push(route.request().method());
+    return route.fulfill({ json: { ok: true } });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  await page
+    .getByRole('navigation', { name: 'Atalhos de gestão' })
+    .getByRole('button', { name: 'Configurações' })
+    .click();
+  await page.getByRole('button', { name: 'Central de avisos', exact: true }).click();
+  const enabled = page.getByText('Notificações ativadas neste aparelho', { exact: true });
+  await expect(enabled).toHaveCount(2);
+  await page.getByRole('dialog').getByRole('button', { name: 'Desativar', exact: true }).click();
+  await expect(enabled).toHaveCount(0);
+  const postsBeforeCheck = calls.filter((call) => call === 'POST').length;
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        window.addEventListener('artisti-push-status', () => resolve(), { once: true });
+        window.dispatchEvent(new Event('online'));
+      }),
+  );
+  await expect(enabled).toHaveCount(0);
+  expect(calls.filter((call) => call === 'POST')).toHaveLength(postsBeforeCheck);
+  await expect(
+    page.getByText('Não foi possível salvar sua preferência de notificações.', { exact: false }),
+  ).toHaveCount(2);
+});
+
+test('push no aparelho: restaura o vínculo ao entrar novamente sem pedir permissão', async ({
+  page,
+}) => {
+  const publicKey = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 2)]).toString('base64url');
+  const calls: string[] = [];
+  let configUnavailable = false;
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    const readEvents = () => JSON.parse(localStorage.getItem('push-lifecycle-events') ?? '[]');
+    const record = (event: string) => {
+      const events = readEvents();
+      events.push(event);
+      localStorage.setItem('push-lifecycle-events', JSON.stringify(events));
+      (window as Window & { pushLifecycleEvents?: string[] }).pushLifecycleEvents = events;
+    };
+    const events: string[] = readEvents();
+    (window as Window & { pushLifecycleEvents?: string[] }).pushLifecycleEvents = events;
+    Object.defineProperty(Notification, 'permission', {
+      get: () => 'granted',
+      configurable: true,
+    });
+    Object.defineProperty(Notification, 'requestPermission', {
+      value: async () => {
+        record('permission');
+        return 'granted';
+      },
+      configurable: true,
+    });
+    const sub = {
+      endpoint: 'https://fcm.googleapis.com/fcm/send/rebind-test',
+      options: { applicationServerKey: new Uint8Array([4, ...Array(64).fill(2)]).buffer },
+      toJSON: () => ({
+        endpoint: 'https://fcm.googleapis.com/fcm/send/rebind-test',
+        keys: { p256dh: 'test', auth: 'test' },
+      }),
+      unsubscribe: async () => {
+        localStorage.removeItem('push-lifecycle-active');
+        record('unsubscribe');
+        return true;
+      },
+    };
+    const registration = {
+      active: {},
+      pushManager: {
+        getSubscription: async () =>
+          localStorage.getItem('push-lifecycle-active') === 'true' ? sub : null,
+        subscribe: async () => {
+          localStorage.setItem('push-lifecycle-active', 'true');
+          record('subscribe');
+          return sub;
+        },
+      },
+    };
+    Object.defineProperty(navigator.serviceWorker, 'register', { value: async () => registration });
+    Object.defineProperty(navigator.serviceWorker, 'getRegistration', {
+      value: async () => registration,
+    });
+    Object.defineProperty(navigator.serviceWorker, 'ready', {
+      get: () => Promise.resolve(registration),
+    });
+  });
+  await page.route('**/api/v1/push/config', (route) =>
+    configUnavailable
+      ? route.fulfill({ status: 503, json: { message: 'Conexão indisponível no teste.' } })
+      : route.fulfill({ json: { enabled: true, publicKey } }),
+  );
+  await page.route('**/api/v1/push/subscriptions', (route) => {
+    calls.push(route.request().method());
+    return route.fulfill({ json: { ok: true } });
+  });
+  await login(page);
+  await expect.poll(() => calls.filter((method) => method === 'POST').length).toBeGreaterThan(0);
+  expect(
+    await page.evaluate(
+      () => (window as Window & { pushLifecycleEvents: string[] }).pushLifecycleEvents,
+    ),
+  ).toEqual(['subscribe']);
+
+  await page
+    .getByRole('navigation', { name: 'Atalhos de gestão' })
+    .getByRole('button', { name: 'Configurações' })
+    .click();
+  await expect(
+    page.getByText('Notificações ativadas neste aparelho', { exact: true }),
+  ).toBeVisible();
+  const postsBeforeLogout = calls.filter((method) => method === 'POST').length;
+  await page.getByRole('button', { name: 'Sair e acessar outro perfil' }).click();
+  await expect(page.getByRole('button', { name: 'Entrar no espaço de trabalho' })).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => (window as Window & { pushLifecycleEvents: string[] }).pushLifecycleEvents,
+    ),
+  ).not.toContain('unsubscribe');
+
+  await login(page);
+  await expect
+    .poll(() => calls.filter((method) => method === 'POST').length)
+    .toBeGreaterThan(postsBeforeLogout);
+  expect(
+    await page.evaluate(
+      () => (window as Window & { pushLifecycleEvents: string[] }).pushLifecycleEvents,
+    ),
+  ).toEqual(['subscribe']);
+
+  await page
+    .getByRole('navigation', { name: 'Atalhos de gestão' })
+    .getByRole('button', { name: 'Configurações' })
+    .click();
+  await page.getByRole('button', { name: 'Central de avisos', exact: true }).click();
+  const enabled = page.getByText('Notificações ativadas neste aparelho', { exact: true });
+  await expect(enabled).toHaveCount(2);
+
+  // A failed attempt followed by online within the throttle window must recover
+  // immediately and update both mounted panels without reopening either one.
+  configUnavailable = true;
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  const verificationError = page.getByText('Não foi possível verificar as notificações.', {
+    exact: false,
+  });
+  await expect(verificationError).toHaveCount(2);
+  const postsBeforeRecovery = calls.filter((method) => method === 'POST').length;
+  configUnavailable = false;
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await expect(enabled).toHaveCount(2);
+  await expect(verificationError).toHaveCount(0);
+  expect(calls.filter((method) => method === 'POST').length).toBeGreaterThan(postsBeforeRecovery);
+
+  // Server recovery may happen without another browser online/focus event.
+  await page.clock.install();
+  configUnavailable = true;
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await expect(verificationError).toHaveCount(2);
+  configUnavailable = false;
+  await page.clock.fastForward(15_001);
+  await expect(enabled).toHaveCount(2);
+
+  await page.getByRole('dialog').getByRole('button', { name: 'Desativar', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Ativar notificações', includeHidden: true }),
+  ).toHaveCount(2);
+  await expect(enabled).toHaveCount(0);
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await expect(enabled).toHaveCount(0);
+
+  // Unlike an ordinary logout, an explicit opt-out survives reload and login.
+  await page.reload();
   await expect(page.getByRole('button', { name: 'Ativar notificações' })).toBeVisible();
-  expect(calls).toEqual(['POST', 'test', 'DELETE']);
-  expect(await events()).toEqual(['permission', 'subscribe', 'unsubscribe']);
+  const postsAfterDisable = calls.filter((method) => method === 'POST').length;
+  await page.getByRole('button', { name: 'Sair e acessar outro perfil' }).click();
+  await expect(page.getByRole('button', { name: 'Entrar no espaço de trabalho' })).toBeVisible();
+  await login(page);
+  await page
+    .getByRole('navigation', { name: 'Atalhos de gestão' })
+    .getByRole('button', { name: 'Configurações' })
+    .click();
+  await expect(page.getByRole('button', { name: 'Ativar notificações' })).toBeVisible();
+  expect(calls.filter((method) => method === 'POST')).toHaveLength(postsAfterDisable);
+  await page.getByRole('button', { name: 'Ativar notificações' }).click();
+  await expect(enabled).toHaveCount(1);
+  expect(
+    await page.evaluate(
+      () => (window as Window & { pushLifecycleEvents: string[] }).pushLifecycleEvents,
+    ),
+  ).toEqual(['subscribe', 'unsubscribe', 'permission', 'subscribe']);
 });
 
 test('atendente cadastra, edita e exclui um atalho no celular', async ({ page }) => {

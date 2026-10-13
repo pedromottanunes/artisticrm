@@ -41,6 +41,35 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request)));
   }
 });
+// A visible tab is not proof that audio is ready. Require an acknowledgement
+// and bound the wait so an old, suspended or unresponsive client cannot mute OS sound.
+function handleForegroundSound(client, data) {
+  if (!client) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    const finish = (handled) => {
+      clearTimeout(timeout);
+      channel.port1.close();
+      channel.port2.close();
+      resolve(handled);
+    };
+    const timeout = setTimeout(() => finish(false), 500);
+    channel.port1.onmessage = (event) => finish(event.data?.handled === true);
+    try {
+      client.postMessage(
+        {
+          type: 'artisti-push',
+          userId: data.userId,
+          tag: data.tag,
+          soundDeadline: Date.now() + 500,
+        },
+        [channel.port2],
+      );
+    } catch {
+      finish(false);
+    }
+  });
+}
 self.addEventListener('push', (event) => {
   event.waitUntil(
     (async () => {
@@ -56,19 +85,18 @@ self.addEventListener('push', (event) => {
       )
         ? requestedPage
         : 'mine';
-      // A visible CRM can reproduce the custom alert through Web Audio. Silence
-      // the system notification in that case so the device's default sound does
-      // not cover it. Web Push still receives a user-visible notification.
+      // Preserve explicit in-app mute; otherwise silence OS sound only when
+      // the selected client confirms that it handled the foreground alert.
       const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
       const visible = windows.filter((client) => client.visibilityState === 'visible');
       const client = visible.find((item) => item.focused) || visible[0];
-      client?.postMessage({ type: 'artisti-push', userId: data.userId, tag: data.tag });
+      const handled = await handleForegroundSound(client, data);
       await self.registration.showNotification(data.title || 'Artisti CRM', {
         body: data.body || 'Há uma atualização no CRM. Abra para consultar.',
         icon: '/icons/icon-192.png',
         tag: data.tag || 'artisti-update',
         renotify: false,
-        ...(client ? { silent: true } : { silent: false, vibrate: [200, 100, 200] }),
+        ...(handled ? { silent: true } : { silent: false, vibrate: [200, 100, 200] }),
         data: { page, opportunityId: data.opportunityId },
       });
     })(),
