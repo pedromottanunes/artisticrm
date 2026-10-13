@@ -20,6 +20,9 @@ body {
   max-width: 100%;
   overflow-x: hidden;
 }
+html {
+  scrollbar-gutter: stable;
+}
 body {
   margin: 0;
 }

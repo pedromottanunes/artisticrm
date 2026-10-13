@@ -429,7 +429,6 @@ export function ManagerReports({
     let disposed = false;
     const controller = new AbortController();
     setMetaBusy(true);
-    setMetaAds(null);
     void api<MetaAdsReport>(
       `/reports/meta-ads?${new URLSearchParams({
         ...query,
@@ -770,7 +769,10 @@ export function ManagerReports({
             <p className="reports-loading compact">Consultando anúncios…</p>
           ) : null}
           {metaAds ? (
-            <section className="meta-ads-panel">
+            <section
+              className={`meta-ads-panel ${metaBusy ? 'is-updating' : ''}`}
+              aria-busy={metaBusy}
+            >
               <div className="meta-ads-updated">
                 <CheckCircle2 size={15} />
                 <span>
@@ -922,6 +924,7 @@ export function ManagerReports({
                     <button
                       key={value}
                       type="button"
+                      disabled={metaBusy}
                       aria-pressed={metaAdGroup === value}
                       onClick={() => {
                         setMetaAdGroup(value);

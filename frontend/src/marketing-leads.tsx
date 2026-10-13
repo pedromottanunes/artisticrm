@@ -55,37 +55,44 @@ export function MarketingLeads({
       title={ad.ad_name}
       description="Contatos ligados a este anúncio no período. Os não comerciais mostram o motivo do selo."
       onClose={onClose}
+      className="report-leads-modal"
     >
       <div className="report-lead-list" aria-busy={busy}>
         {error && <p role="alert">{error}</p>}
-        {busy ? (
-          <p>Carregando…</p>
-        ) : (
-          data?.items.map((lead) => (
-            <button
-              key={lead.id}
-              onClick={() => {
-                onClose();
-                onOpen(lead.id);
-              }}
-            >
-              <span>
-                {lead.name}
-                <small className="marketing-lead-owner">
-                  {lead.owner_name || 'Ainda não assumido'}
-                </small>
-                <small className="marketing-lead-owner">
-                  {lead.non_commercial_reason
-                    ? `Não comercial · ${qualityReasons[lead.non_commercial_reason] ?? lead.non_commercial_reason}`
-                    : 'Lead comercial'}
-                </small>
-              </span>
-              <span>
-                Abrir <ArrowUpRight size={15} />
-              </span>
-            </button>
-          ))
+        {busy && !data && (
+          <p className="report-leads-initial-loading" role="status">
+            Carregando contatos…
+          </p>
         )}
+        {busy && data && (
+          <span className="report-leads-progress" role="status">
+            Atualizando lista…
+          </span>
+        )}
+        {data?.items.map((lead) => (
+          <button
+            key={lead.id}
+            onClick={() => {
+              onClose();
+              onOpen(lead.id);
+            }}
+          >
+            <span>
+              {lead.name}
+              <small className="marketing-lead-owner">
+                {lead.owner_name || 'Ainda não assumido'}
+              </small>
+              <small className="marketing-lead-owner">
+                {lead.non_commercial_reason
+                  ? `Não comercial · ${qualityReasons[lead.non_commercial_reason] ?? lead.non_commercial_reason}`
+                  : 'Lead comercial'}
+              </small>
+            </span>
+            <span>
+              Abrir <ArrowUpRight size={15} />
+            </span>
+          </button>
+        ))}
         {!busy && !error && !data?.items.length && <p>Nenhum lead encontrado.</p>}
         <div className="reports-filter">
           {after && (

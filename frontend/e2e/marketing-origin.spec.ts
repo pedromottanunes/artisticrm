@@ -194,73 +194,86 @@ test('relatório abre lista do anúncio só no clique e solicita atualização e
 }) => {
   await login(page, 'cadu');
   let selectedPeriod = { from: '', to: '' };
+  let releaseAllAds: (() => void) | undefined;
+  let releaseLeads: (() => void) | undefined;
+  const allAdsGate = new Promise<void>((resolve) => {
+    releaseAllAds = resolve;
+  });
+  const leadsGate = new Promise<void>((resolve) => {
+    releaseLeads = resolve;
+  });
   await page.route('**/api/v1/meta-marketing/status', (route) =>
     route.fulfill({ json: { configured: true, state: 'idle' } }),
   );
   await page.route('**/api/v1/reports/meta-ads?*', (route) => {
     const params = new URL(route.request().url()).searchParams;
-    expect(params.get('ad_group')).toBe('with_leads');
+    const group = params.get('ad_group');
+    expect(['with_leads', 'all']).toContain(group);
     selectedPeriod = { from: params.get('from')!, to: params.get('to')! };
-    return route.fulfill({
-      json: {
-        period: selectedPeriod,
-        currency: 'BRL',
-        spend: 300,
-        eligible_spend: 300,
-        cpl: 20,
-        instagram_leads: 15,
-        instagram_entries: 18,
-        non_commercial_leads: 3,
-        identified_paid_leads: 15,
-        identified_paid_non_commercial_leads: 3,
-        matched_attributed_leads: 15,
-        unmatched_attributed_leads: 0,
-        unattributed_or_organic_leads: 0,
-        unattributed_or_organic_non_commercial_leads: 0,
-        coverage_complete: true,
-        total: 1,
-        page_size: 50,
-        ad_groups: { with_leads: 1, without_leads: 0, all: 1 },
-        ads: [
-          {
-            ad_id: '111',
-            ad_name: 'Resultado Carlos',
-            campaign_name: 'Campanha clínica',
-            adset_name: 'Direct Florianópolis',
-            post_url: 'https://www.instagram.com/p/CARLOS/',
-            scope: 'instagram_direct',
-            spend: 300,
-            currency: 'BRL',
-            attributed_leads: 15,
-            non_commercial_leads: 3,
-            scheduled: 5,
-            attended: 4,
-            sales: 1,
-            sales_value: 12000,
-            cpl: 20,
-            cost_per_sale: 300,
-          },
-        ],
-      },
-    });
+    return (group === 'all' ? allAdsGate : Promise.resolve()).then(() =>
+      route.fulfill({
+        json: {
+          period: selectedPeriod,
+          currency: 'BRL',
+          spend: 300,
+          eligible_spend: 300,
+          cpl: 20,
+          instagram_leads: 15,
+          instagram_entries: 18,
+          non_commercial_leads: 3,
+          identified_paid_leads: 15,
+          identified_paid_non_commercial_leads: 3,
+          matched_attributed_leads: 15,
+          unmatched_attributed_leads: 0,
+          unattributed_or_organic_leads: 0,
+          unattributed_or_organic_non_commercial_leads: 0,
+          coverage_complete: true,
+          total: 1,
+          page_size: 50,
+          ad_groups: { with_leads: 1, without_leads: 0, all: 1 },
+          ads: [
+            {
+              ad_id: '111',
+              ad_name: 'Resultado Carlos',
+              campaign_name: 'Campanha clínica',
+              adset_name: 'Direct Florianópolis',
+              post_url: 'https://www.instagram.com/p/CARLOS/',
+              scope: 'instagram_direct',
+              spend: 300,
+              currency: 'BRL',
+              attributed_leads: 15,
+              non_commercial_leads: 3,
+              scheduled: 5,
+              attended: 4,
+              sales: 1,
+              sales_value: 12000,
+              cpl: 20,
+              cost_per_sale: 300,
+            },
+          ],
+        },
+      }),
+    );
   });
   let lists = 0;
   await page.route('**/api/v1/reports/meta-ads/leads?*', (route) => {
     lists++;
     expect(new URL(route.request().url()).searchParams.get('ad_id')).toBe('111');
-    return route.fulfill({
-      json: {
-        items: [
-          {
-            id: '10000000-0000-4000-8000-000000000001',
-            name: 'João teste',
-            owner_name: 'Consultor teste',
-            non_commercial_reason: 'ADVERTISING',
-          },
-        ],
-        next_cursor: null,
-      },
-    });
+    return leadsGate.then(() =>
+      route.fulfill({
+        json: {
+          items: [
+            {
+              id: '10000000-0000-4000-8000-000000000001',
+              name: 'João teste',
+              owner_name: 'Consultor teste',
+              non_commercial_reason: 'ADVERTISING',
+            },
+          ],
+          next_cursor: null,
+        },
+      }),
+    );
   });
   await page.route('**/api/v1/meta-marketing/sync', (route) => {
     expect(route.request().postDataJSON()).toEqual(selectedPeriod);
@@ -281,8 +294,21 @@ test('relatório abre lista do anúncio só no clique e solicita atualização e
   expect(lists).toBe(0);
   await expect(page.getByText('3 contatos não comerciais ficam fora do custo')).toBeVisible();
   await expect(page.getByText('15 · Anúncio identificado')).toBeVisible();
+  const metaPanel = page.locator('.meta-ads-panel');
+  await page.getByRole('button', { name: 'Todos (1)' }).click();
+  await expect(metaPanel).toHaveAttribute('aria-busy', 'true');
+  await expect(page.getByText('Resultado Carlos', { exact: true })).toBeVisible();
+  await expect(page.getByText('Consultando anúncios…')).toHaveCount(0);
+  releaseAllAds?.();
+  await expect(metaPanel).toHaveAttribute('aria-busy', 'false');
   await page.getByRole('button', { name: 'Ver 18 contatos de Resultado Carlos' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText('Carregando contatos…')).toBeVisible();
+  const loadingBox = await dialog.boundingBox();
+  releaseLeads?.();
   await expect(page.getByRole('dialog').getByText('João teste')).toBeVisible();
+  const loadedBox = await dialog.boundingBox();
+  expect(Math.abs((loadingBox?.height ?? 0) - (loadedBox?.height ?? 0))).toBeLessThan(2);
   await expect(
     page.getByRole('dialog').getByText('Não comercial · Vendas e propagandas'),
   ).toBeVisible();
