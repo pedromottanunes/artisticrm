@@ -59,6 +59,7 @@ interface MetaMarketingStatus {
   requested_from?: string | null;
   requested_to?: string | null;
   paused_until?: string | null;
+  retry_at?: string | null;
 }
 
 interface MetaMarketingSyncRequest {
@@ -470,6 +471,12 @@ export function ManagerReports({
   const metaUpdatePending = Boolean(
     metaStatus?.configured && (metaStatus.queued || metaStatus.state === 'syncing'),
   );
+  const metaSafetyPause = Boolean(
+    metaStatus?.queued &&
+    ['META_BUDGET_LIMIT', 'META_CYCLE_LIMIT', 'META_RATE_LIMIT', 'META_PAUSED'].includes(
+      metaStatus.last_error ?? '',
+    ),
+  );
 
   useEffect(() => {
     if (!metaUpdatePending) return;
@@ -741,12 +748,24 @@ export function ManagerReports({
             )}
           </div>
           {metaError && <div className="reports-error">{metaError}</div>}
-          {metaNotice && (
+          {metaSafetyPause ? (
+            <p className="meta-ads-note" role="status">
+              A atualização fez uma pausa automática para proteger a conexão com a Meta. O pedido
+              está salvo e será retomado sem novas ações
+              {metaStatus?.retry_at
+                ? ` a partir das ${new Date(metaStatus.retry_at).toLocaleTimeString('pt-BR', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}`
+                : ' automaticamente'}
+              .
+            </p>
+          ) : metaNotice ? (
             <p className="meta-ads-note" role="status">
               {metaNotice}
             </p>
-          )}
-          {!metaError && metaStatus?.state === 'error' && (
+          ) : null}
+          {!metaError && metaStatus?.state === 'error' && !metaSafetyPause && (
             <div className="reports-error">
               A última sincronização de anúncios falhou. Os dados abaixo são da última atualização
               concluída. A rotina respeita o prazo de retomada da Meta. Se houver falta de

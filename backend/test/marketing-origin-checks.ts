@@ -195,6 +195,8 @@ export async function checkMarketingOrigins(db: MarketingDB) {
   });
   assert.equal(calls.length, 0);
   await marketing.run();
+  assert.equal(calls.filter((path) => path.endsWith('/111')).length, 0);
+  assert.equal(calls.filter((path) => path.endsWith('/222')).length, 0);
   await marketing.run(); // Enrich the zero-lead ad discovered in Insights.
   assert.equal(calls.filter((path) => path.endsWith('/111')).length, 1);
   const beforeReads = calls.length;
@@ -337,6 +339,10 @@ export async function checkMarketingOrigins(db: MarketingDB) {
     code: 'META_MARKETING_SYNC_FAILED',
   });
   assert.equal(limitedCalls, 1);
+  assert.equal(
+    (await marketing.status()).retry_at,
+    new Date(now.getTime() + 3_600_000).toISOString(),
+  );
   await marketing.store.patch({ budget_used: 0 });
   let authCalls = 0;
   const unauthorized: typeof fetch = async () => {

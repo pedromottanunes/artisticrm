@@ -202,8 +202,21 @@ test('relatório abre lista do anúncio só no clique e solicita atualização e
   const leadsGate = new Promise<void>((resolve) => {
     releaseLeads = resolve;
   });
+  let budgetPaused = false;
   await page.route('**/api/v1/meta-marketing/status', (route) =>
-    route.fulfill({ json: { configured: true, state: 'idle' } }),
+    route.fulfill({
+      json: budgetPaused
+        ? {
+            configured: true,
+            state: 'error',
+            queued: true,
+            last_error: 'META_BUDGET_LIMIT',
+            requested_from: selectedPeriod.from,
+            requested_to: selectedPeriod.to,
+            retry_at: '2026-09-23T16:30:00.000Z',
+          }
+        : { configured: true, state: 'idle' },
+    }),
   );
   await page.route('**/api/v1/reports/meta-ads?*', (route) => {
     const params = new URL(route.request().url()).searchParams;
@@ -277,6 +290,7 @@ test('relatório abre lista do anúncio só no clique e solicita atualização e
   });
   await page.route('**/api/v1/meta-marketing/sync', (route) => {
     expect(route.request().postDataJSON()).toEqual(selectedPeriod);
+    budgetPaused = true;
     return route.fulfill({
       status: 202,
       json: {
@@ -319,4 +333,8 @@ test('relatório abre lista do anúncio só no clique e solicita atualização e
   await page.getByRole('button', { name: 'Atualizar dados' }).click();
   await expect(page.getByText(/Atualização de .* agendada/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Atualização em andamento' })).toBeDisabled();
+  await page.reload();
+  await expect(page.getByText(/pausa automática para proteger a conexão com a Meta/)).toBeVisible();
+  await expect(page.getByText(/a partir das 13:30/)).toBeVisible();
+  await expect(page.getByText(/A última sincronização de anúncios falhou/)).toHaveCount(0);
 });

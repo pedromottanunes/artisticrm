@@ -332,23 +332,6 @@ export class MetaMarketing {
         );
       }
       await this.store.backfill(now, lease);
-      for (const job of await this.store.dueAds(now, config.instagramAccountId)) {
-        try {
-          await enrichMarketingAd(this.store, client, job.ad_id, lease, this.clock());
-          await this.store.finishAd(job.ad_id, this.clock(), null, job.attempts, lease);
-        } catch (error) {
-          const code = error instanceof MarketingError ? error.code : 'ENRICHMENT_FAILED';
-          await this.store.finishAd(job.ad_id, this.clock(), code, job.attempts, lease);
-          if (
-            ![
-              'META_OBJECT_UNAVAILABLE',
-              'META_REQUEST_REJECTED',
-              'META_OPTIONAL_PERMISSION',
-            ].includes(code)
-          )
-            throw error;
-        }
-      }
       let result = { rows_synced: 0 };
       const weekDue =
         !control.last_week_sync || Date.parse(control.last_week_sync) <= now.getTime() - 86_400_000;
@@ -385,6 +368,26 @@ export class MetaMarketing {
           rows: result.rows_synced,
           error: null,
         });
+        // Reserve the request budget for the selected period. Ad/publication details are
+        // enriched by later idle ticks and must never prevent a queued report from advancing.
+        return result;
+      }
+      for (const job of await this.store.dueAds(now, config.instagramAccountId)) {
+        try {
+          await enrichMarketingAd(this.store, client, job.ad_id, lease, this.clock());
+          await this.store.finishAd(job.ad_id, this.clock(), null, job.attempts, lease);
+        } catch (error) {
+          const code = error instanceof MarketingError ? error.code : 'ENRICHMENT_FAILED';
+          await this.store.finishAd(job.ad_id, this.clock(), code, job.attempts, lease);
+          if (
+            ![
+              'META_OBJECT_UNAVAILABLE',
+              'META_REQUEST_REJECTED',
+              'META_OPTIONAL_PERMISSION',
+            ].includes(code)
+          )
+            throw error;
+        }
       }
       return result;
     }).finally(() => {
@@ -403,6 +406,15 @@ export class MetaMarketing {
             ])
           ).rows[0];
     const control = await this.store.control();
+    const now = this.clock().getTime();
+    const pauseUntil = Date.parse(control.pause_until ?? '');
+    const budgetUntil = Date.parse(control.budget_until ?? '');
+    const retryAt = Math.max(
+      Number.isFinite(pauseUntil) && pauseUntil > now ? pauseUntil : 0,
+      (control.budget_used ?? 0) >= 120 && Number.isFinite(budgetUntil) && budgetUntil > now
+        ? budgetUntil
+        : 0,
+    );
     return {
       configured: Boolean(this.config),
       state: !this.config ? 'disabled' : (state?.state ?? 'idle'),
@@ -417,6 +429,7 @@ export class MetaMarketing {
       requested_to: control.requested_to || null,
       next_sync_at: control.next_sync_at ?? null,
       paused_until: control.pause_until ?? null,
+      retry_at: retryAt ? new Date(retryAt).toISOString() : null,
       timezone: control.timezone ?? null,
     };
   }
