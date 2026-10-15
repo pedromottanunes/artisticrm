@@ -734,6 +734,34 @@ test('caixa filtra a responsavel antes do limite global de cem conversas', async
   const list = await central.list(attendants[0], 'mine');
   assert.equal(list.conversations.length, 1);
   assert.equal(list.conversations[0].contact_name, 'Contato 0');
+
+  const firstPage = await central.list(manager, 'all', undefined, 40);
+  assert.equal(firstPage.conversations.length, 40);
+  assert.equal(firstPage.has_more, true);
+  const firstPageLast = firstPage.conversations.at(-1)!;
+  const secondPage = await central.list(
+    manager,
+    'all',
+    { at: new Date(firstPageLast.last_message_at), id: String(firstPageLast.id) },
+    40,
+  );
+  assert.equal(secondPage.conversations.length, 40);
+  assert.equal(secondPage.has_more, true);
+  assert.equal(
+    secondPage.conversations.some((conversation) =>
+      firstPage.conversations.some((first) => first.id === conversation.id),
+    ),
+    false,
+  );
+  const secondPageLast = secondPage.conversations.at(-1)!;
+  const thirdPage = await central.list(
+    manager,
+    'all',
+    { at: new Date(secondPageLast.last_message_at), id: String(secondPageLast.id) },
+    40,
+  );
+  assert.equal(thirdPage.conversations.length, 21);
+  assert.equal(thirdPage.has_more, false);
 });
 
 test('historico limitado retorna as duzentas mensagens mais recentes em ordem cronologica', async () => {
@@ -757,8 +785,19 @@ test('historico limitado retorna as duzentas mensagens mais recentes em ordem cr
   const result = await central.messages(attendants[0], conversation.id);
   assert.equal(result.messages.length, 200);
   assert.equal(result.has_more, true);
+  assert.equal(result.has_older, true);
   assert.equal((result.messages[0] as { text: string }).text, 'Mensagem 5');
   assert.equal((result.messages[199] as { text: string }).text, 'Mensagem 204');
+
+  const older = await central.messages(attendants[0], conversation.id, {
+    before: String(result.messages[0].id),
+  });
+  assert.equal(older.messages.length, 5);
+  assert.equal(older.has_older, false);
+  assert.deepEqual(
+    older.messages.map((message) => message.text),
+    ['Mensagem 0', 'Mensagem 1', 'Mensagem 2', 'Mensagem 3', 'Mensagem 4'],
+  );
 
   const cursor = result.messages[199] as { id: string };
   const nextCreatedAt = new Date(Date.now() + 206 * 1000);

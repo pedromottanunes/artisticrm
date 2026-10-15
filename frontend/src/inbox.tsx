@@ -32,6 +32,10 @@ interface ListResponse {
   revision?: string;
   configured: boolean;
   conversations: ConversationSummary[];
+  has_more?: boolean;
+  next_before_at?: string | null;
+  next_before_id?: string | null;
+  review_source_ids?: string[];
 }
 
 interface ThreadResponse {
@@ -41,6 +45,7 @@ interface ThreadResponse {
   messaging_mode?: ConversationSummary['messaging_mode'];
   last_message_at: string;
   has_more: boolean;
+  has_older?: boolean;
   messages: ConversationMessage[];
 }
 
@@ -51,6 +56,13 @@ const time = (value: string) =>
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value));
+
+const compareConversations = (left: ConversationSummary, right: ConversationSummary) => {
+  const timeDifference =
+    new Date(right.last_message_at).getTime() - new Date(left.last_message_at).getTime();
+  if (timeDifference) return timeDifference;
+  return left.id === right.id ? 0 : left.id < right.id ? -1 : 1;
+};
 
 const imageAttachmentTypes = new Set(['image', 'photo', 'animated_image']);
 const audioAttachmentTypes = new Set(['audio', 'voice', 'voice_message']);
@@ -460,6 +472,9 @@ export function InstagramInbox({
   const [sending, setSending] = useState(false);
   const [notificationSaving, setNotificationSaving] = useState(false);
   const [assuming, setAssuming] = useState(false);
+  const [listLoadingMore, setListLoadingMore] = useState(false);
+  const [listHasMore, setListHasMore] = useState(false);
+  const [olderMessagesLoading, setOlderMessagesLoading] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const draft = drafts[selectedId] ?? '';
   const [shortcutPickerOpen, setShortcutPickerOpen] = useState(false);
@@ -480,6 +495,14 @@ export function InstagramInbox({
   const listRequest = useRef<AbortController | null>(null);
   const threadRequest = useRef<{ id: string; controller: AbortController } | null>(null);
   const listCache = useRef<ListResponse | null>(null);
+  const conversationsRef = useRef<ConversationSummary[]>([]);
+  const listPagination = useRef({
+    scope: '',
+    loadedBeyondFirst: false,
+    hasMore: false,
+    beforeAt: null as string | null,
+    beforeId: null as string | null,
+  });
   const retryAfter = useRef(0);
   const pollFailures = useRef(0);
   const inboxRef = useRef<HTMLElement>(null);
@@ -511,6 +534,7 @@ export function InstagramInbox({
       const clearUnread = (items: ConversationSummary[]) =>
         items.map((item) => (item.id === id && item.unread ? { ...item, unread: false } : item));
       setConversations(clearUnread);
+      conversationsRef.current = clearUnread(conversationsRef.current);
       // Keep the cached server snapshot untouched. If a newer message arrived
       // during this request, the next poll restores its unread state.
     } catch {
@@ -660,7 +684,8 @@ export function InstagramInbox({
         for (const message of received) merged.set(message.id, message);
         const next = {
           ...result!,
-          messages: [...merged.values()].slice(-200),
+          has_older: append ? current?.has_older : result!.has_older,
+          messages: [...merged.values()],
         };
         const messageList = messageListRef.current;
         stickToLatestMessage.current =
@@ -698,6 +723,42 @@ export function InstagramInbox({
     [handleError, markConversationRead, onConnectionChange],
   );
 
+  const loadOlderMessages = useCallback(async () => {
+    const current = threadRef.current;
+    const id = selectedIdRef.current;
+    const firstMessageId = current?.messages[0]?.id;
+    if (!current?.has_older || !id || !firstMessageId || olderMessagesLoading) return;
+    setOlderMessagesLoading(true);
+    const messageList = messageListRef.current;
+    const previousHeight = messageList?.scrollHeight ?? 0;
+    try {
+      const result = await api<ThreadResponse>(
+        `/conversations/${id}/messages?before=${encodeURIComponent(firstMessageId)}`,
+      );
+      if (!mounted.current || selectedIdRef.current !== id) return;
+      const latest = threadRef.current;
+      if (!latest || latest.conversation_id !== id) return;
+      const merged = new Map(result.messages.map((message) => [message.id, message]));
+      for (const message of latest.messages) merged.set(message.id, message);
+      const next = {
+        ...latest,
+        has_older: result.has_older,
+        messages: [...merged.values()],
+      };
+      threadRef.current = next;
+      setThread(next);
+      requestAnimationFrame(() => {
+        const list = messageListRef.current;
+        if (list) list.scrollTop += list.scrollHeight - previousHeight;
+      });
+      onConnectionChange(true);
+    } catch (error) {
+      handleError(error);
+    } finally {
+      if (mounted.current) setOlderMessagesLoading(false);
+    }
+  }, [handleError, olderMessagesLoading, onConnectionChange]);
+
   const refresh = useCallback(
     async (quiet = false, forceThread = false) => {
       if (!mounted.current || notificationSavingRef.current) return;
@@ -729,18 +790,51 @@ export function InstagramInbox({
         pollFailures.current = 0;
         retryAfter.current = 0;
         setConfigured(result.configured);
-        setConversations(result.conversations);
+        const scope = `${view}:${[...(result.review_source_ids ?? [])].sort().join('|')}`;
+        const previousPagination = listPagination.current;
+        const preserveLoadedPages =
+          review &&
+          result.conversations.length > 0 &&
+          previousPagination.loadedBeyondFirst &&
+          previousPagination.scope === scope;
+        const allowedReviewOwners = new Set(result.review_source_ids ?? []);
+        const nextConversations = preserveLoadedPages
+          ? [
+              ...new Map(
+                [
+                  ...result.conversations,
+                  ...conversationsRef.current.filter(
+                    (conversation) =>
+                      !conversation.review_shared ||
+                      allowedReviewOwners.has(conversation.owner_id ?? ''),
+                  ),
+                ].map((conversation) => [conversation.id, conversation]),
+              ).values(),
+            ].sort(compareConversations)
+          : result.conversations;
+        conversationsRef.current = nextConversations;
+        setConversations(nextConversations);
+        if (!preserveLoadedPages) {
+          listPagination.current = {
+            scope,
+            loadedBeyondFirst: false,
+            hasMore: Boolean(result.has_more),
+            beforeAt: result.next_before_at ?? null,
+            beforeId: result.next_before_id ?? null,
+          };
+        }
+        setListHasMore(listPagination.current.hasMore);
         const targeted = targetOpportunityId
-          ? result.conversations.find((item) => item.opportunity_id === targetOpportunityId)
+          ? nextConversations.find((item) => item.opportunity_id === targetOpportunityId)
           : undefined;
         const keepConversationSelected =
           !window.matchMedia('(max-width: 760px)').matches || mobileThreadOpenRef.current;
         const next = targeted
           ? targeted.id
           : keepConversationSelected
-            ? result.conversations.some((item) => item.id === selectedIdRef.current)
+            ? nextConversations.some((item) => item.id === selectedIdRef.current)
               ? selectedIdRef.current
-              : (result.conversations[0]?.id ?? '')
+              : (nextConversations[0]?.id ?? '')
             : '';
         const previous = selectedIdRef.current;
         selectedIdRef.current = next;
@@ -758,7 +852,7 @@ export function InstagramInbox({
           onTargetConsumed();
         }
         if (next) {
-          const summary = result.conversations.find((item) => item.id === next)!;
+          const summary = nextConversations.find((item) => item.id === next)!;
           const current = threadRef.current;
           const sameThread = current?.conversation_id === next;
           if (
@@ -825,6 +919,58 @@ export function InstagramInbox({
     ],
   );
 
+  const loadMoreConversations = useCallback(async () => {
+    const page = listPagination.current;
+    if (!review || listLoadingMore || !page.hasMore || !page.beforeAt || !page.beforeId) return;
+    const expectedScope = page.scope;
+    setListLoadingMore(true);
+    try {
+      const params = new URLSearchParams({
+        view: 'review',
+        before_at: page.beforeAt,
+        before_id: page.beforeId,
+      });
+      const result = await api<ListResponse>(`/conversations?${params.toString()}`);
+      const resultScope = `review:${[...(result.review_source_ids ?? [])].sort().join('|')}`;
+      if (!mounted.current || listPagination.current.scope !== expectedScope) return;
+      if (resultScope !== expectedScope) {
+        listCache.current = null;
+        listPagination.current = {
+          scope: '',
+          loadedBeyondFirst: false,
+          hasMore: false,
+          beforeAt: null,
+          beforeId: null,
+        };
+        await refresh();
+        return;
+      }
+      const merged = [
+        ...new Map(
+          [...conversationsRef.current, ...result.conversations].map((conversation) => [
+            conversation.id,
+            conversation,
+          ]),
+        ).values(),
+      ].sort(compareConversations);
+      conversationsRef.current = merged;
+      setConversations(merged);
+      listPagination.current = {
+        scope: expectedScope,
+        loadedBeyondFirst: true,
+        hasMore: Boolean(result.has_more),
+        beforeAt: result.next_before_at ?? null,
+        beforeId: result.next_before_id ?? null,
+      };
+      setListHasMore(Boolean(result.has_more));
+      onConnectionChange(true);
+    } catch (error) {
+      handleError(error);
+    } finally {
+      if (mounted.current) setListLoadingMore(false);
+    }
+  }, [handleError, listLoadingMore, onConnectionChange, refresh, review]);
+
   useEffect(() => {
     void refresh();
     const timer = window.setInterval(() => {
@@ -836,6 +982,14 @@ export function InstagramInbox({
   useEffect(() => {
     if (!targetOpportunityId) return;
     listCache.current = null;
+    listPagination.current = {
+      scope: '',
+      loadedBeyondFirst: false,
+      hasMore: false,
+      beforeAt: null,
+      beforeId: null,
+    };
+    setListHasMore(false);
     setArchive(targetArchived);
     setReview(false);
   }, [targetArchived, targetOpportunityId]);
@@ -991,6 +1145,16 @@ export function InstagramInbox({
   };
 
   const selectedConversation = conversations.find((item) => item.id === selectedId);
+  const resetConversationPagination = () => {
+    listPagination.current = {
+      scope: '',
+      loadedBeyondFirst: false,
+      hasMore: false,
+      beforeAt: null,
+      beforeId: null,
+    };
+    setListHasMore(false);
+  };
   const canControlNotifications =
     user.role === 'attendant' &&
     selectedConversation?.owner_id === user.id &&
@@ -1014,7 +1178,16 @@ export function InstagramInbox({
       threadRef.current = null;
       setSelectedId('');
       setThread(null);
+      conversationsRef.current = [];
       setConversations([]);
+      listPagination.current = {
+        scope: '',
+        loadedBeyondFirst: false,
+        hasMore: false,
+        beforeAt: null,
+        beforeId: null,
+      };
+      setListHasMore(false);
       setReview(false);
       setArchive(false);
       onNotice('Conversa assumida. Ela agora está em seus atendimentos.');
@@ -1054,6 +1227,7 @@ export function InstagramInbox({
             : item,
         );
       setConversations(update);
+      conversationsRef.current = update(conversationsRef.current);
       if (listCache.current)
         listCache.current = {
           ...listCache.current,
@@ -1122,6 +1296,7 @@ export function InstagramInbox({
             aria-pressed={!archive && !review}
             onClick={() => {
               listCache.current = null;
+              resetConversationPagination();
               setArchive(false);
               setReview(false);
             }}
@@ -1133,6 +1308,7 @@ export function InstagramInbox({
             aria-pressed={archive}
             onClick={() => {
               listCache.current = null;
+              resetConversationPagination();
               setArchive(true);
               setReview(false);
             }}
@@ -1145,6 +1321,7 @@ export function InstagramInbox({
               aria-pressed={review}
               onClick={() => {
                 listCache.current = null;
+                resetConversationPagination();
                 setArchive(false);
                 setReview(true);
               }}
@@ -1185,6 +1362,16 @@ export function InstagramInbox({
               <time>{time(conversation.last_message_at)}</time>
             </button>
           ))}
+          {review && listHasMore && (
+            <button
+              type="button"
+              className="inbox-load-more"
+              disabled={listLoadingMore}
+              onClick={() => void loadMoreConversations()}
+            >
+              {listLoadingMore ? 'Carregandoâ€¦' : 'Carregar conversas anteriores'}
+            </button>
+          )}
           {!conversations.length && (
             <div className="inbox-empty-list">
               <Inbox size={27} />
@@ -1289,6 +1476,16 @@ export function InstagramInbox({
               </div>
             )}
             <div ref={messageListRef} className="thread-messages" aria-live="polite">
+              {thread.has_older && (
+                <button
+                  type="button"
+                  className="thread-load-older"
+                  disabled={olderMessagesLoading}
+                  onClick={() => void loadOlderMessages()}
+                >
+                  {olderMessagesLoading ? 'Carregandoâ€¦' : 'Carregar mensagens anteriores'}
+                </button>
+              )}
               {thread.messages.map((message) => (
                 <article
                   key={message.id}

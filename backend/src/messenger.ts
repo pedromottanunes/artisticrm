@@ -1010,8 +1010,12 @@ export class MessengerCentral {
   async list(
     user: User,
     view: 'mine' | 'reserved' | 'pool' | 'all' | 'non_commercial' | 'review' = 'mine',
+    cursor?: { at: Date; id: string },
+    limit = 100,
+    providedReviewOwners?: string[],
   ) {
-    if (!this.config) return { configured: false, conversations: [] as Record<string, unknown>[] };
+    if (!this.config)
+      return { configured: false, conversations: [] as Record<string, unknown>[], has_more: false };
     if (view === 'all' && user.role !== 'manager')
       throw new DomainError('FORBIDDEN', 'Visão completa restrita à gestão.', 403);
     if (view === 'pool' && user.role === 'attendant' && !user.queue_enabled)
@@ -1023,7 +1027,8 @@ export class MessengerCentral {
     const db = this.crm.db;
     if (view === 'review' && user.role !== 'attendant')
       throw new DomainError('FORBIDDEN', 'A carteira de revisão é exclusiva dos consultores.', 403);
-    const reviewOwners = view === 'review' ? await reviewSourceIds(db, user.id) : [];
+    const reviewOwners =
+      view === 'review' ? (providedReviewOwners ?? (await reviewSourceIds(db, user.id))) : [];
     const archived = view === 'non_commercial';
     if (archived) view = user.role === 'manager' ? 'all' : 'mine';
     let rows: Array<{
@@ -1122,9 +1127,20 @@ export class MessengerCentral {
                   },
                 ]),
             { $match: { 'opportunity.non_commercial_reason': archived ? { $ne: null } : null } },
-            // The account-wide stream is already index-sorted; do not re-sort it after lookup.
-            ...(all ? [] : [{ $sort: { last_message_at: -1, id: 1 } }]),
-            { $limit: 100 },
+            ...(cursor
+              ? [
+                  {
+                    $match: {
+                      $or: [
+                        { last_message_at: { $lt: cursor.at } },
+                        { last_message_at: cursor.at, id: { $gt: cursor.id } },
+                      ],
+                    },
+                  },
+                ]
+              : []),
+            { $sort: { last_message_at: -1, id: 1 } },
+            { $limit: limit + 1 },
             {
               $lookup: {
                 from: 'contacts',
@@ -1175,12 +1191,12 @@ export class MessengerCentral {
       const visibility =
         user.role === 'manager'
           ? view === 'all'
-            ? 'TRUE'
+            ? '$2::uuid IS NOT NULL'
             : view === 'mine'
               ? 'o.owner_id=$2'
               : view === 'reserved'
-                ? "o.state='RESERVED'"
-                : "o.state='POOL'"
+                ? "o.state='RESERVED' AND $2::uuid IS NOT NULL"
+                : "o.state='POOL' AND $2::uuid IS NOT NULL"
           : view === 'mine'
             ? 'o.owner_id=$2'
             : view === 'review'
@@ -1188,8 +1204,8 @@ export class MessengerCentral {
               : view === 'reserved'
                 ? "o.state='RESERVED' AND o.reserved_to=$2"
                 : user.active && user.queue_enabled
-                  ? "o.state='POOL'"
-                  : 'FALSE';
+                  ? "o.state='POOL' AND $2::uuid IS NOT NULL"
+                  : '$2::uuid IS NULL AND FALSE';
       rows = (
         await db.query(
           `SELECT cv.id,o.id AS opportunity_id,c.name AS contact_name,
@@ -1201,13 +1217,21 @@ export class MessengerCentral {
              AND i.provider='messenger' AND i.channel_account_id=ca.external_account_id LIMIT 1) ci ON TRUE
            WHERE ca.provider='messenger' AND ca.external_account_id=$1
              AND o.non_commercial_reason IS ${archived ? 'NOT NULL' : 'NULL'} AND (${visibility})
-           ORDER BY cv.last_message_at DESC,cv.id LIMIT 100`,
-          visibility.includes('$2')
-            ? [this.config.pageId, view === 'review' ? reviewOwners : user.id]
-            : [this.config.pageId],
+              AND ($3::timestamptz IS NULL OR cv.last_message_at<$3::timestamptz
+                   OR (cv.last_message_at=$3::timestamptz AND cv.id>$4::uuid))
+            ORDER BY cv.last_message_at DESC,cv.id LIMIT $5`,
+          [
+            this.config.pageId,
+            view === 'review' ? reviewOwners : user.id,
+            cursor?.at ?? null,
+            cursor?.id ?? null,
+            limit + 1,
+          ],
         )
       ).rows as typeof rows;
     }
+    const hasMore = rows.length > limit;
+    if (hasMore) rows = rows.slice(0, limit);
     const unread = await this.unreadConversationIds(
       user.id,
       rows.map((row) => row.id),
@@ -1222,6 +1246,7 @@ export class MessengerCentral {
         : new Set<string>();
     return {
       configured: true,
+      has_more: hasMore,
       conversations: rows.map((row) => {
         const withinWindow =
           Boolean(row.last_inbound_at) &&
@@ -1240,9 +1265,15 @@ export class MessengerCentral {
     };
   }
 
-  async messages(user: User, conversationId: string, afterMessageId?: string) {
+  async messages(
+    user: User,
+    conversationId: string,
+    cursor: { after?: string; before?: string } | string = {},
+  ) {
     const context = await this.context(user, conversationId);
     const db = this.crm.db;
+    const afterMessageId = typeof cursor === 'string' ? cursor : cursor.after;
+    const beforeMessageId = typeof cursor === 'string' ? undefined : cursor.before;
     let messages: Record<string, unknown>[];
     if (db.kind === 'mongo') {
       const projection = {
@@ -1280,6 +1311,28 @@ export class MessengerCentral {
           .sort({ created_at: 1, id: 1 })
           .limit(201)
           .toArray();
+      } else if (beforeMessageId) {
+        const cursorMessage = await db.one<{ created_at: Date; id: string }>('messages', {
+          id: beforeMessageId,
+          conversation_id: context.id,
+        });
+        if (!cursorMessage)
+          throw new DomainError('INVALID_CURSOR', 'Atualize a conversa novamente.', 400);
+        messages = (
+          await db
+            .collection('messages')
+            .find({
+              conversation_id: context.id,
+              $or: [
+                { created_at: { $lt: cursorMessage.created_at } },
+                { created_at: cursorMessage.created_at, id: { $lt: cursorMessage.id } },
+              ],
+            })
+            .project(projection)
+            .sort({ created_at: -1, id: -1 })
+            .limit(201)
+            .toArray()
+        ).reverse();
       } else
         messages = (
           await db
@@ -1304,6 +1357,25 @@ export class MessengerCentral {
                   error_code,sent_at,delivered_at,read_at,created_at FROM messages
            WHERE conversation_id=$1 AND (created_at,id)>($2,$3) ORDER BY created_at,id LIMIT 201`,
           [context.id, cursor.created_at, cursor.id],
+        )
+      ).rows;
+    } else if (beforeMessageId) {
+      const cursorMessage = (
+        await db.query<{ created_at: Date | string; id: string }>(
+          'SELECT created_at,id FROM messages WHERE id=$1 AND conversation_id=$2',
+          [beforeMessageId, context.id],
+        )
+      ).rows[0];
+      if (!cursorMessage)
+        throw new DomainError('INVALID_CURSOR', 'Atualize a conversa novamente.', 400);
+      messages = (
+        await db.query(
+          `SELECT * FROM(SELECT id,external_message_id,direction,sender_user_id,type,text,attachments,
+             status,error_code,sent_at,delivered_at,read_at,created_at FROM messages
+             WHERE conversation_id=$1 AND (created_at,id)<($2,$3)
+             ORDER BY created_at DESC,id DESC LIMIT 201) previous
+           ORDER BY created_at,id`,
+          [context.id, cursorMessage.created_at, cursorMessage.id],
         )
       ).rows;
     } else
@@ -1333,6 +1405,7 @@ export class MessengerCentral {
           : 'expired',
       last_message_at: context.last_message_at,
       has_more: hasMore,
+      has_older: !afterMessageId && hasMore,
       messages,
     };
   }

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { commandFingerprint, matchesCommandFingerprint } from './command-fingerprint.js';
 import { CRM } from './crm.js';
 import { deleteLeadData, type DeleteLeadInput } from './lead-deletion.js';
-import type { Sql } from './db.js';
+import type { Database, Sql } from './db.js';
 import { lockActor } from './access.js';
 import { assertSaleFinancialValues, commercialValues } from './commercial-fields.js';
 import { transferProspects } from './instagram-prospects.js';
@@ -17,6 +17,7 @@ import {
   type Opportunity,
 } from './types.js';
 import { compactQueuePositions } from './weighted-queue.js';
+import type { ConversationAccountScope } from './conversation-sharing.js';
 
 export interface AppointmentRow {
   id: string;
@@ -30,7 +31,37 @@ export interface DeleteAttendantInput {
   expected_version: number;
   confirmation: 'EXCLUIR';
 }
+
+function conversationAccountScopeSql(
+  accounts: ConversationAccountScope | undefined,
+  firstParameter: number,
+) {
+  if (accounts === undefined)
+    return { sql: "ca.provider IN ('instagram','messenger')", values: [] as string[] };
+  const values: string[] = [];
+  const clauses: string[] = [];
+  if (accounts.instagram) {
+    values.push(accounts.instagram);
+    clauses.push(`(ca.provider='instagram' AND ca.external_account_id=$${firstParameter})`);
+  }
+  if (accounts.messenger) {
+    values.push(accounts.messenger);
+    clauses.push(
+      `(ca.provider='messenger' AND ca.external_account_id=$${firstParameter + values.length - 1})`,
+    );
+  }
+  return { sql: clauses.length ? `(${clauses.join(' OR ')})` : 'FALSE', values };
+}
+
 export class Operations extends CRM {
+  constructor(
+    db: Database,
+    clock?: () => Date,
+    private readonly conversationAccounts?: ConversationAccountScope,
+  ) {
+    super(db, clock);
+  }
+
   async shareConversationPortfolio(
     actor: User,
     input: { source_user_id: string; reviewer_user_id: string },
@@ -187,9 +218,13 @@ export class Operations extends CRM {
           );
           if (!granted.rows.length)
             throw new DomainError('FORBIDDEN', 'O acesso a esta carteira foi removido.', 403);
+          const accountScope = conversationAccountScopeSql(this.conversationAccounts, 2);
           const conversation = await tx.query(
-            'SELECT id FROM conversations WHERE opportunity_id=$1 LIMIT 1 FOR UPDATE',
-            [id],
+            `SELECT cv.id FROM conversations cv
+             JOIN channel_accounts ca ON ca.id=cv.channel_account_id
+             WHERE cv.opportunity_id=$1 AND ${accountScope.sql}
+             LIMIT 1 FOR UPDATE OF cv`,
+            [id, ...accountScope.values],
           );
           if (!conversation.rows.length)
             throw new DomainError('NOT_FOUND', 'Esta oportunidade não possui conversa.', 404);
@@ -366,12 +401,17 @@ export class Operations extends CRM {
                 );
             }
             if (sourceOwned.length) {
+              const accountScope = conversationAccountScopeSql(this.conversationAccounts, 2);
               const withoutConversation = await tx.query(
                 `SELECT o.id FROM opportunities o
                  WHERE o.owner_id=$1 AND o.state<>'CANCELLED'
-                   AND NOT EXISTS (SELECT 1 FROM conversations c WHERE c.opportunity_id=o.id)
+                    AND NOT EXISTS (
+                      SELECT 1 FROM conversations c
+                      JOIN channel_accounts ca ON ca.id=c.channel_account_id
+                      WHERE c.opportunity_id=o.id AND ${accountScope.sql}
+                    )
                  LIMIT 1`,
-                [id],
+                [id, ...accountScope.values],
               );
               if (withoutConversation.rows.length)
                 throw new DomainError(

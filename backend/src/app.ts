@@ -33,7 +33,7 @@ import { DomainError, requireManager, stages, type User } from './types.js';
 import { personalQueueStatus } from './queue-status.js';
 import { attendantPoolCounts } from './pool-counts.js';
 import { commercialFields } from './commercial-fields.js';
-import { conversationPortfolioShares } from './conversation-sharing.js';
+import { conversationPortfolioShares, reviewSourceIds } from './conversation-sharing.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -99,10 +99,14 @@ export async function buildApp(
     bodyLimit: 32_768,
     trustProxy: options.production ? (_address, hop) => hop === 0 : false,
   });
+  const conversationAccounts = {
+    instagram: options.instagram?.accountId,
+    messenger: options.messenger?.pageId,
+  };
   const crm =
     db.kind === 'mongo'
-      ? new MongoOperations(db, options.clock)
-      : new Operations(db, options.clock);
+      ? new MongoOperations(db, options.clock, conversationAccounts)
+      : new Operations(db, options.clock, conversationAccounts);
   const metaMarketingRuntime = registerMetaMarketing(
     db,
     options.metaMarketing
@@ -659,7 +663,9 @@ export async function buildApp(
   });
   app.get('/api/v1/conversation-portfolio-shares', async (request) => {
     requireManager(request.user);
-    return { shares: await conversationPortfolioShares(db) };
+    return {
+      shares: await conversationPortfolioShares(db, conversationAccounts),
+    };
   });
   app.post('/api/v1/conversation-portfolio-shares', async (request, reply) => {
     requireManager(request.user);
@@ -839,28 +845,55 @@ export async function buildApp(
     const query = z
       .object({
         view: z.enum(['mine', 'reserved', 'pool', 'all', 'non_commercial', 'review']).optional(),
+        before_at: z.string().datetime({ offset: true }).optional(),
+        before_id: uuid.optional(),
         revision: z
           .string()
           .regex(/^[a-f0-9]{64}$/)
           .optional(),
       })
+      .refine((value) => Boolean(value.before_at) === Boolean(value.before_id), {
+        message: 'Informe o cursor completo da conversa.',
+      })
       .parse(request.query);
     const view = query.view ?? (request.user.role === 'manager' ? 'all' : 'mine');
+    const cursor =
+      query.before_at && query.before_id
+        ? { at: new Date(query.before_at), id: query.before_id }
+        : undefined;
+    const reviewOwners = view === 'review' ? await reviewSourceIds(db, request.user.id) : undefined;
     const [instagramResult, messengerResult] = await Promise.all([
-      instagram.list(request.user, view),
-      messenger.list(request.user, view),
+      instagram.list(request.user, view, cursor, 101, reviewOwners),
+      messenger.list(request.user, view, cursor, 101, reviewOwners),
     ]);
-    const conversations = [...instagramResult.conversations, ...messengerResult.conversations]
-      .sort(
-        (left, right) =>
+    const merged = [...instagramResult.conversations, ...messengerResult.conversations].sort(
+      (left, right) => {
+        const timeDifference =
           new Date(
             String((right as { last_message_at?: unknown }).last_message_at ?? 0),
           ).getTime() -
-          new Date(String((left as { last_message_at?: unknown }).last_message_at ?? 0)).getTime(),
-      )
-      .slice(0, 100);
+          new Date(String((left as { last_message_at?: unknown }).last_message_at ?? 0)).getTime();
+        if (timeDifference) return timeDifference;
+        const leftId = String(left.id);
+        const rightId = String(right.id);
+        return leftId === rightId ? 0 : leftId < rightId ? -1 : 1;
+      },
+    );
+    const conversations = merged.slice(0, 100);
+    const hasMore =
+      merged.length > conversations.length ||
+      Boolean(instagramResult.has_more || messengerResult.has_more);
+    const last = conversations.at(-1) as { id?: unknown; last_message_at?: unknown } | undefined;
     return chatSnapshot(
-      { configured: instagramResult.configured || messengerResult.configured, conversations },
+      {
+        configured: instagramResult.configured || messengerResult.configured,
+        conversations,
+        has_more: hasMore,
+        next_before_at:
+          hasMore && last ? new Date(String(last.last_message_at)).toISOString() : null,
+        next_before_id: hasMore && last ? String(last.id) : null,
+        review_source_ids: reviewOwners ?? [],
+      },
       query.revision,
     );
   });
@@ -878,13 +911,19 @@ export async function buildApp(
   });
   app.get('/api/v1/conversations/:id/messages', async (request) => {
     const query = z
-      .object({ after: z.string().trim().min(1).max(200).optional() })
+      .object({
+        after: z.string().trim().min(1).max(200).optional(),
+        before: z.string().trim().min(1).max(200).optional(),
+      })
       .strict()
+      .refine((value) => !(value.after && value.before), {
+        message: 'Use apenas um cursor de mensagens por vez.',
+      })
       .parse(request.query);
     const id = idParams.parse(request.params).id;
     return (await messenger.owns(id))
-      ? messenger.messages(request.user, id, query.after)
-      : instagram.messages(request.user, id, query.after);
+      ? messenger.messages(request.user, id, query)
+      : instagram.messages(request.user, id, query);
   });
   app.get(
     '/api/v1/conversations/:id/messages/:messageId/attachments/:index/media',

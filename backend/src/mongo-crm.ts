@@ -27,6 +27,7 @@ import type { DeleteAttendantInput, Operations } from './operations.js';
 import { hashPassword, verifyPassword } from './auth.js';
 import { commandFingerprint, matchesCommandFingerprint } from './command-fingerprint.js';
 import type { Document } from 'mongodb';
+import type { ConversationAccountScope } from './conversation-sharing.js';
 import {
   compactQueuePositions,
   selectWeightedParticipant,
@@ -69,6 +70,30 @@ export function publicUser(user: Document): User {
 }
 
 export class MongoOperations {
+  private reviewableAccountFilter(): Record<string, unknown> {
+    if (this.conversationAccounts === undefined)
+      return { provider: { $in: ['instagram', 'messenger'] } };
+    const configured = [
+      ...(this.conversationAccounts.instagram
+        ? [
+            {
+              provider: 'instagram',
+              external_account_id: this.conversationAccounts.instagram,
+            },
+          ]
+        : []),
+      ...(this.conversationAccounts.messenger
+        ? [
+            {
+              provider: 'messenger',
+              external_account_id: this.conversationAccounts.messenger,
+            },
+          ]
+        : []),
+    ];
+    return configured.length ? { $or: configured } : { id: { $in: [] } };
+  }
+
   async shareConversationPortfolio(
     actor: User,
     input: { source_user_id: string; reviewer_user_id: string },
@@ -224,8 +249,16 @@ export class MongoOperations {
           });
           if (!granted)
             throw new DomainError('FORBIDDEN', 'O acesso a esta carteira foi removido.', 403);
-          const conversation = await tx.one('conversations', { opportunity_id: row.id });
-          if (!conversation)
+          const conversation = await tx.one<{ channel_account_id: string }>('conversations', {
+            opportunity_id: row.id,
+          });
+          const account = conversation
+            ? await tx.one('channel_accounts', {
+                id: conversation.channel_account_id,
+                ...this.reviewableAccountFilter(),
+              })
+            : null;
+          if (!conversation || !account)
             throw new DomainError('NOT_FOUND', 'Esta oportunidade não possui conversa.', 404);
           const previousOwner = row.owner_id;
           await transferProspects(tx, row.id, currentActor.id, await this.now(tx));
@@ -279,6 +312,7 @@ export class MongoOperations {
   constructor(
     public db: MongoStore,
     private clock?: () => Date,
+    private readonly conversationAccounts?: ConversationAccountScope,
   ) {}
   async now(tx: MongoTx = this.db) {
     return this.clock ? this.clock() : tx.now();
@@ -1384,7 +1418,16 @@ export class MongoOperations {
             }
             if (sourceOwned.length) {
               for (const row of sourceOwned) {
-                if (!(await tx.one('conversations', { opportunity_id: row.id })))
+                const conversation = await tx.one<{ channel_account_id: string }>('conversations', {
+                  opportunity_id: row.id,
+                });
+                const reviewable = conversation
+                  ? await tx.one('channel_accounts', {
+                      id: conversation.channel_account_id,
+                      ...this.reviewableAccountFilter(),
+                    })
+                  : null;
+                if (!reviewable)
                   throw new DomainError(
                     'TRANSFER_REQUIRED',
                     'Existem leads sem conversa nessa carteira. Transfira esses leads antes de desativar a atendente.',

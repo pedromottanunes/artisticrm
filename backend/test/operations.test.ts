@@ -326,6 +326,13 @@ test('carteira compartilhada preserva histórico e métricas ao assumir uma conv
     (await messenger.messages(users[1], conversationIds.get(first.id)!)).opportunity_id,
     first.id,
   );
+  const wrongAccountOperations = new Operations(db, () => now, {
+    messenger: 'another-page',
+  });
+  await assert.rejects(
+    wrongAccountOperations.assumeSharedConversation(users[1], first.id, 2, randomUUID()),
+    { code: 'NOT_FOUND' },
+  );
   await ops.assumeSharedConversation(users[1], first.id, 2, randomUUID());
   const assumed = await row(first.id);
   assert.equal(assumed.owner_id, users[1].id);

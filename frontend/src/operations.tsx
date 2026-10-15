@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Eye, KeyRound, Plus, ShieldCheck, Users, Save, X } from 'lucide-react';
 import {
   api,
@@ -394,8 +394,8 @@ export function ConversationPortfolioSharing({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const command = useCommand();
-  const load = async () => {
-    setLoading(true);
+  const load = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     try {
       const result = await api<{ shares: ConversationPortfolioShare[] }>(
         '/conversation-portfolio-shares',
@@ -403,14 +403,18 @@ export function ConversationPortfolioSharing({
       setShares(result.shares);
       setError('');
     } catch (err) {
-      setError((err as Error).message);
+      if (!quiet) setError((err as Error).message);
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
-  };
+  }, []);
   useEffect(() => {
     void load();
-  }, [attendantVersion]);
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void load(true);
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [attendantVersion, load]);
   const share = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!sourceId || !reviewerId || busy) return;

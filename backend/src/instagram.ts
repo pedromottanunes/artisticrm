@@ -1223,8 +1223,12 @@ export class InstagramCentral {
   async list(
     user: User,
     view: 'mine' | 'reserved' | 'pool' | 'all' | 'non_commercial' | 'review' = 'mine',
+    cursor?: { at: Date; id: string },
+    limit = 100,
+    providedReviewOwners?: string[],
   ) {
-    if (!this.config) return { configured: false, conversations: [] as Record<string, unknown>[] };
+    if (!this.config)
+      return { configured: false, conversations: [] as Record<string, unknown>[], has_more: false };
     if (view === 'all' && user.role !== 'manager')
       throw new DomainError('FORBIDDEN', 'Visão completa restrita à gestão.', 403);
     if (view === 'pool' && user.role === 'attendant' && !user.queue_enabled)
@@ -1236,7 +1240,8 @@ export class InstagramCentral {
     const db = this.crm.db;
     if (view === 'review' && user.role !== 'attendant')
       throw new DomainError('FORBIDDEN', 'A carteira de revisão é exclusiva dos consultores.', 403);
-    const reviewOwners = view === 'review' ? await reviewSourceIds(db, user.id) : [];
+    const reviewOwners =
+      view === 'review' ? (providedReviewOwners ?? (await reviewSourceIds(db, user.id))) : [];
     const archived = view === 'non_commercial';
     if (archived) view = user.role === 'manager' ? 'all' : 'mine';
     const opportunityFilter =
@@ -1260,9 +1265,9 @@ export class InstagramCentral {
         provider: 'instagram',
         external_account_id: this.config.accountId,
       });
-      if (!account) return { configured: true, conversations: [] };
+      if (!account) return { configured: true, conversations: [], has_more: false };
       const all = user.role === 'manager' && view === 'all';
-      const conversations = await db
+      let conversations = await db
         .collection(all ? 'conversations' : 'opportunities')
         .aggregate<Record<string, unknown>>([
           ...(all
@@ -1322,8 +1327,20 @@ export class InstagramCentral {
                 },
               ]),
           { $match: { 'opportunity.non_commercial_reason': archived ? { $ne: null } : null } },
+          ...(cursor
+            ? [
+                {
+                  $match: {
+                    $or: [
+                      { last_message_at: { $lt: cursor.at } },
+                      { last_message_at: cursor.at, id: { $gt: cursor.id } },
+                    ],
+                  },
+                },
+              ]
+            : []),
           { $sort: { last_message_at: -1, id: 1 } },
-          { $limit: 100 },
+          { $limit: limit + 1 },
           {
             $lookup: {
               from: 'contacts',
@@ -1377,6 +1394,8 @@ export class InstagramCentral {
           },
         ])
         .toArray();
+      const hasMore = conversations.length > limit;
+      if (hasMore) conversations = conversations.slice(0, limit);
       const modes = await this.comments.modes(conversations);
       const unread = await this.unreadConversationIds(
         user.id,
@@ -1392,6 +1411,7 @@ export class InstagramCentral {
           : new Set<string>();
       return {
         configured: true,
+        has_more: hasMore,
         conversations: conversations.map((conversation, index) => {
           const mode = modes[index];
           return {
@@ -1422,12 +1442,12 @@ export class InstagramCentral {
     const visibility =
       user.role === 'manager'
         ? view === 'all'
-          ? 'TRUE'
+          ? '$2::uuid IS NOT NULL'
           : view === 'mine'
             ? 'o.owner_id=$2'
             : view === 'reserved'
-              ? "o.state='RESERVED'"
-              : "o.state='POOL'"
+              ? "o.state='RESERVED' AND $2::uuid IS NOT NULL"
+              : "o.state='POOL' AND $2::uuid IS NOT NULL"
         : view === 'mine'
           ? 'o.owner_id=$2'
           : view === 'review'
@@ -1435,8 +1455,8 @@ export class InstagramCentral {
             : view === 'reserved'
               ? "o.state='RESERVED' AND o.reserved_to=$2"
               : user.active && user.queue_enabled
-                ? "o.state='POOL'"
-                : 'FALSE';
+                ? "o.state='POOL' AND $2::uuid IS NOT NULL"
+                : '$2::uuid IS NULL AND FALSE';
     const rows = (
       await db.query<
         Opportunity & {
@@ -1464,28 +1484,37 @@ export class InstagramCentral {
            ORDER BY i.username DESC LIMIT 1) ci ON TRUE
           WHERE ca.provider='instagram' AND ca.external_account_id=$1
             AND o.non_commercial_reason IS ${archived ? 'NOT NULL' : 'NULL'} AND (${visibility})
-          ORDER BY cv.last_message_at DESC,cv.id LIMIT 100`,
-        visibility.includes('$2')
-          ? [this.config.accountId, view === 'review' ? reviewOwners : user.id]
-          : [this.config.accountId],
+            AND ($3::timestamptz IS NULL OR cv.last_message_at<$3::timestamptz
+                 OR (cv.last_message_at=$3::timestamptz AND cv.id>$4::uuid))
+          ORDER BY cv.last_message_at DESC,cv.id LIMIT $5`,
+        [
+          this.config.accountId,
+          view === 'review' ? reviewOwners : user.id,
+          cursor?.at ?? null,
+          cursor?.id ?? null,
+          limit + 1,
+        ],
       )
     ).rows;
-    const modes = await this.comments.modes(rows);
+    const hasMore = rows.length > limit;
+    const visibleRows = hasMore ? rows.slice(0, limit) : rows;
+    const modes = await this.comments.modes(visibleRows);
     const unread = await this.unreadConversationIds(
       user.id,
-      rows.map((row) => row.conversation_id),
+      visibleRows.map((row) => row.conversation_id),
     );
     const muted =
       user.role === 'attendant'
         ? await mutedOpportunityIds(
             db,
             user.id,
-            rows.map((row) => row.id),
+            visibleRows.map((row) => row.id),
           )
         : new Set<string>();
     return {
       configured: true,
-      conversations: rows.map((row, index) => {
+      has_more: hasMore,
+      conversations: visibleRows.map((row, index) => {
         const mode = modes[index];
         return {
           id: row.conversation_id,
@@ -1643,9 +1672,15 @@ export class InstagramCentral {
     return { notifications_muted: muted };
   }
 
-  async messages(user: User, conversationId: string, afterMessageId?: string) {
+  async messages(
+    user: User,
+    conversationId: string,
+    cursor: { after?: string; before?: string } | string = {},
+  ) {
     const context = await this.context(user, conversationId);
     const db = this.crm.db;
+    const afterMessageId = typeof cursor === 'string' ? cursor : cursor.after;
+    const beforeMessageId = typeof cursor === 'string' ? undefined : cursor.before;
     let messages: Record<string, unknown>[];
     if (db.kind === 'mongo') {
       const projection = {
@@ -1685,6 +1720,30 @@ export class InstagramCentral {
           .sort({ created_at: 1, id: 1 })
           .limit(201)
           .toArray();
+      } else if (beforeMessageId) {
+        const cursorMessage = await db.one<{ created_at: Date; id: string }>('messages', {
+          id: beforeMessageId,
+          conversation_id: context.id,
+        });
+        if (!cursorMessage)
+          throw new DomainError('INVALID_CURSOR', 'Atualize a conversa novamente.', 400);
+        messages = (
+          await db
+            .collection('messages')
+            .find(
+              {
+                conversation_id: context.id,
+                $or: [
+                  { created_at: { $lt: cursorMessage.created_at } },
+                  { created_at: cursorMessage.created_at, id: { $lt: cursorMessage.id } },
+                ],
+              },
+              { projection },
+            )
+            .sort({ created_at: -1, id: -1 })
+            .limit(201)
+            .toArray()
+        ).reverse();
       } else
         messages = (
           await db
@@ -1709,6 +1768,26 @@ export class InstagramCentral {
            FROM messages WHERE conversation_id=$1 AND (created_at,id)>($2,$3)
            ORDER BY created_at,id LIMIT 201`,
           [context.id, cursor.created_at, cursor.id],
+        )
+      ).rows;
+    } else if (beforeMessageId) {
+      const cursorMessage = (
+        await db.query<{ created_at: Date | string; id: string }>(
+          'SELECT created_at,id FROM messages WHERE id=$1 AND conversation_id=$2',
+          [beforeMessageId, context.id],
+        )
+      ).rows[0];
+      if (!cursorMessage)
+        throw new DomainError('INVALID_CURSOR', 'Atualize a conversa novamente.', 400);
+      messages = (
+        await db.query(
+          `SELECT * FROM (
+             SELECT id,external_message_id,direction,sender_user_id,type,text,attachments,status,
+                    error_code,sent_at,delivered_at,read_at,created_at
+             FROM messages WHERE conversation_id=$1 AND (created_at,id)<($2,$3)
+             ORDER BY created_at DESC,id DESC LIMIT 201
+           ) previous ORDER BY created_at,id`,
+          [context.id, cursorMessage.created_at, cursorMessage.id],
         )
       ).rows;
     } else
@@ -1736,6 +1815,7 @@ export class InstagramCentral {
       messaging_mode: messagingMode,
       last_message_at: context.last_message_at,
       has_more: hasMore,
+      has_older: !afterMessageId && hasMore,
       messages,
     };
   }

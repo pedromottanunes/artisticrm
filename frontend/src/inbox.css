@@ -106,6 +106,21 @@
   background: #faf6ed;
 }
 
+.inbox-conversations > .inbox-load-more {
+  display: block;
+  padding: 13px 18px;
+  color: var(--navy, #102a43);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-align: center;
+  background: #fffdf8;
+}
+
+.inbox-conversations > .inbox-load-more:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .inbox-conversations > button.unread {
   background: #0bd711;
 }
@@ -175,6 +190,24 @@
   padding: 22px;
   overflow-y: auto;
   background: #f8f7f3;
+}
+
+.thread-load-older {
+  align-self: center;
+  padding: 8px 13px;
+  border: 1px solid #d8d1c5;
+  border-radius: 999px;
+  color: var(--navy, #102a43);
+  background: #fff;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.thread-load-older:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .thread-message {

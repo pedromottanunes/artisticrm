@@ -15,6 +15,11 @@ export interface ConversationPortfolioShareView {
   conversation_count: number;
 }
 
+export interface ConversationAccountScope {
+  instagram?: string;
+  messenger?: string;
+}
+
 export async function reviewSourceIds(db: Database | MongoStore, reviewerUserId: string) {
   if (db.kind === 'mongo')
     return (
@@ -59,6 +64,7 @@ export async function canReviewOwner(
 
 export async function conversationPortfolioShares(
   db: Database | MongoStore,
+  accounts: ConversationAccountScope = {},
 ): Promise<ConversationPortfolioShareView[]> {
   if (db.kind !== 'mongo')
     return (
@@ -69,12 +75,15 @@ export async function conversationPortfolioShares(
                  JOIN opportunities o ON o.id=cv.opportunity_id
                  JOIN channel_accounts ca ON ca.id=cv.channel_account_id
                  WHERE o.owner_id=s.source_user_id AND o.non_commercial_reason IS NULL
-                   AND o.state<>'CANCELLED' AND ca.provider IN ('instagram','messenger')) AS conversation_count
+                   AND o.state<>'CANCELLED'
+                   AND ((ca.provider='instagram' AND ca.external_account_id=$1)
+                     OR (ca.provider='messenger' AND ca.external_account_id=$2))) AS conversation_count
          FROM conversation_portfolio_shares s
          JOIN users source ON source.id=s.source_user_id
          JOIN users reviewer ON reviewer.id=s.reviewer_user_id
          WHERE s.revoked_at IS NULL
          ORDER BY source.name,s.granted_at`,
+        [accounts.instagram ?? '', accounts.messenger ?? ''],
       )
     ).rows;
 
@@ -94,11 +103,19 @@ export async function conversationPortfolioShares(
   });
   const byId = new Map(users.map((user) => [user.id, user]));
   const sourceIds = [...new Set(shares.map((share) => share.source_user_id))];
-  const supportedAccountIds = (
-    await db.many<{ id: string }>('channel_accounts', {
-      provider: { $in: ['instagram', 'messenger'] },
-    })
-  ).map((account) => account.id);
+  const configuredAccounts = [
+    ...(accounts.instagram
+      ? [{ provider: 'instagram', external_account_id: accounts.instagram }]
+      : []),
+    ...(accounts.messenger
+      ? [{ provider: 'messenger', external_account_id: accounts.messenger }]
+      : []),
+  ];
+  const supportedAccountIds = configuredAccounts.length
+    ? (await db.many<{ id: string }>('channel_accounts', { $or: configuredAccounts })).map(
+        (account) => account.id,
+      )
+    : [];
   const counts = new Map<string, number>();
   if (sourceIds.length && supportedAccountIds.length) {
     const grouped = await db

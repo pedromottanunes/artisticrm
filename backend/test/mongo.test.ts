@@ -604,6 +604,13 @@ test('Mongo: carteira compartilhada preserva histórico e métricas ao assumir',
     (await messenger.messages(users[1], conversationIds.get(first.id)!)).opportunity_id,
     first.id,
   );
+  const wrongAccountOperations = new MongoOperations(db, () => now, {
+    messenger: 'another-page',
+  });
+  await assert.rejects(
+    wrongAccountOperations.assumeSharedConversation(users[1], first.id, 2, key()),
+    { code: 'NOT_FOUND' },
+  );
   await ops.assumeSharedConversation(users[1], first.id, 2, key());
   const assumed = await row(first.id);
   assert.equal(assumed.owner_id, users[1].id);
@@ -1386,6 +1393,22 @@ test('Mongo: Messenger lista em lote, filtra antes do limite e preserva leitura 
     );
     assert.ok(all.conversations.every((row) => row.unread && row.channel === 'messenger'));
     assert.deepEqual((await central.list(manager, 'all')).conversations, all.conversations);
+    assert.equal(all.has_more, true);
+    const lastConversation = all.conversations.at(-1)!;
+    const secondPage = await central.list(
+      manager,
+      'all',
+      { at: new Date(lastConversation.last_message_at), id: lastConversation.id },
+      100,
+    );
+    assert.equal(secondPage.conversations.length, 100);
+    assert.equal(secondPage.has_more, true);
+    assert.equal(
+      secondPage.conversations.some((conversation) =>
+        all.conversations.some((first) => first.id === conversation.id),
+      ),
+      false,
+    );
     commands.length = 0;
     const mine = await central.list(users[0], 'mine');
     t.diagnostic(`Filtro do consultor: ${commands.length} comandos ao MongoDB`);
@@ -1422,13 +1445,34 @@ test('Mongo: Messenger lista em lote, filtra antes do limite e preserva leitura 
     const read = (await central.list(users[0], 'mine')).conversations[0];
     assert.equal(read.unread, false);
     assert.equal(read.notifications_muted, true);
+    const baseMessageAt = messages[350].created_at;
+    await db.collection('messages').insertMany(
+      Array.from({ length: 204 }, (_, index) => ({
+        id: randomUUID(),
+        conversation_id: conversations[350].id,
+        external_message_id: `mid.history-${index}`,
+        direction: 'inbound',
+        created_at: new Date(baseMessageAt.getTime() - (204 - index) * 1000),
+        text: `Mensagem antiga ${index}`,
+        status: 'received',
+        sender_external_id: 'synthetic-private',
+        request_fingerprint: 'internal-test-only',
+      })),
+    );
     const history = await central.messages(users[0], conversations[350].id);
+    assert.equal(history.messages.length, 200);
+    assert.equal(history.has_older, true);
     assert.ok(
       history.messages.every(
         (row) =>
           !('_id' in row) && !('sender_external_id' in row) && !('request_fingerprint' in row),
       ),
     );
+    const olderHistory = await central.messages(users[0], conversations[350].id, {
+      before: String(history.messages[0]?.id),
+    });
+    assert.equal(olderHistory.messages.length, 5);
+    assert.equal(olderHistory.has_older, false);
     // Equal timestamps use the stable message ID ordering used by the chat cursor.
     const nextId = 'ffffffff-ffff-4fff-bfff-ffffffffffff';
     await db.insert('messages', {
