@@ -845,6 +845,8 @@ export async function buildApp(
     const query = z
       .object({
         view: z.enum(['mine', 'reserved', 'pool', 'all', 'non_commercial', 'review']).optional(),
+        owner_id: z.union([uuid, z.literal('unassigned')]).optional(),
+        target_opportunity_id: uuid.optional(),
         before_at: z.string().datetime({ offset: true }).optional(),
         before_id: uuid.optional(),
         revision: z
@@ -857,14 +859,24 @@ export async function buildApp(
       })
       .parse(request.query);
     const view = query.view ?? (request.user.role === 'manager' ? 'all' : 'mine');
+    if (query.owner_id !== undefined || query.target_opportunity_id !== undefined) {
+      requireManager(request.user);
+      if (view !== 'all' && view !== 'non_commercial')
+        throw new DomainError(
+          'VALIDATION',
+          'Filtro de consultor disponível na visão da gestão.',
+          400,
+        );
+    }
+    const ownerId = query.owner_id === 'unassigned' ? null : query.owner_id;
     const cursor =
       query.before_at && query.before_id
         ? { at: new Date(query.before_at), id: query.before_id }
         : undefined;
     const reviewOwners = view === 'review' ? await reviewSourceIds(db, request.user.id) : undefined;
     const [instagramResult, messengerResult] = await Promise.all([
-      instagram.list(request.user, view, cursor, 101, reviewOwners),
-      messenger.list(request.user, view, cursor, 101, reviewOwners),
+      instagram.list(request.user, view, cursor, 101, reviewOwners, ownerId),
+      messenger.list(request.user, view, cursor, 101, reviewOwners, ownerId),
     ]);
     const merged = [...instagramResult.conversations, ...messengerResult.conversations].sort(
       (left, right) => {
@@ -884,6 +896,34 @@ export async function buildApp(
       merged.length > conversations.length ||
       Boolean(instagramResult.has_more || messengerResult.has_more);
     const last = conversations.at(-1) as { id?: unknown; last_message_at?: unknown } | undefined;
+    // An explicitly opened lead may be older than this page. Fetch only that lead,
+    // with the same owner/category constraints, without changing the page or its cursor.
+    let targetConversation = query.target_opportunity_id
+      ? conversations.find((item) => item.opportunity_id === query.target_opportunity_id)
+      : undefined;
+    if (query.target_opportunity_id && !targetConversation) {
+      const targets = await Promise.all([
+        instagram.list(
+          request.user,
+          view,
+          undefined,
+          1,
+          undefined,
+          ownerId,
+          query.target_opportunity_id,
+        ),
+        messenger.list(
+          request.user,
+          view,
+          undefined,
+          1,
+          undefined,
+          ownerId,
+          query.target_opportunity_id,
+        ),
+      ]);
+      targetConversation = targets.flatMap((result) => result.conversations)[0];
+    }
     return chatSnapshot(
       {
         configured: instagramResult.configured || messengerResult.configured,
@@ -893,6 +933,7 @@ export async function buildApp(
           hasMore && last ? new Date(String(last.last_message_at)).toISOString() : null,
         next_before_id: hasMore && last ? String(last.id) : null,
         review_source_ids: reviewOwners ?? [],
+        ...(query.target_opportunity_id ? { target_conversation: targetConversation ?? null } : {}),
       },
       query.revision,
     );

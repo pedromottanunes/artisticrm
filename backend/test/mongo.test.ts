@@ -29,6 +29,10 @@ import { checkReports } from './report-checks.js';
 import { checkShortcuts } from './shortcut-checks.js';
 import { checkComments } from './comment-checks.js';
 import { checkChatEfficiency } from './chat-efficiency-checks.js';
+import { checkConversationOwners } from './conversation-owner-checks.js';
+
+test('consultor responsável: filtro multicanal, paginação e autorização (Mongo)', () =>
+  checkConversationOwners(ops, manager, users, password));
 import { checkPrivateReplyRecovery } from './private-reply-recovery-checks.js';
 import { checkEncodedRoutes } from './security-checks.js';
 import { checkAgenda } from './agenda-checks.js';

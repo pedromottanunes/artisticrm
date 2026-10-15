@@ -1226,7 +1226,14 @@ export class InstagramCentral {
     cursor?: { at: Date; id: string },
     limit = 100,
     providedReviewOwners?: string[],
+    ownerId?: string | null,
+    opportunityId?: string,
   ) {
+    if (
+      (ownerId !== undefined || opportunityId !== undefined) &&
+      (user.role !== 'manager' || !['all', 'non_commercial'].includes(view))
+    )
+      throw new DomainError('FORBIDDEN', 'Filtro de consultor restrito à visão da gestão.', 403);
     if (!this.config)
       return { configured: false, conversations: [] as Record<string, unknown>[], has_more: false };
     if (view === 'all' && user.role !== 'manager')
@@ -1245,28 +1252,31 @@ export class InstagramCentral {
     const archived = view === 'non_commercial';
     if (archived) view = user.role === 'manager' ? 'all' : 'mine';
     const opportunityFilter =
-      user.role === 'manager'
-        ? view === 'all'
-          ? {}
+      ownerId !== undefined
+        ? { owner_id: ownerId }
+        : user.role === 'manager'
+          ? view === 'all'
+            ? {}
+            : view === 'mine'
+              ? { owner_id: user.id }
+              : { state: view === 'reserved' ? 'RESERVED' : 'POOL' }
           : view === 'mine'
             ? { owner_id: user.id }
-            : { state: view === 'reserved' ? 'RESERVED' : 'POOL' }
-        : view === 'mine'
-          ? { owner_id: user.id }
-          : view === 'review'
-            ? { owner_id: { $in: reviewOwners }, state: { $ne: 'CANCELLED' } }
-            : view === 'reserved'
-              ? { state: 'RESERVED', reserved_to: user.id }
-              : user.active && user.queue_enabled
-                ? { state: 'POOL' }
-                : { id: '__inactive_user_cannot_view_pool__' };
+            : view === 'review'
+              ? { owner_id: { $in: reviewOwners }, state: { $ne: 'CANCELLED' } }
+              : view === 'reserved'
+                ? { state: 'RESERVED', reserved_to: user.id }
+                : user.active && user.queue_enabled
+                  ? { state: 'POOL' }
+                  : { id: '__inactive_user_cannot_view_pool__' };
     if (db.kind === 'mongo') {
       const account = await db.one('channel_accounts', {
         provider: 'instagram',
         external_account_id: this.config.accountId,
       });
       if (!account) return { configured: true, conversations: [], has_more: false };
-      const all = user.role === 'manager' && view === 'all';
+      const all =
+        user.role === 'manager' && view === 'all' && ownerId === undefined && !opportunityId;
       let conversations = await db
         .collection(all ? 'conversations' : 'opportunities')
         .aggregate<Record<string, unknown>>([
@@ -1288,6 +1298,7 @@ export class InstagramCentral {
                 {
                   $match: {
                     ...opportunityFilter,
+                    ...(opportunityId ? { id: opportunityId } : {}),
                     non_commercial_reason: archived ? { $ne: null } : null,
                   },
                 },
@@ -1440,23 +1451,27 @@ export class InstagramCentral {
       };
     }
     const visibility =
-      user.role === 'manager'
-        ? view === 'all'
-          ? '$2::uuid IS NOT NULL'
+      ownerId !== undefined
+        ? ownerId === null
+          ? 'o.owner_id IS NULL AND $2::uuid IS NOT NULL'
+          : 'o.owner_id=$2'
+        : user.role === 'manager'
+          ? view === 'all'
+            ? '$2::uuid IS NOT NULL'
+            : view === 'mine'
+              ? 'o.owner_id=$2'
+              : view === 'reserved'
+                ? "o.state='RESERVED' AND $2::uuid IS NOT NULL"
+                : "o.state='POOL' AND $2::uuid IS NOT NULL"
           : view === 'mine'
             ? 'o.owner_id=$2'
-            : view === 'reserved'
-              ? "o.state='RESERVED' AND $2::uuid IS NOT NULL"
-              : "o.state='POOL' AND $2::uuid IS NOT NULL"
-        : view === 'mine'
-          ? 'o.owner_id=$2'
-          : view === 'review'
-            ? "o.owner_id=ANY($2::uuid[]) AND o.state<>'CANCELLED'"
-            : view === 'reserved'
-              ? "o.state='RESERVED' AND o.reserved_to=$2"
-              : user.active && user.queue_enabled
-                ? "o.state='POOL' AND $2::uuid IS NOT NULL"
-                : '$2::uuid IS NULL AND FALSE';
+            : view === 'review'
+              ? "o.owner_id=ANY($2::uuid[]) AND o.state<>'CANCELLED'"
+              : view === 'reserved'
+                ? "o.state='RESERVED' AND o.reserved_to=$2"
+                : user.active && user.queue_enabled
+                  ? "o.state='POOL' AND $2::uuid IS NOT NULL"
+                  : '$2::uuid IS NULL AND FALSE';
     const rows = (
       await db.query<
         Opportunity & {
@@ -1484,15 +1499,17 @@ export class InstagramCentral {
            ORDER BY i.username DESC LIMIT 1) ci ON TRUE
           WHERE ca.provider='instagram' AND ca.external_account_id=$1
             AND o.non_commercial_reason IS ${archived ? 'NOT NULL' : 'NULL'} AND (${visibility})
+            ${opportunityId ? 'AND o.id=$6::uuid' : ''}
             AND ($3::timestamptz IS NULL OR cv.last_message_at<$3::timestamptz
                  OR (cv.last_message_at=$3::timestamptz AND cv.id>$4::uuid))
           ORDER BY cv.last_message_at DESC,cv.id LIMIT $5`,
         [
           this.config.accountId,
-          view === 'review' ? reviewOwners : user.id,
+          view === 'review' ? reviewOwners : (ownerId ?? user.id),
           cursor?.at ?? null,
           cursor?.id ?? null,
           limit + 1,
+          ...(opportunityId ? [opportunityId] : []),
         ],
       )
     ).rows;

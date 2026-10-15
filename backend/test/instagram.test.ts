@@ -8,6 +8,10 @@ import { buildApp } from '../src/app.js';
 import { InstagramCentral, instagramConfig, type InstagramConfig } from '../src/instagram.js';
 import type { User } from '../src/types.js';
 import { checkChatEfficiency } from './chat-efficiency-checks.js';
+import { checkConversationOwners } from './conversation-owner-checks.js';
+
+test('consultor responsável: filtro multicanal, paginação e autorização (SQL)', () =>
+  checkConversationOwners(crm, manager, attendants, DEMO_PASSWORD));
 
 const config: InstagramConfig = {
   appSecret: 'instagram-test-secret-only',

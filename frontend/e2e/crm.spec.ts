@@ -94,6 +94,7 @@ test('push no aparelho: permissão somente por toque, teste e desativação', as
     .getByRole('navigation', { name: 'Atalhos de gestão' })
     .getByRole('button', { name: 'Configurações' })
     .click();
+  await page.getByRole('button', { name: 'Este aparelho', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Ativar notificações' })).toBeVisible();
   const events = () =>
     page.evaluate(() => (window as Window & { pushTestEvents: string[] }).pushTestEvents);
@@ -184,6 +185,7 @@ test('push no aparelho: mantém a desativação e avisa quando não pode salvar 
     .getByRole('navigation', { name: 'Atalhos de gestão' })
     .getByRole('button', { name: 'Configurações' })
     .click();
+  await page.getByRole('button', { name: 'Este aparelho', exact: true }).click();
   await page.getByRole('button', { name: 'Central de avisos', exact: true }).click();
   const enabled = page.getByText('Notificações ativadas neste aparelho', { exact: true });
   await expect(enabled).toHaveCount(2);
@@ -286,10 +288,12 @@ test('push no aparelho: restaura o vínculo ao entrar novamente sem pedir permis
     .getByRole('navigation', { name: 'Atalhos de gestão' })
     .getByRole('button', { name: 'Configurações' })
     .click();
+  await page.getByRole('button', { name: 'Este aparelho', exact: true }).click();
   await expect(
     page.getByText('Notificações ativadas neste aparelho', { exact: true }),
   ).toBeVisible();
   const postsBeforeLogout = calls.filter((method) => method === 'POST').length;
+  await page.getByRole('button', { name: 'Minha conta', exact: true }).click();
   await page.getByRole('button', { name: 'Sair e acessar outro perfil' }).click();
   await expect(page.getByRole('button', { name: 'Entrar no espaço de trabalho' })).toBeVisible();
   expect(
@@ -312,6 +316,7 @@ test('push no aparelho: restaura o vínculo ao entrar novamente sem pedir permis
     .getByRole('navigation', { name: 'Atalhos de gestão' })
     .getByRole('button', { name: 'Configurações' })
     .click();
+  await page.getByRole('button', { name: 'Este aparelho', exact: true }).click();
   await page.getByRole('button', { name: 'Central de avisos', exact: true }).click();
   const enabled = page.getByText('Notificações ativadas neste aparelho', { exact: true });
   await expect(enabled).toHaveCount(2);
@@ -350,8 +355,10 @@ test('push no aparelho: restaura o vínculo ao entrar novamente sem pedir permis
 
   // Unlike an ordinary logout, an explicit opt-out survives reload and login.
   await page.reload();
+  await page.getByRole('button', { name: 'Este aparelho', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Ativar notificações' })).toBeVisible();
   const postsAfterDisable = calls.filter((method) => method === 'POST').length;
+  await page.getByRole('button', { name: 'Minha conta', exact: true }).click();
   await page.getByRole('button', { name: 'Sair e acessar outro perfil' }).click();
   await expect(page.getByRole('button', { name: 'Entrar no espaço de trabalho' })).toBeVisible();
   await login(page);
@@ -359,6 +366,7 @@ test('push no aparelho: restaura o vínculo ao entrar novamente sem pedir permis
     .getByRole('navigation', { name: 'Atalhos de gestão' })
     .getByRole('button', { name: 'Configurações' })
     .click();
+  await page.getByRole('button', { name: 'Este aparelho', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Ativar notificações' })).toBeVisible();
   expect(calls.filter((method) => method === 'POST')).toHaveLength(postsAfterDisable);
   await page.getByRole('button', { name: 'Ativar notificações' }).click();
@@ -479,6 +487,7 @@ test('gestão móvel: todas as telas pela barra inferior, cartões e formulário
   await expect(page.getByText('Meta Ads', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Google Ads', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Google Tag Manager', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Minha conta', exact: true }).click();
   await page.getByRole('button', { name: 'Sair e acessar outro perfil' }).click();
   await expect(page.getByRole('button', { name: 'Entrar no espaço de trabalho' })).toBeVisible();
 });
@@ -587,8 +596,9 @@ test('gestão consulta central desligada em viewport móvel sem expor configura�
   // Navigate through the desktop-sized menu first, then inspect the same panel on mobile.
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.getByRole('button', { name: 'Configurações', exact: true }).click();
+  await page.getByRole('button', { name: 'Conexões dos canais', exact: true }).click();
   const panel = page
-    .locator('section')
+    .locator('.settings-channels > section')
     .filter({ has: page.getByRole('heading', { name: 'WhatsApp central', exact: true }) });
   await expect(panel.getByText('Desligado', { exact: true })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
@@ -831,7 +841,7 @@ test('tema clínico contemporâneo mantém as superfícies claras em toda a gest
     ['agenda', '.panel'],
     ['reports', '.report-card'],
     ['contracts', '.panel'],
-    ['settings', '.panel'],
+    ['settings', '.settings-section'],
   ] as const;
 
   for (const [hash, surface] of pages) {
@@ -1397,6 +1407,7 @@ test('painel móvel sem transbordamento e menu utilizável', async ({ page }) =>
 test('gestão cria atendente com login e senha simples', async ({ page, browser }) => {
   await login(page);
   await page.getByRole('button', { name: 'Configurações', exact: true }).click();
+  await page.getByRole('button', { name: 'Equipe e acessos', exact: true }).click();
   await page.getByRole('button', { name: 'Nova atendente', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Nome da atendente').fill('Atendente E2E');
@@ -1736,6 +1747,7 @@ test('gestão transfere lead e desativação redistribui os atendimentos', async
   await expect(dialog.getByText(/Atribuído pela gestão para Priscila/)).toBeVisible();
   await dialog.getByRole('button', { name: 'Fechar janela' }).click();
   await page.getByRole('button', { name: 'Configurações', exact: true }).click();
+  await page.getByRole('button', { name: 'Equipe e acessos', exact: true }).click();
   const member = page
     .locator('.team-list article')
     .filter({ has: page.getByText('Priscila', { exact: true }) });

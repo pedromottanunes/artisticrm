@@ -1,0 +1,320 @@
+.manager-settings {
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  display: grid;
+  gap: 30px;
+  min-width: 0;
+}
+.settings-intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.settings-intro p {
+  margin: 0;
+  color: var(--light-secondary);
+  font-size: 14px;
+  line-height: 1.7;
+}
+.settings-intro .button {
+  flex-shrink: 0;
+}
+.settings-group {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.settings-group-title {
+  margin: 0 0 2px 4px;
+  color: var(--light-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+}
+.settings-section {
+  min-width: 0;
+  border: 1px solid var(--light-border);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 3px 12px rgba(33, 62, 84, 0.035);
+}
+.settings-section[data-expanded='true'] {
+  border-color: #a9ceca;
+}
+.settings-section-heading {
+  margin: 0;
+  font: inherit;
+}
+.settings-section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  padding: 22px 24px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--light-ink);
+  text-align: left;
+  cursor: pointer;
+}
+.settings-section-toggle:hover {
+  background: #f8fbfb;
+}
+.settings-section-toggle:focus-visible {
+  outline: 2px solid var(--light-teal);
+  outline-offset: 3px;
+}
+.settings-section-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 11px;
+  color: var(--light-teal);
+  background: var(--light-teal-soft);
+}
+.settings-section-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+.settings-section-title {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.settings-section-description {
+  color: var(--light-secondary);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+.settings-section-chevron {
+  flex-shrink: 0;
+  color: var(--light-secondary);
+}
+.settings-section[data-expanded='true'] .settings-section-chevron {
+  transform: rotate(180deg);
+}
+.settings-section-body {
+  border-top: 1px solid var(--light-border);
+}
+.settings-section-body[hidden] {
+  display: none;
+}
+.settings-section-body > .panel {
+  border: 0;
+  border-radius: 0 0 12px 12px;
+  box-shadow: none;
+  margin: 0;
+}
+/* The disclosure provides the title; existing forms and actions stay mounted. */
+.settings-section-body > .panel > .panel-heading h2,
+.settings-section-body > .panel > .panel-heading > svg,
+.settings-section-body > .account-panel > .panel-heading,
+.settings-section-body > .device-panel > .panel-heading,
+.settings-section-body > .portfolio-sharing-panel > .panel-heading {
+  display: none;
+}
+.settings-section-body > .panel > .panel-heading p {
+  margin: 0;
+}
+.manager-settings .team-list strong,
+.manager-settings .profile-card {
+  overflow-wrap: anywhere;
+}
+.manager-settings .profile-card {
+  padding: 24px;
+}
+.manager-settings .profile-card h2 {
+  font-size: 20px;
+}
+.manager-settings .password-panel .form-grid {
+  max-width: 740px;
+}
+.manager-settings .device-options {
+  max-width: 740px;
+}
+.manager-settings .portfolio-share-form {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+}
+.manager-settings .portfolio-share-form label {
+  min-width: 0;
+}
+.manager-settings .portfolio-share-form select {
+  min-width: 0;
+  max-width: 100%;
+  text-overflow: ellipsis;
+}
+.manager-settings .portfolio-share-list article {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+.manager-settings .portfolio-share-list article > div {
+  flex-wrap: wrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.settings-channels {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  padding: 24px;
+}
+.settings-channels > .panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  box-shadow: none;
+  border-radius: 8px;
+}
+.settings-channels .panel-heading {
+  padding: 20px 18px 12px;
+}
+.settings-channels .panel-heading h2 {
+  font-size: 18px;
+}
+.settings-channels .integration-list {
+  padding: 0 18px;
+}
+.settings-channels .integration-list > div {
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px 0;
+  font-size: 12px;
+}
+.settings-channels > .panel > .help-text {
+  margin: auto 0 0;
+  padding: 16px 18px 20px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+@media (max-width: 1100px) {
+  .settings-channels {
+    grid-template-columns: 1fr;
+  }
+  .manager-settings .portfolio-share-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .manager-settings .portfolio-share-form > .button {
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
+  .manager-settings .portfolio-share-list article {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .manager-settings .portfolio-share-list article > div {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 760px) {
+  .manager-settings {
+    gap: 24px;
+  }
+  .settings-intro {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .settings-intro p {
+    font-size: 13px;
+  }
+  .settings-intro .button {
+    align-self: flex-end;
+  }
+  .settings-section-toggle {
+    padding: 18px 16px;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .settings-section-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
+  }
+  .settings-section-title {
+    font-size: 15px;
+  }
+  .settings-section-description {
+    font-size: 12px;
+  }
+  .settings-section-chevron {
+    margin-top: 9px;
+  }
+  .manager-settings .team-panel > .panel-heading {
+    align-items: stretch;
+  }
+  .manager-settings .team-panel > .panel-heading > div {
+    flex-basis: 100%;
+  }
+  .manager-settings .team-panel > .panel-heading > .button {
+    width: 100%;
+  }
+  .manager-settings .team-list article {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+  }
+  .manager-settings .team-list article > div {
+    grid-column: 1 / -1;
+  }
+  .manager-settings .team-list strong {
+    font-size: 15px;
+  }
+  .manager-settings .team-list small {
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  .manager-settings .button {
+    min-height: 44px;
+    white-space: normal;
+    height: auto;
+  }
+  .manager-settings .icon-button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .manager-settings .portfolio-share-form {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 18px 16px;
+    gap: 18px;
+  }
+  .manager-settings .portfolio-share-form > .button {
+    justify-self: stretch;
+  }
+  .manager-settings .portfolio-share-list {
+    padding: 18px 16px;
+  }
+  .manager-settings .portfolio-share-list article {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .manager-settings .portfolio-share-list article > .button {
+    width: 100%;
+  }
+  .manager-settings .portfolio-rule {
+    margin: 0 16px 18px;
+  }
+  .manager-settings .profile-card {
+    padding: 20px 16px;
+  }
+  .settings-channels {
+    padding: 16px;
+  }
+}
+@media (max-width: 440px) {
+  .manager-settings .device-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .manager-settings .device-actions > .button {
+    width: 100%;
+  }
+}

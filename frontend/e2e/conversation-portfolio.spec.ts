@@ -48,6 +48,9 @@ test('gestor compartilha e revoga uma carteira em dois passos claros', async ({ 
   await expect(
     page.getByRole('heading', { name: 'Compartilhar carteira de conversas' }),
   ).toBeVisible();
+  await page
+    .getByRole('button', { name: 'Compartilhar carteira de conversas', exact: true })
+    .click();
   await page.getByLabel('1. Carteira que será revisada').selectOption({ index: 1 });
   await page.getByLabel('2. Quem poderá revisar').selectOption({ index: 1 });
   await page.getByRole('button', { name: 'Liberar acesso' }).click();

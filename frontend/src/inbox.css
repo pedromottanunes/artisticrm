@@ -86,6 +86,60 @@
   overflow-y: auto;
 }
 
+.inbox-owner-filter {
+  display: grid;
+  gap: 8px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border, #e8e4dc);
+}
+.inbox-owner-filter label {
+  font-size: 12px;
+  font-weight: 600;
+}
+.inbox-owner-filter select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  text-overflow: ellipsis;
+}
+.inbox-conversations .inbox-conversation-owner {
+  margin-top: 5px;
+  font-weight: 600;
+}
+.thread-owner {
+  margin: 5px 0 0;
+  color: var(--muted, #7b756c);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.manager-inbox .thread-header {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.manager-inbox .thread-heading {
+  flex: 1 1 210px;
+}
+.manager-inbox .thread-actions {
+  margin-left: auto;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+.inbox-list-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid var(--border, #e8e4dc);
+  font-size: 11px;
+}
+.inbox-list-pagination .button {
+  min-height: 44px;
+  padding: 8px;
+  font-size: 11px;
+}
+
 .inbox-conversations > button {
   display: grid;
   grid-template-columns: 38px minmax(0, 1fr) auto;
@@ -563,6 +617,13 @@
 }
 
 @media (max-width: 760px) {
+  .manager-inbox .thread-heading {
+    flex: 1 1 100%;
+  }
+  .manager-inbox .thread-heading h2 {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
   .instagram-inbox {
     display: block;
     height: var(--inbox-mobile-height, calc(100dvh - 154px));

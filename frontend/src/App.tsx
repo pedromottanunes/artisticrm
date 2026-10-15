@@ -20,13 +20,11 @@ import {
   FileCheck2,
   Info,
   X,
-  Smartphone,
   BarChart3,
   Zap,
   ClipboardList,
 } from 'lucide-react';
 import { api, ApiError, stages, type Snapshot, type Lead, type Detail } from './api';
-import { CentralStatusPanel } from './central';
 import { Badge, Source, Empty, Modal, Countdown, IconButton } from './components';
 import { LeadForm, LeadDetail } from './forms';
 import { ManagerCentral } from './manager-central';
@@ -35,7 +33,8 @@ import { ManagerReports } from './manager-reports';
 import { InstagramInbox } from './inbox';
 import { AttendantLeads } from './attendant-leads';
 import { QueuePosition } from './queue-position';
-import { ConversationPortfolioSharing, Team, PasswordChange } from './operations';
+import { PasswordChange } from './operations';
+import { SettingsPage } from './settings';
 import { MobileNavigation } from './mobile-navigation';
 import { DevicePanel, PushBinding } from './pwa';
 import { ShortcutsPage } from './shortcuts';
@@ -786,6 +785,7 @@ export function App() {
             <InstagramInbox
               key={data.user.id}
               user={data.user}
+              users={data.users}
               connected={connected}
               targetOpportunityId={inboxTargetId}
               targetArchived={inboxTargetArchived}
@@ -913,36 +913,13 @@ export function App() {
             </section>
           )}
           {activePage === 'settings' && (
-            <div className="settings-extension settings-page">
-              <section className="panel">
-                <div className="panel-heading">
-                  <h2>Minha conta</h2>
-                  <ShieldCheck size={21} />
-                </div>
-                <div className="profile-card">
-                  <h2>{data.user.name}</h2>
-                  <p>Login: {data.user.email}</p>
-                  <span className="stage-pill">{isManager ? 'Gestão' : 'Atendimento'}</span>
-                  <button className="button outline" onClick={() => void logout()}>
-                    <LogOut size={16} />
-                    Sair e acessar outro perfil
-                  </button>
-                </div>
-              </section>
-              <PasswordChange onDone={passwordDone} />
-              <section className="panel device-panel">
-                <div className="panel-heading">
-                  <h2>Este aparelho</h2>
-                  <Smartphone size={22} />
-                </div>
-                <div className="modal-body">
-                  <DevicePanel userId={data.user.id} />
-                </div>
-              </section>
-              {isManager && <Team data={data} connected={connected} onChanged={refresh} />}
-              {isManager && <ConversationPortfolioSharing data={data} connected={connected} />}
-              {isManager && <CentralStatusPanel />}
-            </div>
+            <SettingsPage
+              data={data}
+              connected={connected}
+              onChanged={refresh}
+              onLogout={() => void logout()}
+              onPasswordChanged={passwordDone}
+            />
           )}
         </main>
       </div>
