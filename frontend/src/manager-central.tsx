@@ -218,6 +218,18 @@ export function ManagerCentral({
     };
   }, [query, revision, leadRevision, onConnectionChange, onSessionExpired]);
 
+  useEffect(() => {
+    if (
+      attendant &&
+      board &&
+      loadedQuery === query &&
+      !board.attendants.some((user) => user.id === attendant)
+    ) {
+      setAttendant('');
+      setPage(1);
+    }
+  }, [attendant, board, loadedQuery, query]);
+
   const count = (key: string) =>
     board
       ? key === 'ALL'
@@ -320,7 +332,7 @@ export function ManagerCentral({
       <section className="central-team" aria-labelledby="central-team-title">
         <div className="central-section-heading">
           <h2 className="eyebrow" id="central-team-title">
-            EQUIPE
+            EQUIPE ATIVA
           </h2>
           <button
             className="text-link"
@@ -379,7 +391,7 @@ export function ManagerCentral({
           ))}
           {board && !board.attendants.length && (
             <div className="attendant-empty">
-              <Users size={20} /> Nenhum atendente cadastrado.
+              <Users size={20} /> Nenhum consultor ativo no rodízio.
             </div>
           )}
           {!board && <div className="attendant-empty">Carregando equipe…</div>}

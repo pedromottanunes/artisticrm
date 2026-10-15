@@ -26,7 +26,7 @@ export const reportsQuery = z
   })
   .strict();
 
-type ReportUser = Pick<User, 'id' | 'name' | 'active' | 'role'>;
+type ReportUser = Pick<User, 'id' | 'name' | 'active' | 'queue_enabled' | 'role'>;
 interface ReportOpportunity {
   non_commercial_reason?: string | null;
   id: string;
@@ -143,7 +143,7 @@ async function sqlData(db: Database, start: Date, end: Date): Promise<ReportData
       await tx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
     const users = (
       await tx.query<ReportUser>(
-        "SELECT id,name,active,role FROM users WHERE role='attendant' ORDER BY queue_position NULLS LAST,name",
+        "SELECT id,name,active,queue_enabled,role FROM users WHERE role='attendant' ORDER BY queue_position NULLS LAST,name",
       )
     ).rows;
     const opportunitySql = `SELECT o.non_commercial_reason,o.id,c.name,o.source,o.stage,o.state,o.reserved_to,o.owner_id,o.metrics_owner_id,
@@ -242,7 +242,13 @@ async function mongoData(db: MongoStore, start: Date, end: Date): Promise<Report
   return db.atomic(async (tx) => {
     const users = (
       await tx.many<ReportUser>('users', { role: 'attendant' }, { queue_position: 1 })
-    ).map(({ id, name, active, role }) => ({ id, name, active, role }));
+    ).map(({ id, name, active, queue_enabled, role }) => ({
+      id,
+      name,
+      active,
+      queue_enabled,
+      role,
+    }));
     const periodOpportunities = await mongoOpportunities(tx, {
       created_at: { $gte: start, $lt: end },
     });
@@ -301,7 +307,7 @@ function userRanking(map: Map<string, Bucket>, users: Map<string, ReportUser>, a
     .map(([user_id, value]) => ({
       user_id,
       name: users.get(user_id)?.name ?? 'Usuário removido',
-      active: users.get(user_id)?.active ?? false,
+      active: Boolean(users.get(user_id)?.active && users.get(user_id)?.queue_enabled),
       count: value.count,
       lead_ids: [...value.lead_ids],
       ...(average

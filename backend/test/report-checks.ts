@@ -79,6 +79,22 @@ export async function checkReports(
   assert.equal(result.open_activities_by_user[0].count, 1);
   assert.equal(Object.keys(result.leads).length, 2);
 
+  if (db.kind === 'mongo')
+    await db.update('users', { id: users[0].id }, { $set: { queue_enabled: false } });
+  else await db.query('UPDATE users SET queue_enabled=false WHERE id=$1', [users[0].id]);
+  const paused = await reportsOverview(
+    db,
+    manager,
+    { from: '2026-09-10', to: '2026-09-10' },
+    async () => now(),
+  );
+  const pausedRanking = paused.fastest_response_by_user.find((row) => row.user_id === users[0].id);
+  assert.equal(pausedRanking?.active, false);
+  assert.equal(pausedRanking?.count, result.fastest_response_by_user[0].count);
+  if (db.kind === 'mongo')
+    await db.update('users', { id: users[0].id }, { $set: { queue_enabled: true } });
+  else await db.query('UPDATE users SET queue_enabled=true WHERE id=$1', [users[0].id]);
+
   const active = await crm.detail(manager, first.id);
   await crm.update(users[0], first.id, {
     name: active.name,
@@ -98,8 +114,7 @@ export async function checkReports(
     async () => now(),
   );
   assert.equal(
-    afterCommercialClose.open_activities_by_user.find((row) => row.user_id === users[0].id)
-      ?.count,
+    afterCommercialClose.open_activities_by_user.find((row) => row.user_id === users[0].id)?.count,
     1,
     'a final commercial stage must not hide an operationally active follow-up',
   );

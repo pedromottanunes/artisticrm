@@ -86,6 +86,26 @@ export async function checkDistribution(
   assert.equal(all.attendants.find((u) => u.id === users[0].id)?.reserved_count, 506);
   assert.equal(all.attendants.find((u) => u.id === users[0].id)?.claimed_count, 0);
   assert.equal(all.attendants.find((u) => u.id === users[1].id)?.is_next, true);
+  if (db.kind === 'mongo')
+    await db.update('users', { id: users[1].id }, { $set: { queue_enabled: false } });
+  else await db.query('UPDATE users SET queue_enabled=false WHERE id=$1', [users[1].id]);
+  const paused = await board();
+  assert.equal(
+    paused.users.some((u) => u.id === users[1].id),
+    true,
+  );
+  assert.equal(
+    paused.attendants.some((u) => u.id === users[1].id),
+    false,
+  );
+  assert.equal(paused.total, all.total, 'pausing the queue must preserve the consultant history');
+  if (db.kind === 'mongo')
+    await db.update('users', { id: users[1].id }, { $set: { queue_enabled: true } });
+  else await db.query('UPDATE users SET queue_enabled=true WHERE id=$1', [users[1].id]);
+  assert.equal(
+    (await board()).attendants.some((u) => u.id === users[1].id),
+    true,
+  );
   const next = await board({ page: 2 });
   assert.ok(next.rows.every((r) => !all.rows.some((a) => a.id === r.id)));
   const last = await board({ page: 999 });

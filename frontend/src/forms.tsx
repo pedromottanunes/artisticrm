@@ -1151,6 +1151,62 @@ export function QueueSettings({
       ]),
     ),
   );
+  const activeMembers = members.filter(
+    (member) => member.active && participants[member.id]?.enabled,
+  );
+  const inactiveMembers = members.filter(
+    (member) => !member.active || !participants[member.id]?.enabled,
+  );
+  const participantRow = (u: User) => (
+    <div className="queue-participant" key={u.id}>
+      <span className="queue-number">{String(u.queue_position ?? '').padStart(2, '0')}</span>
+      <span className="queue-participant-name">
+        <strong>{u.name}</strong>
+        {!u.active && <small>Acesso da conta desativado</small>}
+      </span>
+      <label className="queue-participation">
+        <span>Ativo</span>
+        <input
+          type="checkbox"
+          disabled={!u.active}
+          checked={participants[u.id]?.enabled ?? false}
+          aria-label={`Ativar ${u.name} no rodízio`}
+          onChange={(event) =>
+            setParticipants((current) => ({
+              ...current,
+              [u.id]: {
+                ...(current[u.id] ?? { weight: 1 }),
+                enabled: event.target.checked,
+              },
+            }))
+          }
+        />
+      </label>
+      <label className="queue-weight">
+        <span>Peso</span>
+        <select
+          value={participants[u.id]?.weight ?? 1}
+          disabled={!u.active}
+          aria-label={`Peso de ${u.name} no rodízio`}
+          onChange={(event) =>
+            setParticipants((current) => ({
+              ...current,
+              [u.id]: {
+                ...(current[u.id] ?? { enabled: false }),
+                weight: Number(event.target.value) as 1 | 2 | 3 | 4 | 5,
+              },
+            }))
+          }
+        >
+          <option value={1}>1x — Um lead</option>
+          <option value={2}>2x — Dois leads seguidos</option>
+          <option value={3}>3x — Três leads seguidos</option>
+          <option value={4}>4x — Quatro leads seguidos</option>
+          <option value={5}>5x — Cinco leads seguidos</option>
+        </select>
+      </label>
+    </div>
+  );
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (submitting.current || !connected) return;
@@ -1187,61 +1243,39 @@ export function QueueSettings({
       <div className="panel-heading">
         <div>
           <h2>Quem participa da fila</h2>
-          <p>Defina quem recebe novos leads e a prioridade de cada atendente.</p>
+          <p>
+            Consultores ativos aparecem nas listas principais e recebem novos leads. Desmarcar não
+            apaga o histórico nem as métricas.
+          </p>
         </div>
       </div>
       <form onSubmit={submit}>
         <div className="queue-settings">
-          {members.map((u) => (
-            <div className="queue-participant" key={u.id}>
-              <span className="queue-number">0{u.queue_position}</span>
-              <span className="queue-participant-name">
-                <strong>{u.name}</strong>
-                {!u.active && <small>Conta inativa</small>}
-              </span>
-              <label className="queue-participation">
-                <span>Participa</span>
-                <input
-                  type="checkbox"
-                  disabled={!u.active}
-                  checked={participants[u.id]?.enabled ?? false}
-                  aria-label={`Habilitar ${u.name} no rodízio`}
-                  onChange={(event) =>
-                    setParticipants((current) => ({
-                      ...current,
-                      [u.id]: {
-                        ...(current[u.id] ?? { weight: 1 }),
-                        enabled: event.target.checked,
-                      },
-                    }))
-                  }
-                />
-              </label>
-              <label className="queue-weight">
-                <span>Peso</span>
-                <select
-                  value={participants[u.id]?.weight ?? 1}
-                  disabled={!u.active}
-                  aria-label={`Peso de ${u.name} no rodízio`}
-                  onChange={(event) =>
-                    setParticipants((current) => ({
-                      ...current,
-                      [u.id]: {
-                        ...(current[u.id] ?? { enabled: false }),
-                        weight: Number(event.target.value) as 1 | 2 | 3 | 4 | 5,
-                      },
-                    }))
-                  }
-                >
-                  <option value={1}>1x — Um lead</option>
-                  <option value={2}>2x — Dois leads seguidos</option>
-                  <option value={3}>3x — Três leads seguidos</option>
-                  <option value={4}>4x — Quatro leads seguidos</option>
-                  <option value={5}>5x — Cinco leads seguidos</option>
-                </select>
-              </label>
+          <section className="queue-member-group" aria-labelledby="active-consultants-title">
+            <div className="queue-member-group-heading">
+              <h3 id="active-consultants-title">Consultores ativos</h3>
+              <span>{activeMembers.length}</span>
             </div>
-          ))}
+            {activeMembers.length ? (
+              activeMembers.map(participantRow)
+            ) : (
+              <p className="queue-member-empty">Nenhum consultor está ativo no rodízio.</p>
+            )}
+          </section>
+          <section className="queue-member-group" aria-labelledby="inactive-consultants-title">
+            <div className="queue-member-group-heading">
+              <h3 id="inactive-consultants-title">Consultores desativados</h3>
+              <span>{inactiveMembers.length}</span>
+            </div>
+            <p className="queue-member-group-description">
+              Marque “Ativo” para devolver o consultor ao rodízio e às listas principais.
+            </p>
+            {inactiveMembers.length ? (
+              inactiveMembers.map(participantRow)
+            ) : (
+              <p className="queue-member-empty">Nenhum consultor desativado.</p>
+            )}
+          </section>
           <label className="timeout-label">
             Prazo para aceite
             <div>

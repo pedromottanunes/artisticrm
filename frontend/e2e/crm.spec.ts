@@ -1662,6 +1662,63 @@ test('configuração preserva rascunho e mostra conflito dentro da janela', asyn
   await expect(dialog).not.toBeVisible();
 });
 
+test('rodízio separa consultores ativos e desativados sem perder o histórico', async ({ page }) => {
+  await login(page);
+  await page
+    .getByRole('navigation', { name: 'Menu principal' })
+    .getByRole('button', { name: 'Central de atendimentos', exact: true })
+    .click();
+  const original = await (await page.request.get('/api/v1/distribution/board')).json();
+  const target = original.attendants[0] as { id: string; name: string };
+  expect(target).toBeTruthy();
+
+  try {
+    await page.getByRole('button', { name: 'Rodízio', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    const activeGroup = dialog.locator('.queue-member-group').filter({
+      has: page.getByRole('heading', { name: 'Consultores ativos', exact: true }),
+    });
+    const inactiveGroup = dialog.locator('.queue-member-group').filter({
+      has: page.getByRole('heading', { name: 'Consultores desativados', exact: true }),
+    });
+    await expect(activeGroup.getByText(target.name, { exact: true })).toBeVisible();
+    await dialog.getByLabel(`Ativar ${target.name} no rodízio`).uncheck();
+    await expect(inactiveGroup.getByText(target.name, { exact: true })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Salvar configuração' }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(page.locator('.attendant-card').filter({ hasText: target.name })).toHaveCount(0);
+
+    const paused = await (await page.request.get('/api/v1/distribution/board')).json();
+    expect(paused.users.some((user: { id: string }) => user.id === target.id)).toBe(true);
+    expect(paused.attendants.some((user: { id: string }) => user.id === target.id)).toBe(false);
+    expect(paused.total).toBe(original.total);
+
+    await page.getByRole('button', { name: 'Rodízio', exact: true }).click();
+    await expect(inactiveGroup.getByText(target.name, { exact: true })).toBeVisible();
+    await dialog.getByLabel(`Ativar ${target.name} no rodízio`).check();
+    await expect(activeGroup.getByText(target.name, { exact: true })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Salvar configuração' }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(page.locator('.attendant-card').filter({ hasText: target.name })).toBeVisible();
+  } finally {
+    const current = await (await page.request.get('/api/v1/distribution/board')).json();
+    await page.request.patch('/api/v1/distribution/settings', {
+      headers: { 'X-Artisti-Client': 'web' },
+      data: {
+        version: current.settings.version,
+        timeout_minutes: original.settings.timeout_minutes,
+        participants: original.users
+          .filter((user: { role: string }) => user.role === 'attendant')
+          .map((user: { id: string; queue_enabled: boolean; queue_weight: number }) => ({
+            id: user.id,
+            enabled: user.queue_enabled,
+            weight: user.queue_weight,
+          })),
+      },
+    });
+  }
+});
+
 test('gestão transfere lead e desativação redistribui os atendimentos', async ({ page }) => {
   await login(page);
   await page

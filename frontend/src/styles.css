@@ -1085,6 +1085,39 @@ main {
 .queue-settings {
   padding: 0 23px 22px;
 }
+.queue-member-group + .queue-member-group {
+  margin-top: 22px;
+}
+.queue-member-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 0 8px;
+}
+.queue-member-group-heading h3 {
+  margin: 0;
+  color: var(--navy);
+  font-size: 15px;
+}
+.queue-member-group-heading span {
+  min-width: 28px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--soft);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+.queue-member-group-description,
+.queue-member-empty {
+  margin: 0;
+  padding: 0 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
 .queue-participant {
   display: grid;
   grid-template-columns: auto minmax(180px, 1fr) auto minmax(180px, 220px);

@@ -112,7 +112,7 @@ function attendantSummaries(
   const metric = (userId: string, state: string) =>
     team.find((item) => item.user_id === userId && item.state === state)?.count ?? 0;
   return users
-    .filter((user) => user.role === 'attendant')
+    .filter((user) => user.role === 'attendant' && user.active && user.queue_enabled)
     .map((user) => ({
       ...publicBoardUser(user),
       queue_rank: ranks.get(user.id) ?? null,
