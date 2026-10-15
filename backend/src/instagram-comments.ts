@@ -150,7 +150,7 @@ export class InstagramComments {
       throw new DomainError('INSTAGRAM_DISABLED', 'Instagram não configurado.', 503);
     return this.config;
   }
-  private async actor(tx: Tx, user: User) {
+  private async actor(tx: Tx, user: User, requirePoolAccess = false) {
     const current =
       tx instanceof MongoTx
         ? await one(tx, 'users', { id: user.id })
@@ -159,6 +159,13 @@ export class InstagramComments {
       throw new DomainError('UNAUTHENTICATED', 'Sua sessão expirou.', 401);
     if (current.role !== 'attendant')
       throw new DomainError('FORBIDDEN', 'Somente consultores podem assumir comentários.', 403);
+    if (requirePoolAccess && !current.queue_enabled)
+      throw new DomainError(
+        'POOL_ACCESS_DISABLED',
+        'O bolsão está disponível somente para consultores que participam do rodízio.',
+        403,
+      );
+    return current;
   }
 
   async persist(event: CommentEvent, eventId: string, lease: string) {
@@ -407,6 +414,14 @@ export class InstagramComments {
 
   async list(user: User, before?: string) {
     if (!this.config) return { configured: false, comments: [], next_cursor: null };
+    if (user.role !== 'attendant')
+      throw new DomainError('FORBIDDEN', 'Bolsão disponível somente para consultores.', 403);
+    if (!user.active || !user.queue_enabled)
+      throw new DomainError(
+        'POOL_ACCESS_DISABLED',
+        'O bolsão está disponível somente para consultores que participam do rodízio.',
+        403,
+      );
     const cursor = before ? cursorSchema.parse(before).split('|') : undefined;
     const time = new Date();
     const filter = {
@@ -499,7 +514,7 @@ export class InstagramComments {
   async ignore(user: User, id: string, version: number) {
     const config = this.enabled();
     return this.transaction(async (tx) => {
-      await this.actor(tx, user);
+      await this.actor(tx, user, true);
       const row = await one(tx, 'instagram_comments', { id, account_id: config.accountId });
       if (!row) throw new DomainError('NOT_FOUND', 'Comentário não encontrado.', 404);
       const reservation = row.username
@@ -522,7 +537,7 @@ export class InstagramComments {
   async claim(user: User, id: string, version: number) {
     const config = this.enabled();
     return this.transaction(async (tx) => {
-      await this.actor(tx, user);
+      await this.actor(tx, user, true);
       const comment = await one(tx, 'instagram_comments', { id, account_id: config.accountId });
       if (!comment) throw new DomainError('NOT_FOUND', 'Comentário não encontrado.', 404);
       if (comment.opportunity_id) {

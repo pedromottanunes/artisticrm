@@ -1215,6 +1215,12 @@ export class InstagramCentral {
     if (!this.config) return { configured: false, conversations: [] as Record<string, unknown>[] };
     if (view === 'all' && user.role !== 'manager')
       throw new DomainError('FORBIDDEN', 'Visão completa restrita à gestão.', 403);
+    if (view === 'pool' && user.role === 'attendant' && !user.queue_enabled)
+      throw new DomainError(
+        'POOL_ACCESS_DISABLED',
+        'O bolsão está disponível somente para consultores que participam do rodízio.',
+        403,
+      );
     const db = this.crm.db;
     const archived = view === 'non_commercial';
     if (archived) view = user.role === 'manager' ? 'all' : 'mine';
@@ -1229,7 +1235,7 @@ export class InstagramCentral {
           ? { owner_id: user.id }
           : view === 'reserved'
             ? { state: 'RESERVED', reserved_to: user.id }
-            : user.active
+            : user.active && user.queue_enabled
               ? { state: 'POOL' }
               : { id: '__inactive_user_cannot_view_pool__' };
     if (db.kind === 'mongo') {
@@ -1404,7 +1410,7 @@ export class InstagramCentral {
           ? 'o.owner_id=$2'
           : view === 'reserved'
             ? "o.state='RESERVED' AND o.reserved_to=$2"
-            : user.active
+            : user.active && user.queue_enabled
               ? "o.state='POOL'"
               : 'FALSE';
     const rows = (

@@ -200,6 +200,7 @@ export class PushService {
   }
   private async message(tx: PushTx, event: PushRecord, user: User, now: Date) {
     if (event.data.kind === 'comment.received') {
+      if (user.role !== 'manager' && !user.queue_enabled) return null;
       const comment =
         tx instanceof MongoTx
           ? await tx.one('instagram_comments', {
@@ -254,6 +255,7 @@ export class PushService {
     if (!received && !movement && lead.state === 'CANCELLED') return null;
     const target = lead.state === 'RESERVED' ? lead.reserved_to : lead.owner_id;
     const manager = user.role === 'manager';
+    if (lead.state === 'POOL' && !manager && !user.queue_enabled) return null;
     if (received) {
       // A message follows the current responsible attendant, even if ownership
       // changed between webhook persistence and push expansion.

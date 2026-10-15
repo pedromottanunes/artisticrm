@@ -1255,8 +1255,8 @@ export function QueueSettings({
           </label>
           <p className="help-text">
             O peso define quantos novos leads seguidos cada atendente recebe antes de o rodízio
-            avançar. Ele não altera leads já distribuídos nem capturas do bolsão. Pausar uma
-            atendente impede apenas novas reservas automáticas.
+            avançar. Ele não altera leads já distribuídos. Ao desmarcar a participação, a atendente
+            deixa de receber novas reservas e também perde o acesso ao bolsão.
           </p>
           {error && (
             <p className="form-error" role="alert">

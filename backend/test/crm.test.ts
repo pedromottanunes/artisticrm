@@ -291,34 +291,24 @@ test('pausa impede novas reservas mas não impede aceite da reserva vigente', as
   assert.equal((await get(id)).state, 'CLAIMED');
 });
 
-test('todas as atendentes ativas acessam o bolsão mesmo com rodízio pausado', async () => {
+test('pausa no rodízio preserva a reserva vigente e bloqueia o bolsão', async () => {
   const { id } = await create();
   await crm.configure(manager, {
     version: 1,
     timeout_minutes: 10,
-    participants: users.map((u) => ({ id: u.id, enabled: false })),
+    participants: [{ id: users[0].id, enabled: false }],
   });
   now = new Date(now.getTime() + 600_000);
-  const paused = users.map((u) => ({ ...u, queue_enabled: false }));
-  for (const user of paused) {
-    const snapshot = await crm.snapshot(user);
-    assert.equal(snapshot.opportunities[0].id, id);
-    assert.equal(snapshot.opportunities[0].state, 'POOL');
-    assert.equal(snapshot.opportunities[0].name, input().name);
-    assert.equal((await crm.detail(user, id)).phone, input().phone);
-  }
-  const row = await get(id);
-  const attempts = await Promise.allSettled(
-    paused.map((u) => crm.claim(u, id, 'pool', row.version, randomUUID())),
-  );
-  assert.equal(attempts.filter((r) => r.status === 'fulfilled').length, 1);
-  assert.equal(await count('claims'), 1);
-  const winner = (await get(id)).owner_id;
-  for (const user of paused) {
-    const snapshot = await crm.snapshot(user);
-    assert.equal(snapshot.opportunities.length, user.id === winner ? 1 : 0);
-  }
-  assert.equal((await get((await create(2)).id)).state, 'PENDING');
+  const paused = { ...users[0], queue_enabled: false };
+  assert.equal((await crm.snapshot(paused)).opportunities.length, 0);
+  await assert.rejects(() => crm.detail(paused, id), { code: 'NOT_FOUND' });
+  await assert.rejects(() => crm.claim(paused, id, 'pool', 2, randomUUID()), {
+    code: 'POOL_ACCESS_DISABLED',
+  });
+  const available = await crm.snapshot(users[1]);
+  assert.equal(available.opportunities[0].id, id);
+  await crm.claim(users[1], id, 'pool', available.opportunities[0].version, randomUUID());
+  assert.equal((await get(id)).owner_id, users[1].id);
 });
 
 test('conta desativada não assume bolsão mesmo com dados de sessão antigos', async () => {
@@ -388,10 +378,9 @@ test('entradas concorrentes mantêm rodízio equilibrado entre instâncias', asy
   assert.equal(new Set(rows.map((r) => r.id)).size, 24);
 });
 
-test('HTTP libera WhatsApp somente para vencedora, inclusive pausada no rodízio', async () => {
+test('HTTP preserva reserva e WhatsApp da proprietária pausada, sem liberar o bolsão', async () => {
   const { id } = await create();
   await db.query("UPDATE users SET queue_enabled=false WHERE role='attendant'");
-  now = new Date(now.getTime() + 600_000);
   const { app } = await buildApp(db, { clock: () => now, reconcile: false });
   try {
     const headers = await Promise.all(
@@ -406,36 +395,21 @@ test('HTTP libera WhatsApp somente para vencedora, inclusive pausada no rodízio
         return { cookie: `artisti_session=${login.cookies[0].value}`, 'x-artisti-client': 'web' };
       }),
     );
-    for (const h of headers) {
-      const snapshot = await app.inject({ url: '/api/v1/workspace', headers: h });
-      assert.equal(snapshot.json().opportunities[0].id, id);
-      assert.equal(snapshot.json().opportunities[0].name, input().name);
-      assert.equal(snapshot.json().opportunities[0].phone, input().phone);
+    const ownerSnapshot = await app.inject({ url: '/api/v1/workspace', headers: headers[0] });
+    assert.equal(ownerSnapshot.json().opportunities[0].id, id);
+    assert.equal(ownerSnapshot.json().opportunities[0].phone, undefined);
+    for (const h of headers.slice(1))
       assert.equal(
-        (
-          await app.inject({
-            method: 'POST',
-            url: `/api/v1/opportunities/${id}/whatsapp-link`,
-            headers: h,
-            payload: {},
-          })
-        ).statusCode,
-        403,
+        (await app.inject({ url: '/api/v1/workspace', headers: h })).json().opportunities.length,
+        0,
       );
-    }
-    const attempts = await Promise.all(
-      headers.map((h) =>
-        app.inject({
-          method: 'POST',
-          url: `/api/v1/opportunities/${id}/claim`,
-          headers: { ...h, 'idempotency-key': randomUUID() },
-          payload: { mode: 'pool', expected_version: 2 },
-        }),
-      ),
-    );
-    assert.equal(attempts.filter((r) => r.statusCode === 200).length, 1);
-    assert.equal(attempts.filter((r) => r.statusCode === 409).length, 3);
-    const winner = attempts.findIndex((r) => r.statusCode === 200);
+    const claim = await app.inject({
+      method: 'POST',
+      url: `/api/v1/opportunities/${id}/claim`,
+      headers: { ...headers[0], 'idempotency-key': randomUUID() },
+      payload: { mode: 'reservation', expected_version: 1 },
+    });
+    assert.equal(claim.statusCode, 200);
     for (let i = 0; i < headers.length; i++) {
       const link = await app.inject({
         method: 'POST',
@@ -443,8 +417,8 @@ test('HTTP libera WhatsApp somente para vencedora, inclusive pausada no rodízio
         headers: headers[i],
         payload: {},
       });
-      assert.equal(link.statusCode, i === winner ? 200 : 404);
-      if (i === winner) assert.equal(link.json().url, `https://wa.me/${input().phone}`);
+      assert.equal(link.statusCode, i === 0 ? 200 : 404);
+      if (i === 0) assert.equal(link.json().url, `https://wa.me/${input().phone}`);
     }
   } finally {
     await app.close();

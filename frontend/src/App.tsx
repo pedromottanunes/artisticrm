@@ -166,7 +166,7 @@ export function App() {
   }, []);
   const refreshPoolCounts = useCallback(
     async (force = false) => {
-      if (data?.user.role !== 'attendant') return;
+      if (data?.user.role !== 'attendant' || !data.user.queue_enabled) return;
       if (poolCountRequest.current) {
         if (!force) return;
         poolCountRequest.current.abort();
@@ -183,12 +183,20 @@ export function App() {
         if (epoch === generation.current && !controller.signal.aborted) setPoolCounts(counts);
       } catch (error) {
         if (error instanceof ApiError && error.status === 401) void refresh(false);
+        else if (
+          error instanceof ApiError &&
+          error.status === 403 &&
+          error.code === 'POOL_ACCESS_DISABLED'
+        ) {
+          setPoolCounts({ leads: 0, comments: 0 });
+          void refresh(false);
+        }
       } finally {
         window.clearTimeout(timeout);
         if (poolCountRequest.current === controller) poolCountRequest.current = null;
       }
     },
-    [data?.user.id, data?.user.role, refresh],
+    [data?.user.id, data?.user.queue_enabled, data?.user.role, refresh],
   );
   useEffect(() => {
     if (!detail || !data || data.user.role === 'manager') return;
@@ -258,7 +266,7 @@ export function App() {
     return () => refreshRequest.current?.controller.abort();
   }, [refresh]);
   useEffect(() => {
-    if (data?.user.role !== 'attendant') {
+    if (data?.user.role !== 'attendant' || !data.user.queue_enabled) {
       poolCountRequest.current?.abort();
       poolCountRequest.current = null;
       setPoolCounts({ leads: 0, comments: 0 });
@@ -280,7 +288,7 @@ export function App() {
       poolCountRequest.current?.abort();
       poolCountRequest.current = null;
     };
-  }, [data?.user.id, data?.user.role, refreshPoolCounts]);
+  }, [data?.user.id, data?.user.queue_enabled, data?.user.role, refreshPoolCounts]);
   useEffect(() => {
     if (connected) return;
     // A deploy/network outage isn't a logout. Retry without caching credentials or
@@ -511,11 +519,13 @@ export function App() {
       </div>
     );
   const isManager = data.user.role === 'manager';
+  const canAccessPool = isManager || data.user.queue_enabled;
   const activePage =
     !isManager &&
-    !['mine', 'pool', 'comments', 'inbox', 'agenda', 'lists', 'shortcuts', 'settings'].includes(
+    (!['mine', 'pool', 'comments', 'inbox', 'agenda', 'lists', 'shortcuts', 'settings'].includes(
       page,
-    )
+    ) ||
+      (!canAccessPool && ['pool', 'comments'].includes(page)))
       ? 'mine'
       : isManager && ['mine', 'pool', 'shortcuts'].includes(page)
         ? 'central'
@@ -523,6 +533,9 @@ export function App() {
   const leads = data.opportunities;
   const pool = leads.filter((l) => l.state === 'POOL');
   const totalPoolCount = poolCounts.leads + poolCounts.comments;
+  const attendantNavigation = canAccessPool
+    ? salesNav
+    : salesNav.filter((item) => item.id !== 'pool');
   const reserved = leads.filter((l) => l.state === 'RESERVED');
   const owned = leads.filter(
     (l) =>
@@ -532,7 +545,7 @@ export function App() {
     ? navItems.find((n) => n.id === activePage)?.label
     : activePage === 'comments'
       ? 'Bolsão'
-      : salesNav.find((n) => n.id === activePage)?.label;
+      : attendantNavigation.find((n) => n.id === activePage)?.label;
   const actionButton = (lead: Lead) => {
     if (!isManager && ['RESERVED', 'POOL'].includes(lead.state))
       return (
@@ -664,7 +677,7 @@ export function App() {
           ) : (
             <div className="nav-group">
               <p>SEU ATENDIMENTO</p>
-              {salesNav.map(({ id, label, icon: Icon }) => (
+              {attendantNavigation.map(({ id, label, icon: Icon }) => (
                 <button
                   key={id}
                   className={`nav-item ${activePage === id || (id === 'pool' && activePage === 'comments') ? 'active' : ''}`}
@@ -814,7 +827,7 @@ export function App() {
             />
           )}
 
-          {!isManager && (activePage === 'pool' || activePage === 'comments') && (
+          {!isManager && canAccessPool && (activePage === 'pool' || activePage === 'comments') && (
             <nav className="comment-pool-tabs" aria-label="Tipo de bolsão">
               <button
                 className={activePage === 'pool' ? 'active' : ''}
@@ -848,7 +861,7 @@ export function App() {
               </button>
             </nav>
           )}
-          {activePage === 'comments' && (
+          {canAccessPool && activePage === 'comments' && (
             <CommentPool
               key={data.user.id}
               user={data.user}
@@ -934,7 +947,7 @@ export function App() {
       </div>
       <PushBinding userId={data.user.id} />
       <MobileNavigation
-        items={isManager ? navItems : salesNav}
+        items={isManager ? navItems : attendantNavigation}
         active={!isManager && activePage === 'comments' ? 'pool' : activePage}
         manager={isManager}
         poolCount={isManager ? pool.length : totalPoolCount}

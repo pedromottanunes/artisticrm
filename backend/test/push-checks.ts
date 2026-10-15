@@ -201,7 +201,7 @@ export async function checkPush(
     await new PushService(db, config, async () => clock(), sender).tick();
     assert.equal(delivered.length, 5);
     assert.equal(delivered[4].message.page, 'settings');
-    // Pool notices also reach active attendants paused in the round robin.
+    // Pool notices reach only attendants currently participating in the round robin.
     if (db.kind === 'mongo')
       await db.update('users', { id: users[3].id }, { $set: { queue_enabled: false } });
     else await db.query('UPDATE users SET queue_enabled=false WHERE id=$1', [users[3].id]);
@@ -209,14 +209,11 @@ export async function checkPush(
     await crm.expire();
     const previousCount = delivered.length;
     await push.tick();
-    assert.equal(delivered.length - previousCount, users.length + 1);
+    assert.equal(delivered.length - previousCount, users.length);
     assert.ok(
       delivered
         .slice(previousCount)
-        .some(
-          (d) =>
-            d.endpoint === subscriptions.get(users[3].id)!.endpoint && d.message.page === 'pool',
-        ),
+        .every((d) => d.endpoint !== subscriptions.get(users[3].id)!.endpoint),
     );
     // Each received message gets its own alert, limited to manager and owner.
     const messagesBefore = delivered.length;

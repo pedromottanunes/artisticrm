@@ -100,6 +100,23 @@ export async function checkComments(crm: CRM | MongoOperations, users: User[], m
     /somente para consultores/i,
   );
   const item = list.comments[0];
+  const paused = users[2];
+  if (db.kind === 'mongo')
+    await db.update('users', { id: paused.id }, { $set: { queue_enabled: false } });
+  else await db.query('UPDATE users SET queue_enabled=false WHERE id=$1', [paused.id]);
+  const pausedSession = { ...paused, queue_enabled: false };
+  await assert.rejects(central.comments.list(pausedSession), {
+    code: 'POOL_ACCESS_DISABLED',
+  });
+  await assert.rejects(attendantPoolCounts(db, pausedSession, config.accountId, new Date()), {
+    code: 'POOL_ACCESS_DISABLED',
+  });
+  await assert.rejects(central.comments.claim(pausedSession, item.id, item.version), {
+    code: 'POOL_ACCESS_DISABLED',
+  });
+  if (db.kind === 'mongo')
+    await db.update('users', { id: paused.id }, { $set: { queue_enabled: true } });
+  else await db.query('UPDATE users SET queue_enabled=true WHERE id=$1', [paused.id]);
   await assert.rejects(
     central.comments.claim(manager, item.id, item.version),
     /Somente consultores/,

@@ -418,7 +418,7 @@ test('Mongo: reserva protege contato e bolsão libera dados para a equipe ativa'
   assert.equal((await ops.detail(users[1], id)).phone, input().phone);
   assert.equal((await ops.snapshot(users[0])).opportunities.length, 0);
 });
-test('Mongo: pausa exclui do rodízio, preserva reserva e permite disputar bolsão', async () => {
+test('Mongo: pausa exclui do rodízio, preserva reserva e bloqueia o bolsão', async () => {
   const { id } = await lead();
   await ops.configure(manager, {
     version: 1,
@@ -431,7 +431,14 @@ test('Mongo: pausa exclui do rodízio, preserva reserva e permite disputar bols�
   now = new Date(now.getTime() + 600_000);
   await ops.expire();
   const pooled = (await db.one('opportunities', { state: 'POOL' }))!;
-  await ops.claim(users[0], pooled.id, 'pool', pooled.version, key());
+  const paused = { ...users[0], queue_enabled: false };
+  assert.ok(!(await ops.snapshot(paused)).opportunities.some((row) => row.id === pooled.id));
+  await assert.rejects(ops.detail(paused, pooled.id), { code: 'NOT_FOUND' });
+  await assert.rejects(ops.claim(paused, pooled.id, 'pool', pooled.version, key()), {
+    code: 'POOL_ACCESS_DISABLED',
+  });
+  await ops.claim(users[1], pooled.id, 'pool', pooled.version, key());
+  assert.equal((await row(pooled.id)).owner_id, users[1].id);
 });
 test('Mongo: pendências são distribuídas ao habilitar equipe, sem mudar reservas antigas', async () => {
   await ops.configure(manager, {

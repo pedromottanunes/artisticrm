@@ -19,6 +19,12 @@ export async function attendantPoolCounts(
 ): Promise<AttendantPoolCounts> {
   if (user.role !== 'attendant')
     throw new DomainError('FORBIDDEN', 'Bolsão disponível somente para consultores.', 403);
+  if (!user.active || !user.queue_enabled)
+    throw new DomainError(
+      'POOL_ACCESS_DISABLED',
+      'O bolsão está disponível somente para consultores que participam do rodízio.',
+      403,
+    );
 
   if (db.kind === 'mongo') {
     // A badge can tolerate a count changing between these two reads. Avoiding a

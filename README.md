@@ -6,7 +6,7 @@ Primeira versão executável do CRM: interface de gestão e atendimento, API e b
 
 - Novos leads percorrem o rodízio das atendentes ativas e habilitadas para recebimento automático.
 - A reserva dura dez minutos por padrão, contados pelo servidor. O prazo configurável só altera reservas futuras.
-- Sem aceite até o vencimento, o lead fica disponível no bolsão para **todas as atendentes com conta ativa**, mesmo pausadas no rodízio. Contas desativadas não têm acesso.
+- Sem aceite até o vencimento, o lead fica disponível no bolsão apenas para as atendentes com conta ativa e participação habilitada no rodízio.
 - O primeiro aceite confirmado pelo banco ganha o lead. Cliques concorrentes não criam dois responsáveis; repetir a mesma solicitação após falha de rede não duplica o aceite.
 - Somente após assumir o contato é liberado o canal de resposta. WhatsApp abre o contato no aparelho/Web e preserva o fluxo atual; Instagram libera o compositor e o histórico dentro do CRM.
 - O processo periódico e as consultas reconciliam reservas vencidas; o próprio aceite também verifica o prazo. Reiniciar o servidor não reinicia o cronômetro.

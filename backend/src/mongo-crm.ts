@@ -496,7 +496,13 @@ export class MongoOperations {
     if (user.role !== 'attendant')
       throw new DomainError('FORBIDDEN', 'Somente atendentes podem assumir.', 403);
     return this.db.atomic(async (tx) => {
-      await this.actor(tx, user);
+      const currentUser = await this.actor(tx, user);
+      if (mode === 'pool' && !currentUser.queue_enabled)
+        throw new DomainError(
+          'POOL_ACCESS_DISABLED',
+          'O bolsão está disponível somente para consultores que participam do rodízio.',
+          403,
+        );
       const fingerprint = digest({ id, mode, version });
       const replay = await tx.one('claims', { user_id: user.id, key });
       const row = await tx.one<Opportunity>('opportunities', { id });
@@ -563,7 +569,7 @@ export class MongoOperations {
           $or: [
             { owner_id: user.id },
             { state: 'RESERVED', reserved_to: user.id },
-            { state: 'POOL' },
+            ...(user.active && user.queue_enabled ? [{ state: 'POOL' }] : []),
           ],
         };
   }
@@ -598,7 +604,7 @@ export class MongoOperations {
     if (
       user.role === 'manager' ||
       row.owner_id === user.id ||
-      (row.state === 'POOL' && user.role === 'attendant' && user.active)
+      (row.state === 'POOL' && user.role === 'attendant' && user.active && user.queue_enabled)
     )
       return full;
     if (row.channel === 'instagram' && row.reserved_to === user.id) {

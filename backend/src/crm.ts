@@ -480,6 +480,12 @@ export class CRM {
       const currentUser = await lockActor(tx, user, true);
       if (currentUser.role !== 'attendant')
         throw new DomainError('FORBIDDEN', 'Participação no rodízio indisponível.', 403);
+      if (mode === 'pool' && !currentUser.queue_enabled)
+        throw new DomainError(
+          'POOL_ACCESS_DISABLED',
+          'O bolsão está disponível somente para consultores que participam do rodízio.',
+          403,
+        );
       const fingerprint = JSON.stringify({ id, mode, version });
       const replay = (
         await tx.query<{ fingerprint: string; response: { id: string; version: number } }>(
@@ -563,14 +569,14 @@ export class CRM {
       user.role === 'manager' ||
       row.owner_id === user.id ||
       (row.state === 'RESERVED' && row.reserved_to === user.id) ||
-      (row.state === 'POOL' && user.role === 'attendant' && user.active)
+      (row.state === 'POOL' && user.role === 'attendant' && user.active && user.queue_enabled)
     );
   }
   private sanitize(row: Opportunity, user: User): Opportunity {
     if (
       user.role === 'manager' ||
       row.owner_id === user.id ||
-      (row.state === 'POOL' && user.role === 'attendant' && user.active)
+      (row.state === 'POOL' && user.role === 'attendant' && user.active && user.queue_enabled)
     )
       return row;
     if (row.channel === 'instagram' && row.reserved_to === user.id) {
@@ -596,7 +602,11 @@ export class CRM {
         `${selectOpportunity}
       WHERE o.non_commercial_reason IS NULL AND ($1::boolean OR o.owner_id=$2 OR (o.state='RESERVED' AND o.reserved_to=$2) OR (o.state='POOL' AND $3::boolean))
       ORDER BY o.created_at DESC LIMIT 500`,
-        [user.role === 'manager', user.id, user.role === 'attendant' && user.active],
+        [
+          user.role === 'manager',
+          user.id,
+          user.role === 'attendant' && user.active && user.queue_enabled,
+        ],
       )
     ).rows;
     const users = (

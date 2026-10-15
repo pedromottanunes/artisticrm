@@ -60,3 +60,30 @@ test('gestão não recebe o indicador pessoal de consultor', async ({ page }) =>
   await expect(page.locator('.consultant-queue-position')).toHaveCount(0);
   expect(queueRequests).toBe(0);
 });
+
+test('consultor fora do rodízio não vê nem consulta o bolsão', async ({ page }) => {
+  await login(page, 'vanessa');
+  const snapshot = await (await page.request.get('/api/v1/workspace')).json();
+  let poolRequests = 0;
+  await page.route('**/api/v1/workspace*', (route) =>
+    route.fulfill({
+      json: {
+        ...snapshot,
+        user: { ...snapshot.user, queue_enabled: false },
+        opportunities: snapshot.opportunities.filter(
+          (lead: { state: string }) => lead.state !== 'POOL',
+        ),
+      },
+    }),
+  );
+  await page.route('**/api/v1/pool/counts', (route) => {
+    poolRequests += 1;
+    return route.fulfill({ status: 403, json: { code: 'POOL_ACCESS_DISABLED' } });
+  });
+
+  await page.goto('/#pool');
+  await expect(page.getByRole('heading', { name: 'Meus atendimentos', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Bolsão', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('navigation', { name: 'Tipo de bolsão' })).toHaveCount(0);
+  expect(poolRequests).toBe(0);
+});
