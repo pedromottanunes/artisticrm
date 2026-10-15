@@ -2,6 +2,28 @@
   display: grid;
   gap: 16px;
 }
+.consultant-status-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.consultant-status-tabs button {
+  border: 0;
+  border-radius: 7px;
+  padding: 10px 14px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.consultant-status-tabs button[aria-pressed='true'] {
+  background: var(--gold);
+  color: #07131d;
+}
 .reports-filter {
   min-height: 66px;
   padding: 10px 14px;

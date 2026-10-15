@@ -11,6 +11,7 @@ import { MediaProxy, trustedMediaUrl } from './media-proxy.js';
 import { MongoTx } from './mongo-store.js';
 import type { Sql } from './db.js';
 import { lockActor } from './access.js';
+import { canReviewOwner, reviewSourceIds } from './conversation-sharing.js';
 
 export interface MessengerConfig {
   appSecret: string;
@@ -126,6 +127,7 @@ interface MessengerEvent {
   };
 }
 interface ConversationContext {
+  non_commercial_reason?: string | null;
   id: string;
   opportunity_id: string;
   contact_id: string;
@@ -879,6 +881,7 @@ export class MessengerCentral {
               ...conversation,
               external_user_id: identity.external_user_id,
               state: opportunity.state,
+              non_commercial_reason: opportunity.non_commercial_reason,
               owner_id: opportunity.owner_id,
               reserved_to: opportunity.reserved_to,
             }
@@ -888,7 +891,7 @@ export class MessengerCentral {
         (
           await db.query<ConversationContext>(
             `SELECT cv.id,cv.opportunity_id,cv.contact_id,cv.last_message_at,cv.last_inbound_at,
-                    o.state,o.owner_id,o.reserved_to,ci.external_user_id
+                    o.state,o.owner_id,o.reserved_to,o.non_commercial_reason,ci.external_user_id
              FROM conversations cv JOIN opportunities o ON o.id=cv.opportunity_id
              JOIN channel_accounts ca ON ca.id=cv.channel_account_id
              JOIN LATERAL(SELECT external_user_id FROM contact_identities i
@@ -899,7 +902,15 @@ export class MessengerCentral {
           )
         ).rows[0] ?? null;
     if (!context) throw new DomainError('NOT_FOUND', 'Conversa não encontrada.', 404);
-    if (user.role !== 'manager' && context.owner_id !== user.id)
+    if (
+      user.role !== 'manager' &&
+      context.owner_id !== user.id &&
+      !(
+        context.state !== 'CANCELLED' &&
+        !context.non_commercial_reason &&
+        (await canReviewOwner(db, user, context.owner_id))
+      )
+    )
       throw new DomainError('FORBIDDEN', 'Assuma o lead para acessar esta conversa.', 403);
     return context;
   }
@@ -996,7 +1007,10 @@ export class MessengerCentral {
     return unread;
   }
 
-  async list(user: User, view: 'mine' | 'reserved' | 'pool' | 'all' | 'non_commercial' = 'mine') {
+  async list(
+    user: User,
+    view: 'mine' | 'reserved' | 'pool' | 'all' | 'non_commercial' | 'review' = 'mine',
+  ) {
     if (!this.config) return { configured: false, conversations: [] as Record<string, unknown>[] };
     if (view === 'all' && user.role !== 'manager')
       throw new DomainError('FORBIDDEN', 'Visão completa restrita à gestão.', 403);
@@ -1007,6 +1021,9 @@ export class MessengerCentral {
         403,
       );
     const db = this.crm.db;
+    if (view === 'review' && user.role !== 'attendant')
+      throw new DomainError('FORBIDDEN', 'A carteira de revisão é exclusiva dos consultores.', 403);
+    const reviewOwners = view === 'review' ? await reviewSourceIds(db, user.id) : [];
     const archived = view === 'non_commercial';
     if (archived) view = user.role === 'manager' ? 'all' : 'mine';
     let rows: Array<{
@@ -1017,6 +1034,7 @@ export class MessengerCentral {
       state: string;
       owner_id: string | null;
       reserved_to: string | null;
+      version: number;
       non_commercial_reason: string | null;
       last_message_at: Date | string;
       last_inbound_at: Date | string | null;
@@ -1031,11 +1049,16 @@ export class MessengerCentral {
         const visibility =
           view === 'mine'
             ? { owner_id: user.id }
-            : view === 'reserved'
-              ? { state: 'RESERVED', ...(user.role === 'manager' ? {} : { reserved_to: user.id }) }
-              : user.role === 'manager' || (user.active && user.queue_enabled)
-                ? { state: 'POOL' }
-                : { id: '__inactive_user_cannot_view_pool__' };
+            : view === 'review'
+              ? { owner_id: { $in: reviewOwners }, state: { $ne: 'CANCELLED' } }
+              : view === 'reserved'
+                ? {
+                    state: 'RESERVED',
+                    ...(user.role === 'manager' ? {} : { reserved_to: user.id }),
+                  }
+                : user.role === 'manager' || (user.active && user.queue_enabled)
+                  ? { state: 'POOL' }
+                  : { id: '__inactive_user_cannot_view_pool__' };
         // Scope ownership before limiting. One aggregation replaces per-conversation reads.
         rows = await db
           .collection(all ? 'conversations' : 'opportunities')
@@ -1069,6 +1092,7 @@ export class MessengerCentral {
                         state: '$state',
                         owner_id: '$owner_id',
                         reserved_to: '$reserved_to',
+                        version: '$version',
                         non_commercial_reason: '$non_commercial_reason',
                       },
                     },
@@ -1138,6 +1162,7 @@ export class MessengerCentral {
                 state: '$opportunity.state',
                 owner_id: '$opportunity.owner_id',
                 reserved_to: '$opportunity.reserved_to',
+                version: '$opportunity.version',
                 non_commercial_reason: { $ifNull: ['$opportunity.non_commercial_reason', null] },
                 last_message_at: 1,
                 last_inbound_at: { $ifNull: ['$last_inbound_at', null] },
@@ -1158,16 +1183,18 @@ export class MessengerCentral {
                 : "o.state='POOL'"
           : view === 'mine'
             ? 'o.owner_id=$2'
-            : view === 'reserved'
-              ? "o.state='RESERVED' AND o.reserved_to=$2"
-              : user.active && user.queue_enabled
-                ? "o.state='POOL'"
-                : 'FALSE';
+            : view === 'review'
+              ? "o.owner_id=ANY($2::uuid[]) AND o.state<>'CANCELLED'"
+              : view === 'reserved'
+                ? "o.state='RESERVED' AND o.reserved_to=$2"
+                : user.active && user.queue_enabled
+                  ? "o.state='POOL'"
+                  : 'FALSE';
       rows = (
         await db.query(
           `SELECT cv.id,o.id AS opportunity_id,c.name AS contact_name,
                   COALESCE(ci.profile_picture_url,'') AS profile_picture_url,o.state,o.owner_id,
-                  o.reserved_to,o.non_commercial_reason,cv.last_message_at,cv.last_inbound_at
+                  o.reserved_to,o.version,o.non_commercial_reason,cv.last_message_at,cv.last_inbound_at
            FROM conversations cv JOIN opportunities o ON o.id=cv.opportunity_id
            JOIN contacts c ON c.id=cv.contact_id JOIN channel_accounts ca ON ca.id=cv.channel_account_id
            LEFT JOIN LATERAL(SELECT * FROM contact_identities i WHERE i.contact_id=cv.contact_id
@@ -1175,7 +1202,9 @@ export class MessengerCentral {
            WHERE ca.provider='messenger' AND ca.external_account_id=$1
              AND o.non_commercial_reason IS ${archived ? 'NOT NULL' : 'NULL'} AND (${visibility})
            ORDER BY cv.last_message_at DESC,cv.id LIMIT 100`,
-          visibility.includes('$2') ? [this.config.pageId, user.id] : [this.config.pageId],
+          visibility.includes('$2')
+            ? [this.config.pageId, view === 'review' ? reviewOwners : user.id]
+            : [this.config.pageId],
         )
       ).rows as typeof rows;
     }
@@ -1204,6 +1233,7 @@ export class MessengerCentral {
           unread: !archived && unread.has(row.id),
           notifications_muted: archived || muted.has(row.opportunity_id),
           messaging_mode: withinWindow ? ('direct' as const) : ('expired' as const),
+          review_shared: view === 'review',
           can_send: withinWindow && row.state === 'CLAIMED' && row.owner_id === user.id,
         };
       }),

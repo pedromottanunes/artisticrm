@@ -33,6 +33,7 @@ import { DomainError, requireManager, stages, type User } from './types.js';
 import { personalQueueStatus } from './queue-status.js';
 import { attendantPoolCounts } from './pool-counts.js';
 import { commercialFields } from './commercial-fields.js';
+import { conversationPortfolioShares } from './conversation-sharing.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -656,6 +657,34 @@ export async function buildApp(
       commandKey(request.headers),
     );
   });
+  app.get('/api/v1/conversation-portfolio-shares', async (request) => {
+    requireManager(request.user);
+    return { shares: await conversationPortfolioShares(db) };
+  });
+  app.post('/api/v1/conversation-portfolio-shares', async (request, reply) => {
+    requireManager(request.user);
+    const input = z
+      .object({ source_user_id: uuid, reviewer_user_id: uuid })
+      .strict()
+      .parse(request.body);
+    return reply
+      .code(201)
+      .send(await crm.shareConversationPortfolio(request.user, input, commandKey(request.headers)));
+  });
+  app.delete('/api/v1/conversation-portfolio-shares/:sourceUserId', async (request) => {
+    requireManager(request.user);
+    const sourceUserId = z.object({ sourceUserId: uuid }).parse(request.params).sourceUserId;
+    const input = z
+      .object({ expected_version: z.number().int().positive() })
+      .strict()
+      .parse(request.body);
+    return crm.revokeConversationPortfolio(
+      request.user,
+      sourceUserId,
+      input.expected_version,
+      commandKey(request.headers),
+    );
+  });
   app.post(
     '/api/v1/users/:id/reset-password',
     { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
@@ -809,7 +838,7 @@ export async function buildApp(
   app.get('/api/v1/conversations', async (request) => {
     const query = z
       .object({
-        view: z.enum(['mine', 'reserved', 'pool', 'all', 'non_commercial']).optional(),
+        view: z.enum(['mine', 'reserved', 'pool', 'all', 'non_commercial', 'review']).optional(),
         revision: z
           .string()
           .regex(/^[a-f0-9]{64}$/)
@@ -833,6 +862,18 @@ export async function buildApp(
     return chatSnapshot(
       { configured: instagramResult.configured || messengerResult.configured, conversations },
       query.revision,
+    );
+  });
+  app.post('/api/v1/opportunities/:id/assume-shared-conversation', async (request) => {
+    const input = z
+      .object({ expected_version: z.number().int().positive() })
+      .strict()
+      .parse(request.body);
+    return crm.assumeSharedConversation(
+      request.user,
+      idParams.parse(request.params).id,
+      input.expected_version,
+      commandKey(request.headers),
     );
   });
   app.get('/api/v1/conversations/:id/messages', async (request) => {

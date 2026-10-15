@@ -69,6 +69,204 @@ export function publicUser(user: Document): User {
 }
 
 export class MongoOperations {
+  async shareConversationPortfolio(
+    actor: User,
+    input: { source_user_id: string; reviewer_user_id: string },
+    key: string,
+  ) {
+    requireManager(actor);
+    if (input.source_user_id === input.reviewer_user_id)
+      throw new DomainError(
+        'INVALID_REVIEWER',
+        'Escolha consultores diferentes para origem e acesso.',
+        400,
+      );
+    return this.db.atomic(async (tx) => {
+      const currentActor = await this.actor(tx, actor);
+      return this.command(
+        tx,
+        currentActor,
+        key,
+        { kind: 'conversation-portfolio.share', ...input },
+        async () => {
+          const source = await tx.one<User>('users', {
+            id: input.source_user_id,
+            role: 'attendant',
+          });
+          const reviewer = await tx.one<User>('users', {
+            id: input.reviewer_user_id,
+            role: 'attendant',
+            active: true,
+          });
+          if (!source)
+            throw new DomainError('INVALID_SOURCE', 'Selecione um consultor de origem.', 400);
+          if (!reviewer)
+            throw new DomainError('INVALID_REVIEWER', 'Selecione um consultor ativo.', 400);
+          const existing = await tx.one<{
+            id: string;
+            reviewer_user_id: string;
+            version: number;
+          }>('conversation_portfolio_shares', {
+            source_user_id: source.id,
+            revoked_at: null,
+          });
+          if (existing?.reviewer_user_id === reviewer.id)
+            return { id: existing.id, version: existing.version };
+          const now = await this.now(tx);
+          if (existing)
+            await tx.update(
+              'conversation_portfolio_shares',
+              { id: existing.id },
+              {
+                $set: { revoked_by: currentActor.id, revoked_at: now },
+                $inc: { version: 1 },
+              },
+            );
+          const id = randomUUID();
+          await tx.insert('conversation_portfolio_shares', {
+            id,
+            source_user_id: source.id,
+            reviewer_user_id: reviewer.id,
+            granted_by: currentActor.id,
+            granted_at: now,
+            revoked_by: null,
+            revoked_at: null,
+            version: 1,
+          });
+          await this.audit(
+            tx,
+            null,
+            currentActor.id,
+            'conversation_portfolio.shared',
+            `Carteira de conversas de ${source.name} compartilhada com ${reviewer.name}.`,
+            {
+              source_user_id: source.id,
+              reviewer_user_id: reviewer.id,
+              previous_reviewer_user_id: existing?.reviewer_user_id ?? null,
+            },
+          );
+          return { id, version: 1 };
+        },
+      );
+    });
+  }
+
+  async revokeConversationPortfolio(
+    actor: User,
+    sourceUserId: string,
+    expectedVersion: number,
+    key: string,
+  ) {
+    requireManager(actor);
+    return this.db.atomic(async (tx) => {
+      const currentActor = await this.actor(tx, actor);
+      return this.command(
+        tx,
+        currentActor,
+        key,
+        { kind: 'conversation-portfolio.revoke', sourceUserId, expectedVersion },
+        async () => {
+          const share = await tx.one<{
+            id: string;
+            reviewer_user_id: string;
+            version: number;
+          }>('conversation_portfolio_shares', {
+            source_user_id: sourceUserId,
+            revoked_at: null,
+          });
+          if (!share) throw new DomainError('NOT_FOUND', 'Compartilhamento não encontrado.', 404);
+          if (share.version !== expectedVersion)
+            throw new DomainError('VERSION_CONFLICT', 'O compartilhamento mudou. Atualize a tela.');
+          await tx.update(
+            'conversation_portfolio_shares',
+            { id: share.id },
+            {
+              $set: { revoked_by: currentActor.id, revoked_at: await this.now(tx) },
+              $inc: { version: 1 },
+            },
+          );
+          await this.audit(
+            tx,
+            null,
+            currentActor.id,
+            'conversation_portfolio.revoked',
+            'Acesso à carteira de conversas removido pela gestão.',
+            { source_user_id: sourceUserId, reviewer_user_id: share.reviewer_user_id },
+          );
+          return { revoked: true };
+        },
+      );
+    });
+  }
+
+  async assumeSharedConversation(actor: User, id: string, expectedVersion: number, key: string) {
+    if (actor.role !== 'attendant')
+      throw new DomainError('FORBIDDEN', 'Somente consultores podem assumir conversas.', 403);
+    return this.db.atomic(async (tx) => {
+      const currentActor = await this.actor(tx, actor);
+      return this.command(
+        tx,
+        currentActor,
+        key,
+        { kind: 'conversation-portfolio.assume', id, expectedVersion },
+        async () => {
+          const row = await tx.one<Opportunity>('opportunities', { id });
+          if (!row || row.state === 'CANCELLED' || row.non_commercial_reason)
+            throw new DomainError('NOT_FOUND', 'Conversa não disponível para revisão.', 404);
+          if (row.version !== expectedVersion)
+            throw new DomainError('VERSION_CONFLICT', 'A conversa mudou. Atualize a carteira.');
+          if (!row.owner_id || row.owner_id === currentActor.id)
+            throw new DomainError('NOT_AVAILABLE', 'Esta conversa não está mais compartilhada.');
+          const granted = await tx.one('conversation_portfolio_shares', {
+            source_user_id: row.owner_id,
+            reviewer_user_id: currentActor.id,
+            revoked_at: null,
+          });
+          if (!granted)
+            throw new DomainError('FORBIDDEN', 'O acesso a esta carteira foi removido.', 403);
+          const conversation = await tx.one('conversations', { opportunity_id: row.id });
+          if (!conversation)
+            throw new DomainError('NOT_FOUND', 'Esta oportunidade não possui conversa.', 404);
+          const previousOwner = row.owner_id;
+          await transferProspects(tx, row.id, currentActor.id, await this.now(tx));
+          await tx.update(
+            'opportunities',
+            { id: row.id, version: expectedVersion },
+            {
+              $set: {
+                state: 'CLAIMED',
+                owner_id: currentActor.id,
+                reserved_to: null,
+                expires_at: null,
+                claimed_at: null,
+                claim_mode: 'portfolio_share',
+                accepted_by: null,
+                reservation_origin: null,
+                needs_review: false,
+                metrics_owner_id: row.metrics_owner_id ?? previousOwner,
+              },
+              $inc: { version: 1 },
+            },
+          );
+          await this.audit(
+            tx,
+            row.id,
+            currentActor.id,
+            'opportunity.transferred',
+            `Conversa assumida por ${currentActor.name} a partir da carteira compartilhada.`,
+            {
+              previous_owner: previousOwner,
+              new_owner: currentActor.id,
+              metrics_owner_id: row.metrics_owner_id ?? previousOwner,
+              transfer_mode: 'portfolio_share',
+            },
+          );
+          return { id: row.id, version: row.version + 1 };
+        },
+      );
+    });
+  }
+
   async deleteLead(actor: User, id: string, input: DeleteLeadInput, key: string) {
     return this.db.atomic(async (tx) => {
       const currentActor = await this.actor(tx, actor);
@@ -1162,19 +1360,79 @@ export class MongoOperations {
                 role: 'attendant',
               })
             : null;
-          if (owned.length && (!replacement || replacement.id === id))
-            throw new DomainError(
-              'REPLACEMENT_REQUIRED',
-              'Selecione outra atendente ativa para receber os atendimentos.',
+          if (input.replacement_id) {
+            if (!replacement || replacement.id === id)
+              throw new DomainError(
+                'INVALID_REPLACEMENT',
+                'Selecione outra atendente ativa para receber os atendimentos.',
+              );
+            for (const row of owned)
+              await this.assign(tx, row, replacement, actor, `Desativação: ${input.reason}`);
+          } else {
+            const sourceOwned = owned.filter((row) => row.owner_id === id);
+            if (owned.length) {
+              const share = await tx.one('conversation_portfolio_shares', {
+                source_user_id: id,
+                revoked_at: null,
+              });
+              if (!share)
+                throw new DomainError(
+                  'REPLACEMENT_REQUIRED',
+                  'Compartilhe a carteira de conversas antes de desativar esta atendente ou selecione uma substituta para transferir tudo.',
+                  409,
+                );
+            }
+            if (sourceOwned.length) {
+              for (const row of sourceOwned) {
+                if (!(await tx.one('conversations', { opportunity_id: row.id })))
+                  throw new DomainError(
+                    'TRANSFER_REQUIRED',
+                    'Existem leads sem conversa nessa carteira. Transfira esses leads antes de desativar a atendente.',
+                    409,
+                  );
+              }
+            }
+            const reservations = owned.filter(
+              (row) => row.state === 'RESERVED' && row.reserved_to === id && row.owner_id !== id,
             );
-          for (const row of owned)
-            await this.assign(tx, row, replacement!, actor, `Desativação: ${input.reason}`);
+            for (const row of reservations) {
+              await tx.update(
+                'opportunities',
+                { id: row.id },
+                {
+                  $set: {
+                    state: 'POOL',
+                    reserved_to: null,
+                    expires_at: null,
+                    reservation_origin: null,
+                  },
+                  $inc: { version: 1 },
+                },
+              );
+              await this.audit(
+                tx,
+                row.id,
+                actor.id,
+                'reservation.released',
+                'Reserva liberada no bolsão durante a desativação da conta.',
+                { reserved_to: id },
+              );
+            }
+          }
           await tx.update(
             'lead_compensations',
             { user_id: id, status: 'pending' },
             { $set: { status: 'revoked' } },
           );
           await tx.remove('sessions', { user_id: id });
+          await tx.update(
+            'conversation_portfolio_shares',
+            { reviewer_user_id: id, revoked_at: null },
+            {
+              $set: { revoked_by: actor.id, revoked_at: await this.now(tx) },
+              $inc: { version: 1 },
+            },
+          );
         }
         await tx.update(
           'users',
@@ -1225,12 +1483,22 @@ export class MongoOperations {
           );
         if (
           await tx.count('opportunities', {
-            $or: [{ owner_id: id }, { reserved_to: id }],
+            $or: [{ owner_id: id }, { reserved_to: id }, { metrics_owner_id: id }],
           })
         )
           throw new DomainError(
             'USER_HAS_LEADS',
-            'Exclua ou transfira todos os leads vinculados antes de apagar a atendente.',
+            'Esta conta possui histórico de leads e métricas. Mantenha-a desativada para preservar os relatórios.',
+            409,
+          );
+        if (
+          await tx.count('conversation_portfolio_shares', {
+            $or: [{ source_user_id: id }, { reviewer_user_id: id }],
+          })
+        )
+          throw new DomainError(
+            'USER_HAS_PORTFOLIO_HISTORY',
+            'Esta conta possui histórico de compartilhamento de carteiras. Mantenha-a desativada.',
             409,
           );
         await this.audit(

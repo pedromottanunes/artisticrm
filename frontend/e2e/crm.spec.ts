@@ -1,4 +1,5 @@
 import { test, expect, type Page, type BrowserContext } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
 
 // Reuse demo sessions across isolated pages; repeated UI login isn't the purpose
 // of every regression and would exhaust the real login rate limit for one IP.
@@ -909,7 +910,7 @@ test('relatórios administrativos mostram período, equipe, bolsão e resultados
   await expect(
     page.getByText('Tempo médio até o primeiro aceite no CRM', { exact: true }),
   ).toBeVisible();
-  await expect(page.getByText('Meta Ads + Instagram Direct', { exact: true })).toBeVisible();
+  await expect(page.getByText('Origem dos leads do Instagram', { exact: true })).toBeVisible();
   await expect(page.getByText('Marketing API ainda não conectada', { exact: true })).toBeVisible();
 
   for (const width of [390, 1440]) {
@@ -1403,7 +1404,9 @@ test('gestão cria atendente com login e senha simples', async ({ page, browser 
   await dialog.getByLabel('Senha de acesso').fill('atendente1');
   await dialog.getByRole('button', { name: 'Confirmar alteração' }).click();
   await expect(dialog).not.toBeVisible();
-  await expect(page.getByText('Atendente E2E', { exact: true })).toBeVisible();
+  await expect(
+    page.locator('.team-list article').getByText('Atendente E2E', { exact: true }),
+  ).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({
@@ -1424,6 +1427,20 @@ test('gestão cria atendente com login e senha simples', async ({ page, browser 
   } finally {
     await context.close();
   }
+  const workspace = await (await page.request.get('/api/v1/workspace')).json();
+  const createdUser = workspace.users.find(
+    (user: { email: string }) => user.email === 'atendente-e2e',
+  );
+  const deactivated = await page.request.patch(`/api/v1/users/${createdUser.id}`, {
+    headers: { 'X-Artisti-Client': 'web', 'Idempotency-Key': randomUUID() },
+    data: {
+      name: createdUser.name,
+      active: false,
+      expected_version: createdUser.version,
+      reason: 'Encerrar conta temporária criada pelo teste automatizado',
+    },
+  });
+  expect(deactivated.status(), await deactivated.text()).toBe(200);
 });
 
 test('central acompanha reservas, histórico e aceite por outra atendente', async ({

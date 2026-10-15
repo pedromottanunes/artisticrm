@@ -18,6 +18,8 @@ import { checkAgenda } from './agenda-checks.js';
 import { checkLeadLists } from './lead-list-checks.js';
 import { checkPersistentSessions } from './session-checks.js';
 import { checkCommercialDrafts, checkCommercialMigration } from './commercial-checks.js';
+import { MessengerCentral } from '../src/messenger.js';
+import { reportsOverview } from '../src/reports.js';
 
 test('SQL: ficha completa, venda separada, permissões e persistência após reinício', () =>
   checkCommercialDrafts(db, manager, users));
@@ -45,7 +47,7 @@ before(async () => {
 });
 beforeEach(async () => {
   await db.query(
-    'TRUNCATE lead_notification_mutes,message_shortcuts,conversation_reads,messages,messenger_webhook_inbox,instagram_webhook_inbox,conversations,contact_identities,channel_accounts,deleted_inbound_events,push_records,whatsapp_inbox,operation_receipts,claims,appointments,lead_attributions,inbound_events,audit_events,lead_compensations,opportunities,contacts,sessions',
+    'TRUNCATE conversation_portfolio_shares,lead_notification_mutes,message_shortcuts,conversation_reads,messages,messenger_webhook_inbox,instagram_webhook_inbox,conversations,contact_identities,channel_accounts,deleted_inbound_events,push_records,whatsapp_inbox,operation_receipts,claims,appointments,lead_attributions,inbound_events,audit_events,lead_compensations,opportunities,contacts,sessions',
   );
   await db.query("DELETE FROM users WHERE email NOT LIKE '%@demo.artisti.local'");
   const { hashPassword } = await import('../src/auth.js');
@@ -253,6 +255,131 @@ test('desativação transfere trabalho, revoga sessões e bloqueia comando auten
   await assert.rejects(() => ops.update(users[0], id, { ...update, version: 3 }), {
     code: 'UNAUTHENTICATED',
   });
+});
+test('carteira compartilhada preserva histórico e métricas ao assumir uma conversa', async () => {
+  const first = await lead(71);
+  await ops.claim(users[0], first.id, 'reservation', 1, randomUUID());
+  const second = await lead(72);
+  await ops.transfer(
+    manager,
+    second.id,
+    {
+      expected_version: 1,
+      target_id: users[0].id,
+      reason: 'Preparar carteira histórica para revisão',
+    },
+    randomUUID(),
+  );
+  assert.equal((await row(first.id)).metrics_owner_id ?? null, null);
+  assert.equal((await row(second.id)).metrics_owner_id ?? null, null);
+  const accountId = randomUUID();
+  await db.query(
+    `INSERT INTO channel_accounts(id,provider,external_account_id,status,graph_api_version)
+     VALUES($1,'messenger','page-review','active','v26.0')`,
+    [accountId],
+  );
+  const conversationIds = new Map<string, string>();
+  for (const opportunityId of [first.id, second.id]) {
+    const opportunity = await row(opportunityId);
+    const conversationId = randomUUID();
+    conversationIds.set(opportunityId, conversationId);
+    await db.query(
+      `INSERT INTO contact_identities(
+         id,contact_id,provider,channel_account_id,external_user_id,last_seen_at
+       ) VALUES($1,$2,'messenger','page-review',$3,$4)`,
+      [randomUUID(), opportunity.contact_id, `psid-${opportunityId}`, now],
+    );
+    await db.query(
+      `INSERT INTO conversations(
+         id,channel_account_id,contact_id,opportunity_id,last_message_at,created_at,updated_at
+       ) VALUES($1,$2,$3,$4,$5,$5,$5)`,
+      [conversationId, accountId, opportunity.contact_id, opportunityId, now],
+    );
+  }
+  const granted = await ops.shareConversationPortfolio(
+    manager,
+    { source_user_id: users[0].id, reviewer_user_id: users[1].id },
+    randomUUID(),
+  );
+  await ops.updateAttendant(
+    manager,
+    users[0].id,
+    {
+      expected_version: 1,
+      name: users[0].name,
+      active: false,
+      reason: 'Consultor deixou a equipe',
+    },
+    randomUUID(),
+  );
+  const messenger = new MessengerCentral(ops, {
+    appSecret: 'messenger-review-test-secret',
+    verifyToken: 'messenger-review-test-verify-token-32-chars',
+    pageId: 'page-review',
+    pageAccessToken: 'EAA-review-token-never-used',
+    graphApiVersion: 'v26.0',
+  });
+  const reviewBefore = await messenger.list(users[1], 'review');
+  assert.equal(reviewBefore.conversations.length, 2);
+  assert.ok(reviewBefore.conversations.every((conversation) => !conversation.can_send));
+  assert.equal(
+    (await messenger.messages(users[1], conversationIds.get(first.id)!)).opportunity_id,
+    first.id,
+  );
+  await ops.assumeSharedConversation(users[1], first.id, 2, randomUUID());
+  const assumed = await row(first.id);
+  assert.equal(assumed.owner_id, users[1].id);
+  assert.equal(assumed.metrics_owner_id, users[0].id);
+  await db.query("UPDATE opportunities SET stage='CLOSED_WITHOUT_DATE' WHERE id=$1", [first.id]);
+  await db.query(
+    `INSERT INTO audit_events(id,opportunity_id,actor_id,kind,description,details,created_at)
+     VALUES($1,$2,$3,'opportunity.updated','Negócio fechado após a assunção',$4,$5)`,
+    [
+      randomUUID(),
+      first.id,
+      users[1].id,
+      JSON.stringify({ previous_stage: 'NEW_LEAD', next_stage: 'CLOSED_WITHOUT_DATE' }),
+      now,
+    ],
+  );
+  const report = await reportsOverview(
+    db,
+    manager,
+    { from: '2026-09-10', to: '2026-09-10' },
+    async () => now,
+  );
+  assert.deepEqual(
+    report.closed_by_user.map(({ user_id, active, count }) => ({ user_id, active, count })),
+    [{ user_id: users[0].id, active: false, count: 1 }],
+  );
+  assert.equal(
+    Number(
+      (
+        await db.query<{ count: string }>(
+          'SELECT count(*) FROM conversations WHERE opportunity_id=$1',
+          [first.id],
+        )
+      ).rows[0].count,
+    ),
+    1,
+  );
+  await ops.revokeConversationPortfolio(manager, users[0].id, granted.version, randomUUID());
+  assert.equal((await messenger.list(users[1], 'review')).conversations.length, 0);
+  assert.equal((await messenger.list(users[1], 'mine')).conversations.length, 1);
+  await assert.rejects(() => ops.assumeSharedConversation(users[1], second.id, 2, randomUUID()), {
+    code: 'FORBIDDEN',
+  });
+  assert.equal((await row(second.id)).owner_id, users[0].id);
+  await assert.rejects(
+    () =>
+      ops.deleteAttendant(
+        manager,
+        users[0].id,
+        { expected_version: 2, confirmation: 'EXCLUIR' },
+        randomUUID(),
+      ),
+    { code: 'USER_HAS_LEADS' },
+  );
 });
 test('retorno de encerrado legado aguarda revisão e não é liberado ao salvar fila', async () => {
   const { id } = await lead();

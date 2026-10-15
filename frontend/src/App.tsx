@@ -35,7 +35,7 @@ import { ManagerReports } from './manager-reports';
 import { InstagramInbox } from './inbox';
 import { AttendantLeads } from './attendant-leads';
 import { QueuePosition } from './queue-position';
-import { Team, PasswordChange } from './operations';
+import { ConversationPortfolioSharing, Team, PasswordChange } from './operations';
 import { MobileNavigation } from './mobile-navigation';
 import { DevicePanel, PushBinding } from './pwa';
 import { ShortcutsPage } from './shortcuts';
@@ -570,9 +570,7 @@ export function App() {
           onClick={() => void openChannel(lead)}
         >
           <MessageCircle size={14} />
-          {lead.channel === 'instagram' || lead.channel === 'messenger'
-            ? 'Conversa'
-            : 'WhatsApp'}
+          {lead.channel === 'instagram' || lead.channel === 'messenger' ? 'Conversa' : 'WhatsApp'}
         </button>
       );
     return (
@@ -942,6 +940,7 @@ export function App() {
                 </div>
               </section>
               {isManager && <Team data={data} connected={connected} onChanged={refresh} />}
+              {isManager && <ConversationPortfolioSharing data={data} connected={connected} />}
               {isManager && <CentralStatusPanel />}
             </div>
           )}

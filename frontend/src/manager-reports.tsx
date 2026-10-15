@@ -24,6 +24,14 @@ interface ReportRanking {
   count: number;
   lead_ids: string[];
   average_minutes?: number;
+  active: boolean;
+}
+
+function matchesConsultantStatus(
+  row: Pick<ReportRanking, 'active'>,
+  status: 'active' | 'inactive',
+) {
+  return row.active === (status === 'active');
 }
 interface ReportOverview {
   quality?: {
@@ -338,6 +346,7 @@ export function ManagerReports({
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
+  const [consultantStatus, setConsultantStatus] = useState<'active' | 'inactive'>('active');
   useEffect(() => {
     const changed = () => setRevision((value) => value + 1);
     window.addEventListener('artisti-lead-quality', changed);
@@ -623,6 +632,23 @@ export function ManagerReports({
         </div>
       </form>
 
+      <div className="consultant-status-tabs" role="group" aria-label="Status dos consultores">
+        <button
+          type="button"
+          aria-pressed={consultantStatus === 'active'}
+          onClick={() => setConsultantStatus('active')}
+        >
+          Consultores ativos
+        </button>
+        <button
+          type="button"
+          aria-pressed={consultantStatus === 'inactive'}
+          onClick={() => setConsultantStatus('inactive')}
+        >
+          Consultores desativados
+        </button>
+      </div>
+
       {error && (
         <div className="reports-error" role="alert">
           {error}
@@ -655,7 +681,9 @@ export function ManagerReports({
                 <h2>Usuários com mais leads sem resposta</h2>
               </header>
               <ReportRows
-                rows={report.unanswered_by_user}
+                rows={report.unanswered_by_user.filter((row) =>
+                  matchesConsultantStatus(row, consultantStatus),
+                )}
                 value={(row) => `${row.count} lead${row.count === 1 ? '' : 's'}`}
                 empty="Nenhum lead sem resposta."
                 onLeads={openLeads}
@@ -667,7 +695,9 @@ export function ManagerReports({
                 <h2>Usuários com resposta mais rápida</h2>
               </header>
               <ReportRows
-                rows={report.fastest_response_by_user}
+                rows={report.fastest_response_by_user.filter((row) =>
+                  matchesConsultantStatus(row, consultantStatus),
+                )}
                 value={(row) => duration(row.average_minutes)}
                 empty="Nenhum aceite registrado."
                 onLeads={openLeads}
@@ -1018,7 +1048,9 @@ export function ManagerReports({
                 <h2>Leads assumidos através do bolsão</h2>
               </header>
               <HorizontalChart
-                rows={report.pool_claimed_by_user}
+                rows={report.pool_claimed_by_user.filter((row) =>
+                  matchesConsultantStatus(row, consultantStatus),
+                )}
                 metric={(row) => row.count}
                 onLeads={openLeads}
               />
@@ -1029,7 +1061,9 @@ export function ManagerReports({
                 <h2>Leads perdidos para o bolsão por usuário</h2>
               </header>
               <HorizontalChart
-                rows={report.pool_lost_by_user}
+                rows={report.pool_lost_by_user.filter((row) =>
+                  matchesConsultantStatus(row, consultantStatus),
+                )}
                 metric={(row) => row.count}
                 onLeads={openLeads}
               />
@@ -1072,7 +1106,9 @@ export function ManagerReports({
                 <h2>Tempo de primeira interação por usuário (minutos)</h2>
               </header>
               <HorizontalChart
-                rows={report.first_interaction_by_user}
+                rows={report.first_interaction_by_user.filter((row) =>
+                  matchesConsultantStatus(row, consultantStatus),
+                )}
                 metric={(row) => row.average_minutes ?? 0}
                 onLeads={openLeads}
               />
@@ -1083,7 +1119,9 @@ export function ManagerReports({
                 <h2>Leads com negócio fechado por usuário</h2>
               </header>
               <HorizontalChart
-                rows={report.closed_by_user}
+                rows={report.closed_by_user.filter((row) =>
+                  matchesConsultantStatus(row, consultantStatus),
+                )}
                 metric={(row) => row.count}
                 onLeads={openLeads}
               />
@@ -1094,7 +1132,9 @@ export function ManagerReports({
                 <h2>Atividades em aberto por usuário</h2>
               </header>
               <HorizontalChart
-                rows={report.open_activities_by_user}
+                rows={report.open_activities_by_user.filter((row) =>
+                  matchesConsultantStatus(row, consultantStatus),
+                )}
                 metric={(row) => row.count}
                 onLeads={openLeads}
               />

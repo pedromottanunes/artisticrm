@@ -342,6 +342,7 @@ export async function initializeMongo(db: MongoStore) {
     'audit_events',
     'message_shortcuts',
     'instagram_comments',
+    'conversation_portfolio_shares',
   ])
     await db.collection(name).createIndex({ id: 1 }, { unique: true });
   await db.collection('users').createIndex({ email: 1 }, { unique: true });
@@ -367,6 +368,7 @@ export async function initializeMongo(db: MongoStore) {
     .createIndex({ contact_id: 1 }, { unique: true, partialFilterExpression: { open: true } });
   await db.collection('opportunities').createIndex({ state: 1, expires_at: 1 });
   await db.collection('opportunities').createIndex({ owner_id: 1, created_at: -1 });
+  await db.collection('opportunities').createIndex({ metrics_owner_id: 1, created_at: -1 });
   await db.collection('opportunities').createIndex({ state: 1, reserved_to: 1 });
   await db.collection('opportunities').createIndex({ created_at: -1 });
   await db.collection('opportunities').createIndex({ stage: 1, created_at: -1 });
@@ -385,6 +387,18 @@ export async function initializeMongo(db: MongoStore) {
     );
   await db.collection('audit_events').createIndex({ opportunity_id: 1, created_at: -1 });
   await db.collection('audit_events').createIndex({ kind: 1, created_at: -1, id: -1 });
+  await db
+    .collection('conversation_portfolio_shares')
+    .createIndex(
+      { source_user_id: 1 },
+      { unique: true, partialFilterExpression: { revoked_at: null } },
+    );
+  await db
+    .collection('conversation_portfolio_shares')
+    .createIndex(
+      { reviewer_user_id: 1, source_user_id: 1 },
+      { partialFilterExpression: { revoked_at: null } },
+    );
   await db.collection('lead_attributions').createIndex({ id: 1 }, { unique: true });
   await db.collection('lead_attributions').createIndex({ external_id: 1 }, { unique: true });
   await db.collection('lead_attributions').createIndex({ opportunity_id: 1, received_at: -1 });

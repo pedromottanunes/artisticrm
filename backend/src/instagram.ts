@@ -12,6 +12,7 @@ import { InstagramComments, commentChangeSchema, type CommentEvent } from './ins
 import { MediaProxy, trustedMediaUrl } from './media-proxy.js';
 import { InstagramProspects, type ProspectRouting } from './instagram-prospects.js';
 import { mutedOpportunityIds, setLeadNotificationMuted } from './lead-notification-mutes.js';
+import { canReviewOwner, reviewSourceIds } from './conversation-sharing.js';
 
 class ProspectProfileRetry extends Error {
   constructor(readonly retryAt: number) {
@@ -1206,12 +1207,23 @@ export class InstagramCentral {
           )
         ).rows[0] ?? null;
     if (!context) throw new DomainError('NOT_FOUND', 'Conversa não encontrada.', 404);
-    if (user.role !== 'manager' && context.owner_id !== user.id)
+    if (
+      user.role !== 'manager' &&
+      context.owner_id !== user.id &&
+      !(
+        context.state !== 'CANCELLED' &&
+        !context.non_commercial_reason &&
+        (await canReviewOwner(db, user, context.owner_id))
+      )
+    )
       throw new DomainError('FORBIDDEN', 'Assuma o lead para acessar esta conversa.', 403);
     return context;
   }
 
-  async list(user: User, view: 'mine' | 'reserved' | 'pool' | 'all' | 'non_commercial' = 'mine') {
+  async list(
+    user: User,
+    view: 'mine' | 'reserved' | 'pool' | 'all' | 'non_commercial' | 'review' = 'mine',
+  ) {
     if (!this.config) return { configured: false, conversations: [] as Record<string, unknown>[] };
     if (view === 'all' && user.role !== 'manager')
       throw new DomainError('FORBIDDEN', 'Visão completa restrita à gestão.', 403);
@@ -1222,6 +1234,9 @@ export class InstagramCentral {
         403,
       );
     const db = this.crm.db;
+    if (view === 'review' && user.role !== 'attendant')
+      throw new DomainError('FORBIDDEN', 'A carteira de revisão é exclusiva dos consultores.', 403);
+    const reviewOwners = view === 'review' ? await reviewSourceIds(db, user.id) : [];
     const archived = view === 'non_commercial';
     if (archived) view = user.role === 'manager' ? 'all' : 'mine';
     const opportunityFilter =
@@ -1233,11 +1248,13 @@ export class InstagramCentral {
             : { state: view === 'reserved' ? 'RESERVED' : 'POOL' }
         : view === 'mine'
           ? { owner_id: user.id }
-          : view === 'reserved'
-            ? { state: 'RESERVED', reserved_to: user.id }
-            : user.active && user.queue_enabled
-              ? { state: 'POOL' }
-              : { id: '__inactive_user_cannot_view_pool__' };
+          : view === 'review'
+            ? { owner_id: { $in: reviewOwners }, state: { $ne: 'CANCELLED' } }
+            : view === 'reserved'
+              ? { state: 'RESERVED', reserved_to: user.id }
+              : user.active && user.queue_enabled
+                ? { state: 'POOL' }
+                : { id: '__inactive_user_cannot_view_pool__' };
     if (db.kind === 'mongo') {
       const account = await db.one('channel_accounts', {
         provider: 'instagram',
@@ -1278,6 +1295,7 @@ export class InstagramCentral {
                       state: '$state',
                       owner_id: '$owner_id',
                       reserved_to: '$reserved_to',
+                      version: '$version',
                     },
                   },
                 },
@@ -1349,6 +1367,7 @@ export class InstagramCentral {
               state: '$opportunity.state',
               owner_id: '$opportunity.owner_id',
               reserved_to: '$opportunity.reserved_to',
+              version: '$opportunity.version',
               last_message_at: 1,
               last_inbound_at: 1,
               private_reply_comment_id: 1,
@@ -1385,11 +1404,13 @@ export class InstagramCentral {
             state: conversation.state,
             owner_id: conversation.owner_id,
             reserved_to: conversation.reserved_to,
+            version: conversation.version,
             last_message_at: conversation.last_message_at,
             non_commercial_reason: conversation.non_commercial_reason ?? null,
             unread: !archived && unread.has(String(conversation.id)),
             notifications_muted: archived || muted.has(String(conversation.opportunity_id)),
             messaging_mode: mode,
+            review_shared: view === 'review',
             can_send:
               conversation.state === 'CLAIMED' &&
               conversation.owner_id === user.id &&
@@ -1409,11 +1430,13 @@ export class InstagramCentral {
               : "o.state='POOL'"
         : view === 'mine'
           ? 'o.owner_id=$2'
-          : view === 'reserved'
-            ? "o.state='RESERVED' AND o.reserved_to=$2"
-            : user.active && user.queue_enabled
-              ? "o.state='POOL'"
-              : 'FALSE';
+          : view === 'review'
+            ? "o.owner_id=ANY($2::uuid[]) AND o.state<>'CANCELLED'"
+            : view === 'reserved'
+              ? "o.state='RESERVED' AND o.reserved_to=$2"
+              : user.active && user.queue_enabled
+                ? "o.state='POOL'"
+                : 'FALSE';
     const rows = (
       await db.query<
         Opportunity & {
@@ -1442,7 +1465,9 @@ export class InstagramCentral {
           WHERE ca.provider='instagram' AND ca.external_account_id=$1
             AND o.non_commercial_reason IS ${archived ? 'NOT NULL' : 'NULL'} AND (${visibility})
           ORDER BY cv.last_message_at DESC,cv.id LIMIT 100`,
-        visibility.includes('$2') ? [this.config.accountId, user.id] : [this.config.accountId],
+        visibility.includes('$2')
+          ? [this.config.accountId, view === 'review' ? reviewOwners : user.id]
+          : [this.config.accountId],
       )
     ).rows;
     const modes = await this.comments.modes(rows);
@@ -1472,11 +1497,13 @@ export class InstagramCentral {
           state: row.state,
           owner_id: row.owner_id,
           reserved_to: row.reserved_to,
+          version: row.version,
           last_message_at: row.conversation_last_message_at,
           non_commercial_reason: row.non_commercial_reason ?? null,
           unread: !archived && unread.has(row.conversation_id),
           notifications_muted: archived || muted.has(row.id),
           messaging_mode: mode,
+          review_shared: view === 'review',
           can_send:
             row.state === 'CLAIMED' &&
             row.owner_id === user.id &&

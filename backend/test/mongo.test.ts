@@ -35,6 +35,7 @@ import { checkAgenda } from './agenda-checks.js';
 import { checkLeadLists } from './lead-list-checks.js';
 import { checkPersistentSessions } from './session-checks.js';
 import { checkCommercialDrafts, checkCommercialMigration } from './commercial-checks.js';
+import { reportsOverview } from '../src/reports.js';
 
 test('Mongo: ficha completa, venda separada, permissões e persistência após reinício', () =>
   checkCommercialDrafts(db, manager, users));
@@ -525,6 +526,125 @@ test('Mongo: desativação exige substituta, transfere em transação e revoga a
     code: 'UNAUTHENTICATED',
   });
   await assert.rejects(ops.snapshot(users[0]), { code: 'UNAUTHENTICATED' });
+});
+test('Mongo: carteira compartilhada preserva histórico e métricas ao assumir', async () => {
+  const first = await lead(71);
+  await ops.claim(users[0], first.id, 'reservation', 1, key());
+  const second = await lead(72);
+  await ops.transfer(
+    manager,
+    second.id,
+    {
+      expected_version: 1,
+      target_id: users[0].id,
+      reason: 'Preparar carteira histórica para revisão',
+    },
+    key(),
+  );
+  assert.equal((await row(first.id)).metrics_owner_id ?? null, null);
+  assert.equal((await row(second.id)).metrics_owner_id ?? null, null);
+  const accountId = randomUUID();
+  await db.insert('channel_accounts', {
+    id: accountId,
+    provider: 'messenger',
+    external_account_id: 'page-review',
+    status: 'active',
+    graph_api_version: 'v26.0',
+  });
+  const conversationIds = new Map<string, string>();
+  for (const opportunityId of [first.id, second.id]) {
+    const opportunity = await row(opportunityId);
+    const conversationId = randomUUID();
+    conversationIds.set(opportunityId, conversationId);
+    await db.insert('contact_identities', {
+      id: randomUUID(),
+      contact_id: opportunity.contact_id,
+      provider: 'messenger',
+      channel_account_id: 'page-review',
+      external_user_id: `psid-${opportunityId}`,
+      last_seen_at: now,
+    });
+    await db.insert('conversations', {
+      id: conversationId,
+      channel_account_id: accountId,
+      contact_id: opportunity.contact_id,
+      opportunity_id: opportunityId,
+      last_message_at: now,
+      created_at: now,
+      updated_at: now,
+    });
+  }
+  const granted = await ops.shareConversationPortfolio(
+    manager,
+    { source_user_id: users[0].id, reviewer_user_id: users[1].id },
+    key(),
+  );
+  await ops.updateAttendant(
+    manager,
+    users[0].id,
+    {
+      expected_version: 1,
+      name: users[0].name,
+      active: false,
+      reason: 'Consultor deixou a equipe',
+    },
+    key(),
+  );
+  const messenger = new MessengerCentral(ops, {
+    appSecret: 'messenger-review-test-secret',
+    verifyToken: 'messenger-review-test-verify-token-32-chars',
+    pageId: 'page-review',
+    pageAccessToken: 'EAA-review-token-never-used',
+    graphApiVersion: 'v26.0',
+  });
+  const reviewBefore = await messenger.list(users[1], 'review');
+  assert.equal(reviewBefore.conversations.length, 2);
+  assert.ok(reviewBefore.conversations.every((conversation) => !conversation.can_send));
+  assert.equal(
+    (await messenger.messages(users[1], conversationIds.get(first.id)!)).opportunity_id,
+    first.id,
+  );
+  await ops.assumeSharedConversation(users[1], first.id, 2, key());
+  const assumed = await row(first.id);
+  assert.equal(assumed.owner_id, users[1].id);
+  assert.equal(assumed.metrics_owner_id, users[0].id);
+  await db.update('opportunities', { id: first.id }, { $set: { stage: 'CLOSED_WITHOUT_DATE' } });
+  await db.insert('audit_events', {
+    id: randomUUID(),
+    opportunity_id: first.id,
+    actor_id: users[1].id,
+    kind: 'opportunity.updated',
+    description: 'Negócio fechado após a assunção',
+    details: { previous_stage: 'NEW_LEAD', next_stage: 'CLOSED_WITHOUT_DATE' },
+    created_at: now,
+  });
+  const report = await reportsOverview(
+    db,
+    manager,
+    { from: '2026-09-10', to: '2026-09-10' },
+    async () => now,
+  );
+  assert.deepEqual(
+    report.closed_by_user.map(({ user_id, active, count }) => ({ user_id, active, count })),
+    [{ user_id: users[0].id, active: false, count: 1 }],
+  );
+  assert.equal(await db.count('conversations', { opportunity_id: first.id }), 1);
+  await ops.revokeConversationPortfolio(manager, users[0].id, granted.version, key());
+  assert.equal((await messenger.list(users[1], 'review')).conversations.length, 0);
+  assert.equal((await messenger.list(users[1], 'mine')).conversations.length, 1);
+  await assert.rejects(ops.assumeSharedConversation(users[1], second.id, 2, key()), {
+    code: 'FORBIDDEN',
+  });
+  assert.equal((await row(second.id)).owner_id, users[0].id);
+  await assert.rejects(
+    ops.deleteAttendant(
+      manager,
+      users[0].id,
+      { expected_version: 2, confirmation: 'EXCLUIR' },
+      key(),
+    ),
+    { code: 'USER_HAS_LEADS' },
+  );
 });
 test('Mongo: atualização e agendamento concorrentes respeitam versões e avaliação única', async () => {
   const { id } = await lead();

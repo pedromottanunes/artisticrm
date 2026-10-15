@@ -52,6 +52,7 @@ export interface Opportunity {
   state: string;
   reserved_to: string | null;
   owner_id: string | null;
+  metrics_owner_id?: string | null;
   created_at: string | Date;
   expires_at: string | Date | null;
   claimed_at: string | Date | null;

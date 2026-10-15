@@ -450,6 +450,7 @@ export function InstagramInbox({
   onSessionExpired: () => void;
 }) {
   const [archive, setArchive] = useState(targetArchived);
+  const [review, setReview] = useState(false);
   const [configured, setConfigured] = useState(true);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [selectedId, setSelectedId] = useState('');
@@ -458,12 +459,14 @@ export function InstagramInbox({
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [notificationSaving, setNotificationSaving] = useState(false);
+  const [assuming, setAssuming] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const draft = drafts[selectedId] ?? '';
   const [shortcutPickerOpen, setShortcutPickerOpen] = useState(false);
   const [shortcutsLoading, setShortcutsLoading] = useState(false);
   const [shortcuts, setShortcuts] = useState<MessageShortcut[]>([]);
   const pendingSends = useRef(new Map<string, string>());
+  const assumeReceipt = useRef<{ opportunityId: string; key: string } | null>(null);
   const sendingRef = useRef(false);
   const notificationSavingRef = useRef(false);
   const mounted = useRef(true);
@@ -705,7 +708,13 @@ export function InstagramInbox({
       const request = signalWithTimeout(controller.signal, 20_000);
       const sequence = ++listSequence.current;
       try {
-        const view = archive ? 'non_commercial' : user.role === 'manager' ? 'all' : 'mine';
+        const view = review
+          ? 'review'
+          : archive
+            ? 'non_commercial'
+            : user.role === 'manager'
+              ? 'all'
+              : 'mine';
         const revision = listCache.current?.revision;
         const response = await api<ListResponse | { unchanged: true; revision: string }>(
           `/conversations?view=${view}${revision ? `&revision=${revision}` : ''}`,
@@ -806,6 +815,7 @@ export function InstagramInbox({
     },
     [
       archive,
+      review,
       handleError,
       loadThread,
       onConnectionChange,
@@ -827,6 +837,7 @@ export function InstagramInbox({
     if (!targetOpportunityId) return;
     listCache.current = null;
     setArchive(targetArchived);
+    setReview(false);
   }, [targetArchived, targetOpportunityId]);
 
   useEffect(() => {
@@ -984,6 +995,36 @@ export function InstagramInbox({
     user.role === 'attendant' &&
     selectedConversation?.owner_id === user.id &&
     !selectedConversation?.non_commercial_reason;
+  const assumeConversation = async () => {
+    if (!selectedConversation?.review_shared || assuming || !connected) return;
+    setAssuming(true);
+    const opportunityId = selectedConversation.opportunity_id;
+    if (assumeReceipt.current?.opportunityId !== opportunityId)
+      assumeReceipt.current = { opportunityId, key: crypto.randomUUID() };
+    try {
+      await api(`/opportunities/${opportunityId}/assume-shared-conversation`, {
+        method: 'POST',
+        body: JSON.stringify({ expected_version: selectedConversation.version }),
+        headers: { 'Idempotency-Key': assumeReceipt.current.key },
+      });
+      assumeReceipt.current = null;
+      listCache.current = null;
+      loadedThreadVersion.current.clear();
+      selectedIdRef.current = '';
+      threadRef.current = null;
+      setSelectedId('');
+      setThread(null);
+      setConversations([]);
+      setReview(false);
+      setArchive(false);
+      onNotice('Conversa assumida. Ela agora está em seus atendimentos.');
+    } catch (error) {
+      if (error instanceof ApiError && error.status < 500) assumeReceipt.current = null;
+      handleError(error);
+    } finally {
+      if (mounted.current) setAssuming(false);
+    }
+  };
   const toggleNotifications = async () => {
     const conversation = conversations.find((item) => item.id === selectedIdRef.current);
     if (
@@ -1078,10 +1119,11 @@ export function InstagramInbox({
         <div className="quality-tabs" role="group" aria-label="Tipo de atendimento">
           <button
             type="button"
-            aria-pressed={!archive}
+            aria-pressed={!archive && !review}
             onClick={() => {
               listCache.current = null;
               setArchive(false);
+              setReview(false);
             }}
           >
             Ativos
@@ -1092,10 +1134,24 @@ export function InstagramInbox({
             onClick={() => {
               listCache.current = null;
               setArchive(true);
+              setReview(false);
             }}
           >
             Não comerciais
           </button>
+          {user.role === 'attendant' && (
+            <button
+              type="button"
+              aria-pressed={review}
+              onClick={() => {
+                listCache.current = null;
+                setArchive(false);
+                setReview(true);
+              }}
+            >
+              Para revisar
+            </button>
+          )}
         </div>
         <div className="inbox-conversations">
           {conversations.map((conversation) => (
@@ -1136,7 +1192,9 @@ export function InstagramInbox({
               <span>
                 {user.role === 'manager'
                   ? 'As novas mensagens do Instagram e Messenger aparecerão aqui.'
-                  : 'Depois de assumir um lead, a conversa aparecerá aqui.'}
+                  : review
+                    ? 'A gestão ainda não compartilhou uma carteira com você.'
+                    : 'Depois de assumir um lead, a conversa aparecerá aqui.'}
               </span>
             </div>
           )}
@@ -1167,6 +1225,16 @@ export function InstagramInbox({
                 </div>
               </div>
               <div className="thread-actions">
+                {selectedConversation?.review_shared && (
+                  <button
+                    type="button"
+                    className="button gold compact"
+                    disabled={!connected || assuming}
+                    onClick={() => void assumeConversation()}
+                  >
+                    {assuming ? 'Assumindo…' : 'Assumir conversa'}
+                  </button>
+                )}
                 {selectedConversation?.state === 'CLAIMED' &&
                   (user.role === 'manager' || selectedConversation.owner_id === user.id) && (
                     <LeadQualityControl
@@ -1203,13 +1271,15 @@ export function InstagramInbox({
                     </span>
                   </button>
                 )}
-                <button
-                  className="button outline compact thread-lead-button"
-                  aria-label="Abrir ficha do lead"
-                  onClick={() => onOpenLead(thread.opportunity_id)}
-                >
-                  <span>Abrir ficha</span> <ArrowRight size={15} />
-                </button>
+                {!selectedConversation?.review_shared && (
+                  <button
+                    className="button outline compact thread-lead-button"
+                    aria-label="Abrir ficha do lead"
+                    onClick={() => onOpenLead(thread.opportunity_id)}
+                  >
+                    <span>Abrir ficha</span> <ArrowRight size={15} />
+                  </button>
+                )}
               </div>
             </header>
             {selectedConversation?.non_commercial_reason && (
@@ -1332,13 +1402,15 @@ export function InstagramInbox({
                 <AlertTriangle size={18} />
                 {user.role === 'manager'
                   ? 'A gestão pode acompanhar o histórico. A resposta pertence à atendente responsável.'
-                  : thread.messaging_mode === 'waiting_reply'
-                    ? `Aguardando o lead responder no ${selectedConversation?.channel === 'messenger' ? 'Messenger' : 'Instagram'}.`
-                    : thread.messaging_mode === 'send_unconfirmed'
-                      ? `Envio não confirmado. Confira a conversa no ${selectedConversation?.channel === 'messenger' ? 'Messenger' : 'Instagram'} antes de uma nova abordagem.`
-                      : thread.messaging_mode === 'expired'
-                        ? 'Prazo de envio encerrado. Aguarde uma nova mensagem do lead.'
-                        : 'Assuma o lead antes de responder pelo CRM.'}
+                  : selectedConversation?.review_shared
+                    ? 'Esta conversa está disponível somente para leitura. Assuma para movê-la aos seus atendimentos e poder responder.'
+                    : thread.messaging_mode === 'waiting_reply'
+                      ? `Aguardando o lead responder no ${selectedConversation?.channel === 'messenger' ? 'Messenger' : 'Instagram'}.`
+                      : thread.messaging_mode === 'send_unconfirmed'
+                        ? `Envio não confirmado. Confira a conversa no ${selectedConversation?.channel === 'messenger' ? 'Messenger' : 'Instagram'} antes de uma nova abordagem.`
+                        : thread.messaging_mode === 'expired'
+                          ? 'Prazo de envio encerrado. Aguarde uma nova mensagem do lead.'
+                          : 'Assuma o lead antes de responder pelo CRM.'}
               </div>
             )}
           </>

@@ -36,6 +36,7 @@ interface ReportOpportunity {
   state: string;
   reserved_to: string | null;
   owner_id: string | null;
+  metrics_owner_id: string | null;
   created_at: string | Date;
   claimed_at: string | Date | null;
   next_action: string;
@@ -145,7 +146,7 @@ async function sqlData(db: Database, start: Date, end: Date): Promise<ReportData
         "SELECT id,name,active,role FROM users WHERE role='attendant' ORDER BY queue_position NULLS LAST,name",
       )
     ).rows;
-    const opportunitySql = `SELECT o.non_commercial_reason,o.id,c.name,o.source,o.stage,o.state,o.reserved_to,o.owner_id,
+    const opportunitySql = `SELECT o.non_commercial_reason,o.id,c.name,o.source,o.stage,o.state,o.reserved_to,o.owner_id,o.metrics_owner_id,
       o.created_at,o.claimed_at,o.next_action FROM opportunities o
       JOIN contacts c ON c.id=o.contact_id`;
     const periodOpportunities = (
@@ -224,6 +225,7 @@ async function mongoOpportunities(tx: MongoTx, filter: Document) {
             state: 1,
             reserved_to: 1,
             owner_id: 1,
+            metrics_owner_id: 1,
             created_at: 1,
             claimed_at: 1,
             next_action: 1,
@@ -299,6 +301,7 @@ function userRanking(map: Map<string, Bucket>, users: Map<string, ReportUser>, a
     .map(([user_id, value]) => ({
       user_id,
       name: users.get(user_id)?.name ?? 'Usuário removido',
+      active: users.get(user_id)?.active ?? false,
       count: value.count,
       lead_ids: [...value.lead_ids],
       ...(average
@@ -426,7 +429,7 @@ function buildReport(data: ReportData, from: string, to: string) {
     )
       continue;
     const row = opportunities.get(event.opportunity_id);
-    const userId = row?.owner_id ?? event.actor_id;
+    const userId = row?.metrics_owner_id ?? row?.owner_id ?? event.actor_id;
     if (!userId) continue;
     const value = bucket(won, userId);
     value.count++;
@@ -434,8 +437,9 @@ function buildReport(data: ReportData, from: string, to: string) {
   }
   const activities = new Map<string, Bucket>();
   for (const row of data.periodOpportunities) {
-    if (!row.owner_id || row.state === 'CANCELLED' || !row.next_action.trim()) continue;
-    const value = bucket(activities, row.owner_id);
+    const metricsOwner = row.metrics_owner_id ?? row.owner_id;
+    if (!metricsOwner || row.state === 'CANCELLED' || !row.next_action.trim()) continue;
+    const value = bucket(activities, metricsOwner);
     value.count++;
     value.lead_ids.add(row.id);
   }

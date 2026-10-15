@@ -1,6 +1,14 @@
-import { useRef, useState, type FormEvent } from 'react';
-import { KeyRound, Plus, ShieldCheck, Users, Save } from 'lucide-react';
-import { api, ApiError, type Snapshot, type User, type Detail, type Appointment } from './api';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { Eye, KeyRound, Plus, ShieldCheck, Users, Save, X } from 'lucide-react';
+import {
+  api,
+  ApiError,
+  type Snapshot,
+  type User,
+  type Detail,
+  type Appointment,
+  type ConversationPortfolioShare,
+} from './api';
 import { Modal, dateLabel } from './components';
 
 // Keep the same command key after an ambiguous network failure. Do not let changed
@@ -337,8 +345,9 @@ export function Team({
                         ))}
                     </select>
                     <small>
-                      Reservas e atendimentos abertos serão atribuídos à substituta. Histórico
-                      permanece preservado. Reativação não devolve leads.
+                      Se escolher uma substituta, os atendimentos serão transferidos. Sem
+                      substituta, compartilhe antes a carteira de conversas; as reservas pendentes
+                      voltam ao bolsão.
                     </small>
                   </label>
                   <label className="full">
@@ -364,6 +373,169 @@ export function Team({
             </div>
           </form>
         </Modal>
+      )}
+    </section>
+  );
+}
+
+export function ConversationPortfolioSharing({
+  data,
+  connected,
+}: {
+  data: Snapshot;
+  connected: boolean;
+}) {
+  const attendants = data.users.filter((user) => user.role === 'attendant');
+  const attendantVersion = attendants.map((user) => `${user.id}:${user.version}`).join('|');
+  const [shares, setShares] = useState<ConversationPortfolioShare[]>([]);
+  const [sourceId, setSourceId] = useState('');
+  const [reviewerId, setReviewerId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const command = useCommand();
+  const load = async () => {
+    setLoading(true);
+    try {
+      const result = await api<{ shares: ConversationPortfolioShare[] }>(
+        '/conversation-portfolio-shares',
+      );
+      setShares(result.shares);
+      setError('');
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    void load();
+  }, [attendantVersion]);
+  const share = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!sourceId || !reviewerId || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await command('/conversation-portfolio-shares', 'POST', {
+        source_user_id: sourceId,
+        reviewer_user_id: reviewerId,
+      });
+      setSourceId('');
+      setReviewerId('');
+      await load();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const revoke = async (item: ConversationPortfolioShare) => {
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await command(`/conversation-portfolio-shares/${item.source_user_id}`, 'DELETE', {
+        expected_version: item.version,
+      });
+      await load();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="panel portfolio-sharing-panel">
+      <div className="panel-heading">
+        <div>
+          <h2>Compartilhar carteira de conversas</h2>
+          <p>Dê acesso temporário para outro consultor revisar e assumir conversas.</p>
+        </div>
+        <Eye size={22} />
+      </div>
+      <form className="portfolio-share-form" onSubmit={share}>
+        <label>
+          <span>1. Carteira que será revisada</span>
+          <select
+            value={sourceId}
+            onChange={(event) => {
+              const next = event.target.value;
+              setSourceId(next);
+              if (reviewerId === next) setReviewerId('');
+            }}
+            required
+          >
+            <option value="">Selecione o consultor de origem</option>
+            {attendants.map((user) => (
+              <option key={user.id} value={user.id}>
+                {user.name} {user.active ? '' : '— acesso desativado'}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>2. Quem poderá revisar</span>
+          <select
+            value={reviewerId}
+            onChange={(event) => setReviewerId(event.target.value)}
+            required
+          >
+            <option value="">Selecione um consultor ativo</option>
+            {attendants
+              .filter((user) => user.active && user.id !== sourceId)
+              .map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.name}
+                </option>
+              ))}
+          </select>
+        </label>
+        <button className="button gold" disabled={!connected || busy || !sourceId || !reviewerId}>
+          <Eye size={16} />
+          {busy ? 'Salvando…' : 'Liberar acesso'}
+        </button>
+      </form>
+      <div className="inline-info portfolio-rule">
+        <ShieldCheck size={20} />
+        <span>
+          O histórico fica somente para leitura até a conversa ser assumida. As métricas continuam
+          vinculadas ao consultor de origem.
+        </span>
+      </div>
+      <div className="portfolio-share-list">
+        <h3>Acessos liberados</h3>
+        {loading && <p className="help-text">Carregando acessos…</p>}
+        {!loading && !shares.length && (
+          <p className="help-text">Nenhuma carteira está compartilhada no momento.</p>
+        )}
+        {shares.map((item) => (
+          <article key={item.id}>
+            <div>
+              <strong>{item.source_name}</strong>
+              <span aria-hidden="true">→</span>
+              <strong>{item.reviewer_name}</strong>
+            </div>
+            <small>
+              {item.conversation_count} conversa{item.conversation_count === 1 ? '' : 's'} para
+              revisão
+            </small>
+            <button
+              type="button"
+              className="button outline compact"
+              disabled={!connected || busy}
+              onClick={() => void revoke(item)}
+            >
+              <X size={15} />
+              Remover acesso
+            </button>
+          </article>
+        ))}
+      </div>
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
       )}
     </section>
   );

@@ -31,6 +31,196 @@ export interface DeleteAttendantInput {
   confirmation: 'EXCLUIR';
 }
 export class Operations extends CRM {
+  async shareConversationPortfolio(
+    actor: User,
+    input: { source_user_id: string; reviewer_user_id: string },
+    key: string,
+  ) {
+    requireManager(actor);
+    if (input.source_user_id === input.reviewer_user_id)
+      throw new DomainError(
+        'INVALID_REVIEWER',
+        'Escolha consultores diferentes para origem e acesso.',
+        400,
+      );
+    return this.db.transaction(async (tx) => {
+      await tx.query('SELECT id FROM distribution_settings WHERE id=1 FOR UPDATE');
+      const currentActor = await lockActor(tx, actor, true);
+      return this.command(
+        tx,
+        currentActor,
+        key,
+        { kind: 'conversation-portfolio.share', ...input },
+        async () => {
+          const users = (
+            await tx.query<User>(
+              'SELECT * FROM users WHERE id=ANY($1::uuid[]) ORDER BY id FOR UPDATE',
+              [[input.source_user_id, input.reviewer_user_id]],
+            )
+          ).rows;
+          const source = users.find((user) => user.id === input.source_user_id);
+          const reviewer = users.find((user) => user.id === input.reviewer_user_id);
+          if (!source || source.role !== 'attendant')
+            throw new DomainError('INVALID_SOURCE', 'Selecione um consultor de origem.', 400);
+          if (!reviewer?.active || reviewer.role !== 'attendant')
+            throw new DomainError('INVALID_REVIEWER', 'Selecione um consultor ativo.', 400);
+          const existing = (
+            await tx.query<{
+              id: string;
+              reviewer_user_id: string;
+              version: number;
+            }>(
+              `SELECT id,reviewer_user_id,version FROM conversation_portfolio_shares
+               WHERE source_user_id=$1 AND revoked_at IS NULL FOR UPDATE`,
+              [source.id],
+            )
+          ).rows[0];
+          if (existing?.reviewer_user_id === reviewer.id)
+            return { id: existing.id, version: existing.version };
+          const now = await this.now(tx);
+          if (existing)
+            await tx.query(
+              `UPDATE conversation_portfolio_shares
+               SET revoked_by=$2,revoked_at=$3,version=version+1 WHERE id=$1`,
+              [existing.id, currentActor.id, now],
+            );
+          const id = randomUUID();
+          await tx.query(
+            `INSERT INTO conversation_portfolio_shares(
+               id,source_user_id,reviewer_user_id,granted_by,granted_at,revoked_by,revoked_at,version
+             ) VALUES($1,$2,$3,$4,$5,NULL,NULL,1)`,
+            [id, source.id, reviewer.id, currentActor.id, now],
+          );
+          await this.audit(
+            tx,
+            null,
+            currentActor.id,
+            'conversation_portfolio.shared',
+            `Carteira de conversas de ${source.name} compartilhada com ${reviewer.name}.`,
+            {
+              source_user_id: source.id,
+              reviewer_user_id: reviewer.id,
+              previous_reviewer_user_id: existing?.reviewer_user_id ?? null,
+            },
+          );
+          return { id, version: 1 };
+        },
+      );
+    });
+  }
+
+  async revokeConversationPortfolio(
+    actor: User,
+    sourceUserId: string,
+    expectedVersion: number,
+    key: string,
+  ) {
+    requireManager(actor);
+    return this.db.transaction(async (tx) => {
+      await tx.query('SELECT id FROM distribution_settings WHERE id=1 FOR UPDATE');
+      const currentActor = await lockActor(tx, actor, true);
+      return this.command(
+        tx,
+        currentActor,
+        key,
+        { kind: 'conversation-portfolio.revoke', sourceUserId, expectedVersion },
+        async () => {
+          const share = (
+            await tx.query<{
+              id: string;
+              reviewer_user_id: string;
+              version: number;
+            }>(
+              `SELECT id,reviewer_user_id,version FROM conversation_portfolio_shares
+               WHERE source_user_id=$1 AND revoked_at IS NULL FOR UPDATE`,
+              [sourceUserId],
+            )
+          ).rows[0];
+          if (!share) throw new DomainError('NOT_FOUND', 'Compartilhamento não encontrado.', 404);
+          if (share.version !== expectedVersion)
+            throw new DomainError('VERSION_CONFLICT', 'O compartilhamento mudou. Atualize a tela.');
+          const now = await this.now(tx);
+          await tx.query(
+            `UPDATE conversation_portfolio_shares
+             SET revoked_by=$2,revoked_at=$3,version=version+1 WHERE id=$1`,
+            [share.id, currentActor.id, now],
+          );
+          await this.audit(
+            tx,
+            null,
+            currentActor.id,
+            'conversation_portfolio.revoked',
+            'Acesso à carteira de conversas removido pela gestão.',
+            { source_user_id: sourceUserId, reviewer_user_id: share.reviewer_user_id },
+          );
+          return { revoked: true };
+        },
+      );
+    });
+  }
+
+  async assumeSharedConversation(actor: User, id: string, expectedVersion: number, key: string) {
+    if (actor.role !== 'attendant')
+      throw new DomainError('FORBIDDEN', 'Somente consultores podem assumir conversas.', 403);
+    return this.db.transaction(async (tx) => {
+      await tx.query('SELECT id FROM distribution_settings WHERE id=1 FOR UPDATE');
+      const currentActor = await lockActor(tx, actor);
+      return this.command(
+        tx,
+        currentActor,
+        key,
+        { kind: 'conversation-portfolio.assume', id, expectedVersion },
+        async () => {
+          const row = (
+            await tx.query<Opportunity>('SELECT * FROM opportunities WHERE id=$1 FOR UPDATE', [id])
+          ).rows[0];
+          if (!row || row.state === 'CANCELLED' || row.non_commercial_reason)
+            throw new DomainError('NOT_FOUND', 'Conversa não disponível para revisão.', 404);
+          if (row.version !== expectedVersion)
+            throw new DomainError('VERSION_CONFLICT', 'A conversa mudou. Atualize a carteira.');
+          if (!row.owner_id || row.owner_id === currentActor.id)
+            throw new DomainError('NOT_AVAILABLE', 'Esta conversa não está mais compartilhada.');
+          const granted = await tx.query(
+            `SELECT id FROM conversation_portfolio_shares
+             WHERE source_user_id=$1 AND reviewer_user_id=$2 AND revoked_at IS NULL FOR UPDATE`,
+            [row.owner_id, currentActor.id],
+          );
+          if (!granted.rows.length)
+            throw new DomainError('FORBIDDEN', 'O acesso a esta carteira foi removido.', 403);
+          const conversation = await tx.query(
+            'SELECT id FROM conversations WHERE opportunity_id=$1 LIMIT 1 FOR UPDATE',
+            [id],
+          );
+          if (!conversation.rows.length)
+            throw new DomainError('NOT_FOUND', 'Esta oportunidade não possui conversa.', 404);
+          const previousOwner = row.owner_id;
+          await transferProspects(tx, row.id, currentActor.id, await this.now(tx));
+          await tx.query(
+            `UPDATE opportunities SET state='CLAIMED',owner_id=$2,reserved_to=NULL,expires_at=NULL,
+             claimed_at=NULL,claim_mode='portfolio_share',accepted_by=NULL,reservation_origin=NULL,
+             needs_review=false,metrics_owner_id=COALESCE(metrics_owner_id,$3),version=version+1
+             WHERE id=$1`,
+            [row.id, currentActor.id, previousOwner],
+          );
+          await this.audit(
+            tx,
+            row.id,
+            currentActor.id,
+            'opportunity.transferred',
+            `Conversa assumida por ${currentActor.name} a partir da carteira compartilhada.`,
+            {
+              previous_owner: previousOwner,
+              new_owner: currentActor.id,
+              metrics_owner_id: row.metrics_owner_id ?? previousOwner,
+              transfer_mode: 'portfolio_share',
+            },
+          );
+          return { id: row.id, version: row.version + 1 };
+        },
+      );
+    });
+  }
+
   async deleteLead(actor: User, id: string, input: DeleteLeadInput, key: string) {
     return this.db.transaction(async (tx) => {
       await tx.query('SELECT id FROM distribution_settings WHERE id=1 FOR UPDATE');
@@ -146,28 +336,80 @@ export class Operations extends CRM {
             )
           ).rows;
           const replacement = locked.find((u) => u.id === input.replacement_id);
-          if (
-            owned.length &&
-            (!replacement?.active || replacement.role !== 'attendant' || replacement.id === id)
-          )
-            throw new DomainError(
-              'REPLACEMENT_REQUIRED',
-              'Selecione outra atendente ativa para receber os atendimentos e reservas atuais.',
+          if (input.replacement_id) {
+            if (!replacement?.active || replacement.role !== 'attendant' || replacement.id === id)
+              throw new DomainError(
+                'INVALID_REPLACEMENT',
+                'Selecione outra atendente ativa para receber os atendimentos e reservas atuais.',
+              );
+            for (const row of owned)
+              await this.assign(
+                tx,
+                row,
+                replacement,
+                actor,
+                `Desativação de conta: ${input.reason}`,
+              );
+          } else {
+            const sourceOwned = owned.filter((row) => row.owner_id === id);
+            if (owned.length) {
+              const share = await tx.query(
+                `SELECT id FROM conversation_portfolio_shares
+                 WHERE source_user_id=$1 AND revoked_at IS NULL FOR UPDATE`,
+                [id],
+              );
+              if (!share.rows.length)
+                throw new DomainError(
+                  'REPLACEMENT_REQUIRED',
+                  'Compartilhe a carteira de conversas antes de desativar esta atendente ou selecione uma substituta para transferir tudo.',
+                  409,
+                );
+            }
+            if (sourceOwned.length) {
+              const withoutConversation = await tx.query(
+                `SELECT o.id FROM opportunities o
+                 WHERE o.owner_id=$1 AND o.state<>'CANCELLED'
+                   AND NOT EXISTS (SELECT 1 FROM conversations c WHERE c.opportunity_id=o.id)
+                 LIMIT 1`,
+                [id],
+              );
+              if (withoutConversation.rows.length)
+                throw new DomainError(
+                  'TRANSFER_REQUIRED',
+                  'Existem leads sem conversa nessa carteira. Transfira esses leads antes de desativar a atendente.',
+                  409,
+                );
+            }
+            const reservations = owned.filter(
+              (row) => row.state === 'RESERVED' && row.reserved_to === id && row.owner_id !== id,
             );
-          for (const row of owned) {
-            await this.assign(
-              tx,
-              row,
-              replacement!,
-              actor,
-              `Desativação de conta: ${input.reason}`,
-            );
+            for (const row of reservations) {
+              await tx.query(
+                `UPDATE opportunities SET state='POOL',reserved_to=NULL,expires_at=NULL,
+                 reservation_origin=NULL,version=version+1 WHERE id=$1`,
+                [row.id],
+              );
+              await this.audit(
+                tx,
+                row.id,
+                actor.id,
+                'reservation.released',
+                'Reserva liberada no bolsão durante a desativação da conta.',
+                { reserved_to: id },
+              );
+            }
           }
           await tx.query(
             "UPDATE lead_compensations SET status='revoked' WHERE user_id=$1 AND status='pending'",
             [id],
           );
           await tx.query('DELETE FROM sessions WHERE user_id=$1', [id]);
+          await tx.query(
+            `UPDATE conversation_portfolio_shares
+             SET revoked_by=$2,revoked_at=clock_timestamp(),version=version+1
+             WHERE reviewer_user_id=$1 AND revoked_at IS NULL`,
+            [id, actor.id],
+          );
         }
         await tx.query(
           `UPDATE users SET name=$2,active=$3,queue_enabled=CASE WHEN NOT $3 THEN false ELSE queue_enabled END,
@@ -219,13 +461,25 @@ export class Operations extends CRM {
             400,
           );
         const linked = await tx.query(
-          'SELECT id FROM opportunities WHERE owner_id=$1 OR reserved_to=$1 LIMIT 1 FOR UPDATE',
+          `SELECT id FROM opportunities
+           WHERE owner_id=$1 OR reserved_to=$1 OR metrics_owner_id=$1 LIMIT 1 FOR UPDATE`,
           [id],
         );
         if (linked.rows.length)
           throw new DomainError(
             'USER_HAS_LEADS',
-            'Exclua ou transfira todos os leads vinculados antes de apagar a atendente.',
+            'Esta conta possui histórico de leads e métricas. Mantenha-a desativada para preservar os relatórios.',
+            409,
+          );
+        const shared = await tx.query(
+          `SELECT id FROM conversation_portfolio_shares
+           WHERE source_user_id=$1 OR reviewer_user_id=$1 LIMIT 1 FOR UPDATE`,
+          [id],
+        );
+        if (shared.rows.length)
+          throw new DomainError(
+            'USER_HAS_PORTFOLIO_HISTORY',
+            'Esta conta possui histórico de compartilhamento de carteiras. Mantenha-a desativada.',
             409,
           );
         await this.audit(

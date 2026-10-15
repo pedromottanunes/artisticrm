@@ -35,6 +35,53 @@
   margin-top: 6px;
   overflow-wrap: anywhere;
 }
+.portfolio-share-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto;
+  gap: 14px;
+  align-items: end;
+  padding: 20px;
+}
+.portfolio-sharing-panel {
+  grid-column: 1 / -1;
+}
+.portfolio-share-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+.portfolio-share-form select {
+  width: 100%;
+}
+.portfolio-rule {
+  margin: 0 20px 20px;
+}
+.portfolio-share-list {
+  border-top: 1px solid var(--line);
+  padding: 18px 20px 20px;
+}
+.portfolio-share-list h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+.portfolio-share-list article {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, auto) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.portfolio-share-list article > div {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.portfolio-share-list small {
+  color: var(--muted);
+}
 .checkbox-label {
   flex-direction: row;
   align-items: center;
@@ -136,8 +183,16 @@
   .settings-extension {
     grid-template-columns: 1fr;
   }
+  .portfolio-share-form,
+  .portfolio-share-list article {
+    grid-template-columns: 1fr;
+  }
 }
 @media (max-width: 500px) {
+  .portfolio-share-form,
+  .portfolio-share-list article {
+    grid-template-columns: 1fr;
+  }
   .team-list {
     padding: 0 16px 18px;
   }

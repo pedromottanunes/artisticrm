@@ -129,11 +129,25 @@ export interface ConversationSummary {
   state: string;
   owner_id: string | null;
   reserved_to: string | null;
+  version: number;
   last_message_at: string;
   unread: boolean;
   notifications_muted: boolean;
   can_send: boolean;
+  review_shared?: boolean;
   messaging_mode?: 'direct' | 'private_reply' | 'waiting_reply' | 'expired' | 'send_unconfirmed';
+}
+export interface ConversationPortfolioShare {
+  id: string;
+  source_user_id: string;
+  source_name: string;
+  source_active: boolean;
+  reviewer_user_id: string;
+  reviewer_name: string;
+  granted_by: string;
+  granted_at: string;
+  version: number;
+  conversation_count: number;
 }
 export interface ConversationMessage {
   id: string;

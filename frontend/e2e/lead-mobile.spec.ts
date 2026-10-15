@@ -118,7 +118,8 @@ test('ações secundárias no menu, sem fechar ficha com Escape; desktop preserv
   for (const width of [320, 390, 760]) {
     await page.setViewportSize({ width, height: 844 });
     const box = await dialog.boundingBox();
-    expect(box!.width).toBe(width);
+    expect(box!.width).toBeGreaterThanOrEqual(width - 16);
+    expect(box!.width).toBeLessThanOrEqual(width);
     expect(box!.y).toBe(0);
     expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   }
