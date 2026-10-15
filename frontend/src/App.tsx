@@ -407,7 +407,7 @@ export function App() {
     }
   };
   const openChannel = async (lead: Lead) => {
-    if (lead.channel === 'instagram') {
+    if (lead.channel === 'instagram' || lead.channel === 'messenger') {
       detailSeq.current++;
       setDetail(null);
       setInboxTargetId(lead.id);
@@ -434,7 +434,7 @@ export function App() {
       });
       claims.current.delete(lead.id);
       setNotice(
-        lead.channel === 'instagram'
+        lead.channel === 'instagram' || lead.channel === 'messenger'
           ? 'Lead assumido. A conversa está disponível na caixa de entrada do CRM.'
           : 'Lead assumido. A conversa acontece no seu WhatsApp.',
       );
@@ -570,7 +570,9 @@ export function App() {
           onClick={() => void openChannel(lead)}
         >
           <MessageCircle size={14} />
-          {lead.channel === 'instagram' ? 'Conversa' : 'WhatsApp'}
+          {lead.channel === 'instagram' || lead.channel === 'messenger'
+            ? 'Conversa'
+            : 'WhatsApp'}
         </button>
       );
     return (

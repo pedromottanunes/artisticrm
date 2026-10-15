@@ -409,7 +409,7 @@ export function LeadDetail({
         ) : undefined
       }
       leading={
-        detail.channel === 'instagram' ? (
+        detail.channel === 'instagram' || detail.channel === 'messenger' ? (
           <span className="lead-profile-avatar" aria-hidden="true">
             <CircleUserRound size={24} />
             {detail.profile_picture_url && (
@@ -803,7 +803,9 @@ export function LeadDetail({
                   onClick={onWhatsApp}
                 >
                   <MessageCircle size={16} />
-                  {detail.channel === 'instagram' ? 'Abrir conversa' : 'WhatsApp'}
+                  {detail.channel === 'instagram' || detail.channel === 'messenger'
+                    ? 'Abrir conversa'
+                    : 'WhatsApp'}
                 </button>
               )}
               {detail.can_edit ? (
@@ -998,6 +1000,7 @@ function financialText(text: string, cents: number | null) {
 
 function channelLabel(channel: Detail['channel']) {
   if (channel === 'instagram') return 'Instagram Direct';
+  if (channel === 'messenger') return 'Facebook Messenger';
   if (channel === 'whatsapp') return 'WhatsApp';
   return 'Cadastro manual';
 }

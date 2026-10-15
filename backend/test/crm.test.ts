@@ -50,7 +50,7 @@ after(async () => {
 });
 beforeEach(async () => {
   await db.query(
-    'TRUNCATE lead_notification_mutes,conversation_reads,messages,instagram_webhook_inbox,conversations,contact_identities,channel_accounts,push_records,whatsapp_inbox,claims,appointments,lead_attributions,inbound_events,audit_events,lead_compensations,opportunities,contacts,sessions',
+    'TRUNCATE lead_notification_mutes,conversation_reads,messages,messenger_webhook_inbox,instagram_webhook_inbox,conversations,contact_identities,channel_accounts,push_records,whatsapp_inbox,claims,appointments,lead_attributions,inbound_events,audit_events,lead_compensations,opportunities,contacts,sessions',
   );
   await db.query('UPDATE distribution_settings SET last_position=0,timeout_minutes=10,version=1');
   await db.query(

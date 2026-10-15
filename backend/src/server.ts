@@ -7,6 +7,7 @@ import { buildApp } from './app.js';
 import { bootstrapManager } from './bootstrap.js';
 import { whatsappConfig } from './whatsapp.js';
 import { instagramConfig } from './instagram.js';
+import { messengerConfig } from './messenger.js';
 import { metaMarketingConfig } from './meta-marketing.js';
 import { pushConfig } from './push.js';
 import { openMongo, initializeMongo, bootstrapMongo } from './mongo-store.js';
@@ -18,6 +19,7 @@ const testRateLimitMax =
     : undefined;
 const whatsapp = whatsappConfig(process.env);
 const instagram = instagramConfig(process.env);
+const messenger = messengerConfig(process.env);
 const metaMarketing = metaMarketingConfig(process.env);
 if (process.env.MONGODB_URI && process.env.DATABASE_URL)
   throw new Error('Configure apenas MONGODB_URI ou DATABASE_URL, nunca ambos.');
@@ -58,6 +60,7 @@ const { app } = await buildApp(db, {
   production,
   whatsapp,
   instagram,
+  messenger,
   metaMarketing,
   push: pushConfig(process.env),
   appOrigin,

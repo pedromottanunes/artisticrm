@@ -4,7 +4,7 @@ Contrato-alvo; nem todas as rotas abaixo estão implementadas. Prefixo: `/api/v1
 
 ## Rotas da primeira entrega
 
-Implementadas em `src/app.ts`: `POST /auth/login`, `POST /auth/logout`, `GET /me`, `GET /workspace` (snapshot autorizado, até 500 oportunidades), `POST /opportunities`, `GET/PATCH /opportunities/:id`, `POST /opportunities/:id/claim`, `POST /opportunities/:id/whatsapp-link`, `POST /opportunities/:id/appointments`, `PATCH /distribution/settings`, caixa de entrada do Instagram e `GET /integrations/status`. Health check público: `GET /api/health`.
+Implementadas em `src/app.ts`: `POST /auth/login`, `POST /auth/logout`, `GET /me`, `GET /workspace` (snapshot autorizado, até 500 oportunidades), `POST /opportunities`, `GET/PATCH /opportunities/:id`, `POST /opportunities/:id/claim`, `POST /opportunities/:id/whatsapp-link`, `POST /opportunities/:id/appointments`, `PATCH /distribution/settings`, caixa multicanal de Instagram/Messenger e `GET /integrations/status`. Health check público: `GET /api/health`.
 
 Nesta etapa, cadastro manual cria contato e oportunidade numa operação só; edição da ficha atualiza ambos com controle de versão. Histórico vem na ficha. Leituras em tempo real ainda são substituídas por consulta a cada 5 segundos; não há SSE/push ativo. A API exige cookie de sessão e `X-Artisti-Client: web` nas alterações, valida a origem do navegador e exige `Idempotency-Key` no cadastro/aceite. Integrações retornam `not_connected`, sem credenciais.
 
@@ -58,14 +58,14 @@ numérica e a ordem dos demais participantes não fazem parte dessa resposta.
 | `GET /me`                                | Perfil, permissões e escopo                                                  |
 | `GET /opportunities?view=mine`           | Reservas e oportunidades do usuário                                          |
 | `GET /opportunities?view=pool`           | Resumo autorizado do bolsão, incluindo elegibilidade por vencimento          |
-| `GET /opportunities/:id`                 | Ficha autorizada; inclui perfil e URL da foto do Instagram quando disponíveis |
+| `GET /opportunities/:id`                 | Ficha autorizada; inclui perfil e foto do canal quando disponíveis            |
 | `POST /contacts`                         | Cadastro manual com validação de identidade                                  |
 | `PATCH /contacts/:id`                    | Complementar contato sem apagar evidências de origem                         |
 | `POST /opportunities`                    | Criar oportunidade manual com regra de atribuição explícita                  |
 | `PATCH /opportunities/:id`               | Interesse, unidade, etapa e dados comerciais permitidos                      |
 | `POST /opportunities/:id/claim`          | Confirmar posse de reserva ou bolsão                                         |
 | `POST /opportunities/:id/whatsapp-link`  | Retornar destino somente ao usuário autorizado; não afirma envio de mensagem |
-| `GET /conversations`                     | Listar conversas Instagram com nome, usuário, foto e visão autorizada        |
+| `GET /conversations`                     | Listar conversas Instagram/Messenger com canal, perfil e visão autorizada     |
 | `GET /conversations/:id/messages`        | Histórico da conversa para gestão ou responsável                             |
 | `POST /conversations/:id/messages`       | Responder Direct como responsável, com `Idempotency-Key`                     |
 | `POST /conversations/:id/read`           | Registrar leitura da conversa pelo usuário                                   |
@@ -93,6 +93,8 @@ numérica e a ordem dos demais participantes não fazem parte dessa resposta.
 | `POST /webhooks/whatsapp`                | Receber eventos assinados e persistir entrada                                |
 | `GET /webhooks/instagram`                | Verificação pública do callback do Instagram                                 |
 | `POST /webhooks/instagram`               | Receber mensagens, referrals e postbacks assinados antes do processamento    |
+| `GET /webhooks/messenger`                | Verificação pública do callback do Facebook Messenger                        |
+| `POST /webhooks/messenger`               | Receber mensagens e postbacks assinados antes do processamento               |
 
 ## Aceite
 
@@ -121,3 +123,7 @@ Resposta identifica período, fuso, moeda, nível de agregação, última sincro
 # Central WhatsApp implementada
 
 Rotas públicas fora do prefixo `/api/v1`: `GET /webhooks/whatsapp` (desafio Meta) e `POST /webhooks/whatsapp` (HMAC-SHA256 obrigatório sobre corpo original, limite de 1 MiB). Desligadas sem configuração. POST confirma apenas após persistir a inbox normalizada; processamento assíncrono e idempotente. `GET /api/v1/whatsapp/status` é exclusivo da gestão e não devolve IDs ou segredos. Consulte [WHATSAPP.md](../WHATSAPP.md).
+
+# Facebook Messenger implementado
+
+`GET /webhooks/messenger` verifica o callback e `POST /webhooks/messenger` valida HMAC-SHA256 sobre os bytes originais antes de persistir a inbox. O processamento é assíncrono, idempotente e compartilha o rodízio do CRM. As rotas autenticadas de conversas listam o canal e encaminham histórico, leitura, silêncio, mídia e envio ao conector correto. Apenas a responsável por um lead assumido pode responder e o servidor aplica a janela de 24 horas. `GET /api/v1/messenger/status` é exclusivo da gestão e não expõe credenciais. Consulte [MESSENGER.md](../MESSENGER.md).

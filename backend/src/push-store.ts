@@ -129,8 +129,12 @@ export async function enqueuePushEvent(
     return;
   const lead = await pushOpportunity(tx, opportunityId);
   if (!lead || lead.non_commercial_reason) return;
-  // Instagram persists a separate, deduplicated event for each received message.
-  if (kind === 'lead.repeated' && lead.channel === 'instagram') return;
+  // Chat channels persist a separate, deduplicated event for each received message.
+  if (
+    ['lead.created', 'lead.repeated'].includes(kind) &&
+    ['instagram', 'messenger'].includes(lead.channel)
+  )
+    return;
   await putPush(tx, {
     id: `event:${eventId}`,
     kind: 'event',

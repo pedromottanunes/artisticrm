@@ -12,6 +12,7 @@ interface CentralStatus {
 const channels = [
   ['whatsapp', 'WhatsApp'],
   ['instagram', 'Instagram Direct'],
+  ['messenger', 'Facebook Messenger'],
 ] as const;
 
 export function CentralStatusPanel() {
@@ -98,7 +99,9 @@ export function CentralStatusPanel() {
             <p className="help-text">
               {channel === 'whatsapp'
                 ? 'Configuração feita no servidor, sem credenciais no navegador. “Configurado” não comprova entrega pela Meta: confirme com uma mensagem de teste. A central não envia respostas.'
-                : 'Configuração separada do WhatsApp. Depois do aceite, a responsável responde o Direct pela caixa de entrada do CRM.'}
+                : channel === 'instagram'
+                  ? 'Configuração separada do WhatsApp. Depois do aceite, a responsável responde o Direct pela caixa de entrada do CRM.'
+                  : 'As mensagens da Página entram no mesmo rodízio. Depois do aceite, a responsável responde pelo Messenger na caixa de entrada do CRM.'}
             </p>
           </section>
         );

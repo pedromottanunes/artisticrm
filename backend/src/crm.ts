@@ -32,7 +32,7 @@ const selectOpportunity = `SELECT o.*, c.name, c.phone, c.email, c.residence_cit
   ),'') AS instagram,
   COALESCE((
     SELECT ci.profile_picture_url FROM contact_identities ci
-    WHERE ci.contact_id=c.id AND ci.provider='instagram'
+    WHERE ci.contact_id=c.id AND ci.provider=o.channel AND o.channel IN ('instagram','messenger')
     ORDER BY ci.profile_updated_at DESC NULLS LAST LIMIT 1
   ),'') AS profile_picture_url
   FROM opportunities o JOIN contacts c ON c.id = o.contact_id`;
@@ -50,7 +50,7 @@ export interface LeadInput {
 }
 
 export interface ChannelIdentityInput {
-  provider: 'whatsapp' | 'instagram';
+  provider: 'whatsapp' | 'instagram' | 'messenger';
   account_id: string;
   external_user_id: string;
   username?: string;
@@ -59,7 +59,7 @@ export interface ChannelIdentityInput {
 
 export interface MetaAttributionInput {
   provider: 'meta';
-  channel: 'whatsapp' | 'instagram';
+  channel: 'whatsapp' | 'instagram' | 'messenger';
   source_type: 'ad';
   source_id?: string;
   source_url?: string;
@@ -579,7 +579,7 @@ export class CRM {
       (row.state === 'POOL' && user.role === 'attendant' && user.active && user.queue_enabled)
     )
       return row;
-    if (row.channel === 'instagram' && row.reserved_to === user.id) {
+    if (['instagram', 'messenger'].includes(row.channel) && row.reserved_to === user.id) {
       const { phone: _phone, email: _email, ...summary } = row;
       return { ...summary, next_action: '' };
     }

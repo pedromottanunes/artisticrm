@@ -1,6 +1,6 @@
 # Artisti CRM
 
-Primeira versão executável do CRM: interface de gestão e atendimento, API e banco persistente. Ainda é uma **versão de desenvolvimento/homologação**, não está pronta para operar com pacientes. WhatsApp e Instagram Direct são conectores independentes e opcionais: o WhatsApp preserva o fluxo externo atual, enquanto o Instagram recebe e responde mensagens pela caixa de entrada do CRM. Ambos convergem no mesmo rodízio. A Meta Marketing API pode ser conectada separadamente para sincronizar gastos e desempenho; Google Ads e GTM ainda não estão conectados. Consulte [WHATSAPP.md](WHATSAPP.md), [INSTAGRAM.md](INSTAGRAM.md) e [PWA.md](PWA.md).
+Primeira versão executável do CRM: interface de gestão e atendimento, API e banco persistente. Ainda é uma **versão de desenvolvimento/homologação**, não está pronta para operar com pacientes. WhatsApp, Instagram Direct e Facebook Messenger são conectores independentes e opcionais: o WhatsApp preserva o fluxo externo atual, enquanto Instagram e Messenger recebem e respondem mensagens pela caixa multicanal do CRM. Todos convergem no mesmo rodízio. A Meta Marketing API pode ser conectada separadamente para sincronizar gastos e desempenho; Google Ads e GTM ainda não estão conectados. Consulte [WHATSAPP.md](WHATSAPP.md), [INSTAGRAM.md](INSTAGRAM.md), [MESSENGER.md](MESSENGER.md) e [PWA.md](PWA.md).
 
 ## Distribuição e bolsão: fluxo acordado
 
@@ -8,7 +8,7 @@ Primeira versão executável do CRM: interface de gestão e atendimento, API e b
 - A reserva dura dez minutos por padrão, contados pelo servidor. O prazo configurável só altera reservas futuras.
 - Sem aceite até o vencimento, o lead fica disponível no bolsão apenas para as atendentes com conta ativa e participação habilitada no rodízio.
 - O primeiro aceite confirmado pelo banco ganha o lead. Cliques concorrentes não criam dois responsáveis; repetir a mesma solicitação após falha de rede não duplica o aceite.
-- Somente após assumir o contato é liberado o canal de resposta. WhatsApp abre o contato no aparelho/Web e preserva o fluxo atual; Instagram libera o compositor e o histórico dentro do CRM.
+- Somente após assumir o contato é liberado o canal de resposta. WhatsApp abre o contato no aparelho/Web e preserva o fluxo atual; Instagram e Messenger liberam o compositor e o histórico dentro do CRM.
 - O processo periódico e as consultas reconciliam reservas vencidas; o próprio aceite também verifica o prazo. Reiniciar o servidor não reinicia o cronômetro.
 - A entrada da central tem webhook assinado, fila persistente, deduplicação e novas tentativas; depende da configuração da Meta e do ambiente. PWA e Web Push estão implementados; o envio push permanece desligado até configurar VAPID. Consulte [PWA.md](PWA.md). O fluxo pode ser verificado com cadastros manuais e testes automatizados, sem enviar mensagens.
 
@@ -41,7 +41,7 @@ Abra **http://127.0.0.1:5173**. Escolha Cadu para gestão ou uma atendente para 
 - `DATABASE_URL` permite usar PostgreSQL externo de desenvolvimento. Não aponte o desenvolvimento para o banco publicado: o seed local é exclusivo de teste.
 - Para usar MongoDB, configure `MONGODB_URI` e `MONGODB_DB=artisti`, sem `DATABASE_URL`. O MongoDB começa sem dados fictícios e exige `BOOTSTRAP_ADMIN_EMAIL` e `BOOTSTRAP_ADMIN_PASSWORD` na primeira inicialização. Use um banco separado para desenvolvimento. Consulte [MONGODB.md](MONGODB.md).
 - Os exemplos `.env.example` documentam variáveis; nesta etapa, o processo lê o ambiente do terminal/Render e não carrega arquivos `.env` automaticamente.
-- Contatos fictícios não abrem WhatsApp. Cadastros manuais podem abrir o contato após aceite, por ação explícita da atendente. O CRM não envia mensagens pela API do WhatsApp; no Instagram, a responsável usa o chat interno.
+- Contatos fictícios não abrem WhatsApp. Cadastros manuais podem abrir o contato após aceite, por ação explícita da atendente. O CRM não envia mensagens pela API do WhatsApp; no Instagram e no Messenger, a responsável usa o chat interno.
 
 ## O que já funciona
 
@@ -51,6 +51,7 @@ Abra **http://127.0.0.1:5173**. Escolha Cadu para gestão ou uma atendente para 
 - Gestão: indicadores calculados da base, pesquisa e filtro de leads, ficha editável, funil, agenda e configuração do rodízio.
 - Atendimento: meus leads, bolsão, aceite no servidor e abertura externa do WhatsApp para contatos não fictícios.
 - Instagram Direct: webhook assinado, inbox durável, identidade sem telefone, conversa interna, resposta exclusiva da responsável e visão de auditoria da gestão.
+- Facebook Messenger: webhook assinado, inbox durável, rodízio compartilhado, caixa interna, resposta exclusiva da responsável e janela de envio validada no servidor.
 - Meta Ads: sincronização opcional diária por anúncio, paginação, retentativa isolada do atendimento e relatório gerencial de investimento, cliques, leads atribuídos e CPL.
 - Rodízio transacional, prazo configurável, vencimento persistente, disputa com um vencedor e repetição segura do aceite.
 - Deduplicação de cadastro/entrada, histórico de eventos e agendamento de consultas.
@@ -62,7 +63,7 @@ Abra **http://127.0.0.1:5173**. Escolha Cadu para gestão ou uma atendente para 
 - Reconciliação de reservas a cada 5 segundos e nas consultas; o aceite também valida o prazo, sem depender da rotina periódica.
 - Navegação inferior deslizável, cartões e formulários adaptados ao celular nos dois perfis; menu lateral no desktop, logo original e tema azul-marinho/dourado.
 - PWA instalável e tela pública offline, sem cache de dados privados. Web Push opcional com permissão por aparelho, fila durável e revogação; configuração e limites em [PWA.md](PWA.md).
-- Canais WhatsApp e Instagram configurados separadamente, sem que a ativação de um altere o outro.
+- Canais WhatsApp, Instagram e Messenger configurados separadamente, sem que a ativação de um altere os outros.
 - Meta Ads permanece **não conectado** até receber sua própria conta e credencial `ads_read`; Google Ads continua como espaço futuro. Nenhuma métrica de mídia é inventada.
 
 Não implementado: instrumentação do site/GTM, Google Ads, envio de mídia pelo chat, contratos e comissões, upload de documentos, recuperação autônoma de senha por e-mail, convites por link, MFA e administração de perfis de gestão. Os canais e a Marketing API exigem configuração e homologação com a Meta; push exige chaves no servidor e homologação nos celulares. A visão geral e a lista de Leads possuem limite de 500 oportunidades por consulta; a central de Distribuição já tem paginação e totais completos. Não usar esta etapa como sistema de produção.
@@ -141,12 +142,12 @@ As seções seguintes preservam o planejamento completo. Elas descrevem também 
 
 Uma plataforma da Artisti, com área de gestão e área das atendentes. Ambas acessíveis pelo navegador; a área das atendentes prioriza celular e também funciona em desktop.
 
-1. O lead envia mensagem ao WhatsApp ou ao Instagram profissional.
+1. O lead envia mensagem ao WhatsApp, ao Instagram profissional ou à Página no Messenger.
 2. Cada conector valida e persiste seu próprio webhook; o backend registra o contato e distribui oportunidades novas no mesmo rodízio.
 3. A atendente recebe uma reserva na sua área e pode assumir.
 4. Encerrado o prazo sem aceite, o lead fica disponível no bolsão.
 5. A primeira atendente que tiver o aceite confirmado pelo servidor assume.
-6. O WhatsApp mantém a abertura externa atual; o Instagram libera a conversa interna para a responsável.
+6. O WhatsApp mantém a abertura externa atual; Instagram e Messenger liberam a conversa interna para a responsável.
 7. Cadastro, próximas ações, agendamentos e andamento comercial são atualizados no CRM.
 8. Gestão acompanha atendimento, contratos, comissões e resultados de aquisição.
 
@@ -156,17 +157,17 @@ Meta Ads e Google Ads são integrações de relatórios distintas dos canais de 
 
 ## Decisões propostas, sujeitas à validação
 
-| Tema | Proposta inicial |
-| --- | --- |
-| Prazo | Dez minutos corridos desde a disponibilização da reserva; configurável |
-| Ordem | Vanessa → Priscila → Vitória → Calel; confirmar nomes e ordem |
-| Participação | Atendentes habilitadas pelo gestor; não depende de presença online |
-| Filas | Uma fila compartilhada; unidade cadastrada sem criar filas separadas automaticamente |
-| Reentrada | Oportunidade aberta mantém responsável; retorno após encerramento precisa de política validada |
-| Aceite | Registra posse e tempo até aceite; não comprova primeira mensagem enviada |
-| Instalação | PWA candidata; aplicativo de loja depende dos testes nos celulares e decisão de distribuição |
-| Tecnologia | React/TypeScript, API Node.js/Fastify, MongoDB nativo com transações; reconciliação/inbox dentro da API |
-| Serviços gerenciados | MongoDB Atlas para dados e Render para aplicação; sessões próprias; arquivos privados pendentes |
+| Tema                 | Proposta inicial                                                                                        |
+| -------------------- | ------------------------------------------------------------------------------------------------------- |
+| Prazo                | Dez minutos corridos desde a disponibilização da reserva; configurável                                  |
+| Ordem                | Vanessa → Priscila → Vitória → Calel; confirmar nomes e ordem                                           |
+| Participação         | Atendentes habilitadas pelo gestor; não depende de presença online                                      |
+| Filas                | Uma fila compartilhada; unidade cadastrada sem criar filas separadas automaticamente                    |
+| Reentrada            | Oportunidade aberta mantém responsável; retorno após encerramento precisa de política validada          |
+| Aceite               | Registra posse e tempo até aceite; não comprova primeira mensagem enviada                               |
+| Instalação           | PWA candidata; aplicativo de loja depende dos testes nos celulares e decisão de distribuição            |
+| Tecnologia           | React/TypeScript, API Node.js/Fastify, MongoDB nativo com transações; reconciliação/inbox dentro da API |
+| Serviços gerenciados | MongoDB Atlas para dados e Render para aplicação; sessões próprias; arquivos privados pendentes         |
 
 ## Entregas e critérios de avanço
 

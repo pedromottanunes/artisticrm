@@ -479,6 +479,13 @@ export async function initializeMongo(db: MongoStore) {
   await db
     .collection('instagram_webhook_inbox')
     .createIndex({ instagram_account_id: 1, processed_at: 1, available_at: 1 });
+  await db.collection('messenger_webhook_inbox').createIndex({ event_id: 1 }, { unique: true });
+  await db
+    .collection('messenger_webhook_inbox')
+    .createIndex({ processed_at: 1 }, { expireAfterSeconds: TECHNICAL_RECORD_RETENTION_SECONDS });
+  await db
+    .collection('messenger_webhook_inbox')
+    .createIndex({ page_id: 1, processed_at: 1, available_at: 1 });
   await db
     .collection('instagram_pending_referrals')
     .createIndex({ account_id: 1, sender_external_id: 1 }, { unique: true });

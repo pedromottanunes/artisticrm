@@ -1377,6 +1377,7 @@ export class InstagramCentral {
           const mode = modes[index];
           return {
             id: conversation.id,
+            channel: 'instagram',
             opportunity_id: conversation.opportunity_id,
             contact_name: conversation.contact_name,
             instagram_username: conversation.instagram_username,
@@ -1463,6 +1464,7 @@ export class InstagramCentral {
         const mode = modes[index];
         return {
           id: row.conversation_id,
+          channel: 'instagram',
           opportunity_id: row.id,
           contact_name: row.contact_name,
           instagram_username: row.instagram_username,

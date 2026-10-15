@@ -11,6 +11,7 @@ import { Readable } from 'node:stream';
 import { z, ZodError } from 'zod';
 import { registerWhatsApp, type WhatsAppConfig } from './whatsapp.js';
 import { registerInstagram, type InstagramConfig, type InstagramFetch } from './instagram.js';
+import { registerMessenger, type MessengerConfig, type MessengerFetch } from './messenger.js';
 import {
   registerMetaMarketing,
   type MetaMarketingConfig,
@@ -82,6 +83,8 @@ export async function buildApp(
     whatsapp?: WhatsAppConfig;
     instagram?: InstagramConfig;
     instagramFetch?: InstagramFetch;
+    messenger?: MessengerConfig;
+    messengerFetch?: MessengerFetch;
     metaMarketing?: MetaMarketingConfig;
     metaMarketingFetch?: MetaMarketingFetch;
     push?: PushConfig;
@@ -568,17 +571,20 @@ export async function buildApp(
   app.get('/api/v1/integrations/status', async (request) => {
     requireManager(request.user);
     const metaMarketingStatus = await metaMarketingRuntime.marketing.status();
-    return ['whatsapp', 'instagram', 'meta-ads', 'google-ads', 'web-push', 'gtm'].map((id) => ({
-      id,
-      status:
-        (id === 'whatsapp' && options.whatsapp) ||
-        (id === 'instagram' && options.instagram) ||
-        (id === 'meta-ads' && metaMarketingStatus.configured) ||
-        (id === 'web-push' && options.push)
-          ? 'configured'
-          : 'not_connected',
-      last_sync: id === 'meta-ads' ? metaMarketingStatus.last_completed_at : null,
-    }));
+    return ['whatsapp', 'instagram', 'messenger', 'meta-ads', 'google-ads', 'web-push', 'gtm'].map(
+      (id) => ({
+        id,
+        status:
+          (id === 'whatsapp' && options.whatsapp) ||
+          (id === 'instagram' && options.instagram) ||
+          (id === 'messenger' && options.messenger) ||
+          (id === 'meta-ads' && metaMarketingStatus.configured) ||
+          (id === 'web-push' && options.push)
+            ? 'configured'
+            : 'not_connected',
+        last_sync: id === 'meta-ads' ? metaMarketingStatus.last_completed_at : null,
+      }),
+    );
   });
   const commandKey = (headers: Record<string, unknown>) =>
     z.string().min(8).max(100).parse(headers['idempotency-key']);
@@ -722,6 +728,13 @@ export async function buildApp(
     options.reconcile !== false,
     options.instagramFetch,
   );
+  const messenger = await registerMessenger(
+    app,
+    crm,
+    options.messenger,
+    options.reconcile !== false,
+    options.messengerFetch,
+  );
   const push = registerPush(
     app,
     db,
@@ -739,6 +752,10 @@ export async function buildApp(
   app.get('/api/v1/instagram/status', async (request) => {
     requireManager(request.user);
     return instagram.status();
+  });
+  app.get('/api/v1/messenger/status', async (request) => {
+    requireManager(request.user);
+    return messenger.status();
   });
   app.get('/api/v1/meta-marketing/status', async (request) => {
     requireManager(request.user);
@@ -799,11 +816,22 @@ export async function buildApp(
           .optional(),
       })
       .parse(request.query);
+    const view = query.view ?? (request.user.role === 'manager' ? 'all' : 'mine');
+    const [instagramResult, messengerResult] = await Promise.all([
+      instagram.list(request.user, view),
+      messenger.list(request.user, view),
+    ]);
+    const conversations = [...instagramResult.conversations, ...messengerResult.conversations]
+      .sort(
+        (left, right) =>
+          new Date(
+            String((right as { last_message_at?: unknown }).last_message_at ?? 0),
+          ).getTime() -
+          new Date(String((left as { last_message_at?: unknown }).last_message_at ?? 0)).getTime(),
+      )
+      .slice(0, 100);
     return chatSnapshot(
-      await instagram.list(
-        request.user,
-        query.view ?? (request.user.role === 'manager' ? 'all' : 'mine'),
-      ),
+      { configured: instagramResult.configured || messengerResult.configured, conversations },
       query.revision,
     );
   });
@@ -812,7 +840,10 @@ export async function buildApp(
       .object({ after: z.string().trim().min(1).max(200).optional() })
       .strict()
       .parse(request.query);
-    return instagram.messages(request.user, idParams.parse(request.params).id, query.after);
+    const id = idParams.parse(request.params).id;
+    return (await messenger.owns(id))
+      ? messenger.messages(request.user, id, query.after)
+      : instagram.messages(request.user, id, query.after);
   });
   app.get(
     '/api/v1/conversations/:id/messages/:messageId/attachments/:index/media',
@@ -821,7 +852,8 @@ export async function buildApp(
       const range = typeof request.headers.range === 'string' ? request.headers.range : undefined;
       const controller = new AbortController();
       reply.raw.once('close', () => controller.abort());
-      const media = await instagram.streamAttachment(
+      const source = (await messenger.owns(params.id)) ? messenger : instagram;
+      const media = await source.streamAttachment(
         request.user,
         params.id,
         params.messageId,
@@ -847,7 +879,8 @@ export async function buildApp(
       const params = attachmentParams.parse(request.params);
       const controller = new AbortController();
       reply.raw.once('close', () => controller.abort());
-      const media = await instagram.downloadImage(
+      const source = (await messenger.owns(params.id)) ? messenger : instagram;
+      const media = await source.downloadImage(
         request.user,
         params.id,
         params.messageId,
@@ -871,31 +904,27 @@ export async function buildApp(
       .object({ last_message_id: z.string().uuid().optional() })
       .strict()
       .parse(request.body ?? {});
-    return instagram.markRead(
-      request.user,
-      idParams.parse(request.params).id,
-      input.last_message_id,
-    );
+    const id = idParams.parse(request.params).id;
+    return (await messenger.owns(id))
+      ? messenger.markRead(request.user, id, input.last_message_id)
+      : instagram.markRead(request.user, id, input.last_message_id);
   });
   app.put('/api/v1/conversations/:id/notifications', async (request) => {
     const input = z.object({ muted: z.boolean() }).strict().parse(request.body);
-    return instagram.setNotificationsMuted(
-      request.user,
-      idParams.parse(request.params).id,
-      input.muted,
-    );
+    const id = idParams.parse(request.params).id;
+    return (await messenger.owns(id))
+      ? messenger.setNotificationsMuted(request.user, id, input.muted)
+      : instagram.setNotificationsMuted(request.user, id, input.muted);
   });
   app.post('/api/v1/conversations/:id/messages', async (request) => {
     const input = z
       .object({ text: z.string().trim().min(1).max(1000) })
       .strict()
       .parse(request.body);
-    return instagram.send(
-      request.user,
-      idParams.parse(request.params).id,
-      input.text,
-      commandKey(request.headers),
-    );
+    const id = idParams.parse(request.params).id;
+    return (await messenger.owns(id))
+      ? messenger.send(request.user, id, input.text, commandKey(request.headers))
+      : instagram.send(request.user, id, input.text, commandKey(request.headers));
   });
   let reconciling = false;
   const timer =
@@ -926,5 +955,13 @@ export async function buildApp(
       return reply.status(404).send({ message: 'Não encontrado.' });
     });
   }
-  return { app, crm, central, instagram, metaMarketing: metaMarketingRuntime.marketing, push };
+  return {
+    app,
+    crm,
+    central,
+    instagram,
+    messenger,
+    metaMarketing: metaMarketingRuntime.marketing,
+    push,
+  };
 }

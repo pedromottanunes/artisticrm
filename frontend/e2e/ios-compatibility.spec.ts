@@ -20,6 +20,7 @@ async function login(page: Page, profile: 'cadu' | 'vanessa') {
 
 const conversation = {
   id: 'conversation-ios',
+  channel: 'instagram',
   opportunity_id: 'lead-ios',
   contact_name: 'Conversa no iPhone',
   instagram_username: 'iphone',
@@ -84,7 +85,7 @@ for (const profile of ['cadu', 'vanessa'] as const) {
     await page.goto('/#inbox');
     await page.getByRole('button', { name: 'Conversa no iPhone' }).click();
     await expect(page.getByText('Mensagem aberta no iPhone', { exact: true })).toBeVisible();
-    const image = page.getByRole('img', { name: 'Imagem recebida pelo Instagram', exact: true });
+    const image = page.getByRole('img', { name: 'Imagem recebida na conversa', exact: true });
     await expect(image).toBeVisible();
     await expect
       .poll(() => image.evaluate((node: HTMLImageElement) => node.naturalWidth))

@@ -583,21 +583,23 @@ export class MongoOperations {
     const contact = loadedContact ?? (await tx.one('contacts', { id: row.contact_id }));
     if (!contact) throw new Error('Missing contact');
     const { id: _id, ...fields } = contact;
-    const identity =
-      row.channel === 'instagram'
-        ? (loadedIdentity ??
-          (await tx.one('contact_identities', {
-            contact_id: row.contact_id,
-            provider: 'instagram',
-          })))
-        : null;
+    const chatChannel = row.channel === 'instagram' || row.channel === 'messenger';
+    const identity = chatChannel
+      ? (loadedIdentity ??
+        (await tx.one('contact_identities', {
+          contact_id: row.contact_id,
+          provider: row.channel,
+        })))
+      : null;
     const full = {
       ...row,
       ...fields,
-      ...(row.channel === 'instagram'
+      ...(chatChannel
         ? {
-            instagram: contact.instagram || identity?.username || '',
             profile_picture_url: identity?.profile_picture_url || '',
+            ...(row.channel === 'instagram'
+              ? { instagram: contact.instagram || identity?.username || '' }
+              : {}),
           }
         : {}),
     } as Opportunity;
@@ -607,7 +609,7 @@ export class MongoOperations {
       (row.state === 'POOL' && user.role === 'attendant' && user.active && user.queue_enabled)
     )
       return full;
-    if (row.channel === 'instagram' && row.reserved_to === user.id) {
+    if (chatChannel && row.reserved_to === user.id) {
       const { phone: _phone, email: _email, ...safe } = full;
       return { ...safe, next_action: '' };
     }
@@ -643,9 +645,9 @@ export class MongoOperations {
         (
           await tx.many('contact_identities', {
             contact_id: { $in: rows.map((r) => r.contact_id) },
-            provider: 'instagram',
+            provider: { $in: ['instagram', 'messenger'] },
           })
-        ).map((identity) => [identity.contact_id, identity]),
+        ).map((identity) => [`${identity.contact_id}:${identity.provider}`, identity]),
       );
       const opportunities: Opportunity[] = [];
       for (const row of rows)
@@ -655,7 +657,7 @@ export class MongoOperations {
             row,
             user,
             contacts.get(row.contact_id),
-            identities.get(row.contact_id),
+            identities.get(`${row.contact_id}:${row.channel}`),
           ),
         );
       const users = (await tx.many('users', {}, { queue_position: 1 })).map(publicUser);

@@ -20,7 +20,6 @@ import {
 import {
   api,
   ApiError,
-  stateLabels,
   type MessageShortcut,
   type ConversationMessage,
   type ConversationSummary,
@@ -306,7 +305,7 @@ function MediaAttachment({
     return (
       <span className="message-media-unavailable" role="status">
         <FileQuestion size={16} aria-hidden="true" />
-        Prévia não fornecida pelo Instagram
+        Prévia não fornecida pelo canal
       </span>
     );
 
@@ -352,7 +351,7 @@ function MediaAttachment({
           <img
             className="message-image"
             src={mediaUrl}
-            alt="Imagem recebida pelo Instagram"
+            alt="Imagem recebida na conversa"
             loading="lazy"
             referrerPolicy="no-referrer"
             onError={mediaFailed}
@@ -361,7 +360,7 @@ function MediaAttachment({
             <Maximize2 size={15} />
           </span>
         </button>
-        <a className="message-image-download" href={downloadUrl} download="imagem-instagram">
+        <a className="message-image-download" href={downloadUrl} download="imagem-conversa">
           <Download size={14} aria-hidden="true" />
           Baixar imagem
         </a>
@@ -385,11 +384,11 @@ function MediaAttachment({
             </button>
             <img
               src={mediaUrl}
-              alt="Imagem recebida pelo Instagram ampliada"
+              alt="Imagem recebida na conversa ampliada"
               referrerPolicy="no-referrer"
               onError={mediaFailed}
             />
-            <a className="message-lightbox-download" href={downloadUrl} download="imagem-instagram">
+            <a className="message-lightbox-download" href={downloadUrl} download="imagem-conversa">
               <Download size={16} aria-hidden="true" />
               Baixar imagem
             </a>
@@ -951,7 +950,9 @@ export function InstagramInbox({
           );
       } else if (result.status === 'failed') {
         pendingSends.current.delete(commandId);
-        onNotice('O Instagram recusou a mensagem. Você pode tentar novamente.');
+        onNotice(
+          `O ${selectedConversation?.channel === 'messenger' ? 'Messenger' : 'Instagram'} recusou a mensagem. Você pode tentar novamente.`,
+        );
       } else
         onNotice(
           'O envio ainda não foi confirmado pela Meta. Confira a conversa antes de tentar novamente.',
@@ -961,7 +962,9 @@ export function InstagramInbox({
     } catch (error) {
       if (
         error instanceof ApiError &&
-        (error.status < 500 || error.code === 'INSTAGRAM_SEND_FAILED')
+        (error.status < 500 ||
+          error.code === 'INSTAGRAM_SEND_FAILED' ||
+          error.code === 'MESSENGER_SEND_FAILED')
       )
         pendingSends.current.delete(commandId);
       if (mounted.current) handleError(error);
@@ -1046,8 +1049,8 @@ export function InstagramInbox({
     return (
       <section className="instagram-inbox panel">
         <Empty
-          title="Instagram ainda não conectado"
-          description="Configure as variáveis da integração e publique o webhook para receber conversas aqui."
+          title="Canais de conversa ainda não conectados"
+          description="Configure uma integração e publique o webhook para receber conversas aqui."
         />
       </section>
     );
@@ -1056,12 +1059,12 @@ export function InstagramInbox({
     <section
       ref={inboxRef}
       className={`instagram-inbox${mobileThreadOpen ? ' mobile-thread-open' : ''}`}
-      aria-label="Caixa de entrada do Instagram"
+      aria-label="Caixa de entrada multicanal"
     >
       <aside className="inbox-list panel">
         <header>
           <div>
-            <span>INSTAGRAM DIRECT</span>
+            <span>CAIXA MULTICANAL</span>
             <h2>Conversas</h2>
           </div>
           <button
@@ -1116,9 +1119,11 @@ export function InstagramInbox({
               <span>
                 <strong>{conversation.contact_name}</strong>
                 <small>
-                  {conversation.instagram_username
-                    ? `@${conversation.instagram_username}`
-                    : (stateLabels[conversation.state] ?? conversation.state)}
+                  {conversation.channel === 'messenger'
+                    ? 'Facebook Messenger'
+                    : conversation.instagram_username
+                      ? `@${conversation.instagram_username}`
+                      : 'Instagram Direct'}
                 </small>
               </span>
               <time>{time(conversation.last_message_at)}</time>
@@ -1130,8 +1135,8 @@ export function InstagramInbox({
               <strong>Nenhuma conversa</strong>
               <span>
                 {user.role === 'manager'
-                  ? 'Os novos Directs aparecerão aqui.'
-                  : 'Depois de assumir um lead do Instagram, a conversa aparecerá aqui.'}
+                  ? 'As novas mensagens do Instagram e Messenger aparecerão aqui.'
+                  : 'Depois de assumir um lead, a conversa aparecerá aqui.'}
               </span>
             </div>
           )}
@@ -1142,7 +1147,7 @@ export function InstagramInbox({
         {!selectedId || !thread ? (
           <Empty
             title="Selecione uma conversa"
-            description="Escolha um atendimento do Instagram para visualizar o histórico."
+            description="Escolha um atendimento para visualizar o histórico."
           />
         ) : (
           <>
@@ -1158,7 +1163,7 @@ export function InstagramInbox({
                 </button>
                 <div>
                   <span>ATENDIMENTO PELO CRM</span>
-                  <h2>{selectedConversation?.contact_name ?? 'Contato Instagram'}</h2>
+                  <h2>{selectedConversation?.contact_name ?? 'Contato'}</h2>
                 </div>
               </div>
               <div className="thread-actions">
@@ -1315,7 +1320,7 @@ export function InstagramInbox({
                   maxLength={1000}
                   rows={2}
                   placeholder="Digite a resposta…"
-                  aria-label="Mensagem para o Instagram"
+                  aria-label={`Mensagem para o ${selectedConversation?.channel === 'messenger' ? 'Messenger' : 'Instagram'}`}
                 />
                 <button className="button gold" disabled={!draft.trim() || sending || !connected}>
                   <Send size={17} />
@@ -1328,9 +1333,9 @@ export function InstagramInbox({
                 {user.role === 'manager'
                   ? 'A gestão pode acompanhar o histórico. A resposta pertence à atendente responsável.'
                   : thread.messaging_mode === 'waiting_reply'
-                    ? 'Aguardando o lead responder no Instagram.'
+                    ? `Aguardando o lead responder no ${selectedConversation?.channel === 'messenger' ? 'Messenger' : 'Instagram'}.`
                     : thread.messaging_mode === 'send_unconfirmed'
-                      ? 'Envio não confirmado. Confira a conversa no Instagram antes de uma nova abordagem.'
+                      ? `Envio não confirmado. Confira a conversa no ${selectedConversation?.channel === 'messenger' ? 'Messenger' : 'Instagram'} antes de uma nova abordagem.`
                       : thread.messaging_mode === 'expired'
                         ? 'Prazo de envio encerrado. Aguarde uma nova mensagem do lead.'
                         : 'Assuma o lead antes de responder pelo CRM.'}

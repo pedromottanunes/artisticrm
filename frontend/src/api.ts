@@ -59,7 +59,7 @@ export interface Lead {
   interest: string;
   unit: string;
   source: string;
-  channel: 'manual' | 'whatsapp' | 'instagram';
+  channel: 'manual' | 'whatsapp' | 'instagram' | 'messenger';
   source_evidence: string;
   stage: string;
   consultation_status: ConsultationStatus;
@@ -106,7 +106,7 @@ export interface MarketingAd {
 export interface MetaAttribution {
   id: string;
   provider: 'meta';
-  channel: 'whatsapp' | 'instagram';
+  channel: 'whatsapp' | 'instagram' | 'messenger';
   source_type: 'ad';
   source_id?: string | null;
   source_url?: string | null;
@@ -121,6 +121,7 @@ export interface MetaAttribution {
 export interface ConversationSummary {
   non_commercial_reason?: string | null;
   id: string;
+  channel: 'instagram' | 'messenger';
   opportunity_id: string;
   contact_name: string;
   instagram_username: string;

@@ -15,6 +15,11 @@ import { MongoOperations, publicUser } from '../src/mongo-crm.js';
 import { buildApp } from '../src/app.js';
 import { WhatsAppCentral } from '../src/whatsapp.js';
 import { InstagramCentral, type InstagramConfig } from '../src/instagram.js';
+import { MessengerCentral, type MessengerConfig } from '../src/messenger.js';
+import {
+  checkMessengerProfileBackoff,
+  checkMessengerSendAuthorization,
+} from './messenger-resilience-checks.js';
 import { MetaMarketing, type MetaMarketingConfig } from '../src/meta-marketing.js';
 import { hashPassword } from '../src/auth.js';
 import type { User } from '../src/types.js';
@@ -59,6 +64,13 @@ const instagramTestConfig: InstagramConfig = {
   accessToken: 'IGAA-mongo-test-token-never-used',
   graphApiVersion: 'v26.0',
   profileLookup: false,
+};
+const messengerTestConfig: MessengerConfig = {
+  appSecret: 'messenger-mongo-test-secret',
+  verifyToken: 'messenger-mongo-test-verify-token-32-chars',
+  pageId: '366748579845081',
+  pageAccessToken: 'EAA-mongo-test-page-token-never-used',
+  graphApiVersion: 'v26.0',
 };
 const metaMarketingTestConfig: MetaMarketingConfig = {
   accessToken: 'synthetic-mongo-marketing-token-never-used',
@@ -172,6 +184,10 @@ test('Mongo: retenção técnica e índices dos caminhos frequentes ficam config
     .collection('instagram_webhook_inbox')
     .listIndexes()
     .toArray();
+  const messengerInboxIndexes = await db
+    .collection('messenger_webhook_inbox')
+    .listIndexes()
+    .toArray();
   const whatsappInboxIndexes = await db.collection('whatsapp_inbox').listIndexes().toArray();
   const messageIndexes = await db.collection('messages').listIndexes().toArray();
   const opportunityIndexes = await db.collection('opportunities').listIndexes().toArray();
@@ -181,6 +197,10 @@ test('Mongo: retenção técnica e índices dos caminhos frequentes ficam config
   );
   assert.equal(
     instagramInboxIndexes.find((index) => index.key.processed_at === 1)?.expireAfterSeconds,
+    30 * 24 * 60 * 60,
+  );
+  assert.equal(
+    messengerInboxIndexes.find((index) => index.key.processed_at === 1)?.expireAfterSeconds,
     30 * 24 * 60 * 60,
   );
   assert.equal(
@@ -1129,6 +1149,299 @@ test('Mongo: webhook assinado persiste lote, deduplica e retoma após nova conex
   const unknown = Buffer.from(raw.toString().replace('"id":"111"', '"id":"999"'));
   await central.receive(unknown, sign(unknown));
   assert.equal(await db.count('whatsapp_inbox'), 1);
+});
+test('Mongo: Messenger revalida responsável, sessão e janela dentro da transação', () =>
+  checkMessengerSendAuthorization(ops, manager, users));
+
+for (const [name, failure, minimumPauseMs] of [
+  [
+    'HTTP 429 com Retry-After',
+    () => new Response('', { status: 429, headers: { 'Retry-After': '1800' } }),
+    30 * 60_000,
+  ],
+  [
+    'HTTP 429 com Retry-After em data',
+    () =>
+      new Response('', {
+        status: 429,
+        headers: { 'Retry-After': new Date(Date.now() + 30 * 60_000).toUTCString() },
+      }),
+    29 * 60_000,
+  ],
+  [
+    'Graph code 4 em HTTP 400',
+    () => Response.json({ error: { code: 4 } }, { status: 400 }),
+    15 * 60_000,
+  ],
+  ['falha transitória HTTP 503', () => new Response('', { status: 503 }), 15 * 60_000],
+  [
+    'erro de rede',
+    () => {
+      throw new Error('synthetic network failure');
+    },
+    15 * 60_000,
+  ],
+] as const)
+  test(`Mongo: Messenger pausa e recupera perfis — ${name}`, () =>
+    checkMessengerProfileBackoff(ops, manager, failure, minimumPauseMs));
+
+test('Mongo: Messenger lista em lote, filtra antes do limite e preserva leitura e silêncio', async (t) => {
+  const { MongoStore } = await import('../src/mongo-store.js');
+  const account = randomUUID();
+  await db.insert('channel_accounts', {
+    id: account,
+    provider: 'messenger',
+    external_account_id: messengerTestConfig.pageId,
+  });
+  const contacts = [],
+    opportunities = [],
+    conversations = [],
+    identities = [],
+    messages = [];
+  for (let index = 0; index < 360; index++) {
+    const contact = randomUUID(),
+      opportunity = randomUUID(),
+      conversation = randomUUID();
+    const time = new Date(Date.now() - index * 1000);
+    contacts.push({ id: contact, name: `Contato de teste ${index}` });
+    opportunities.push({
+      id: opportunity,
+      contact_id: contact,
+      channel: 'messenger',
+      state: index === 351 ? 'RESERVED' : index === 352 ? 'POOL' : 'CLAIMED',
+      owner_id: [350, 353].includes(index)
+        ? users[0].id
+        : [351, 352].includes(index)
+          ? null
+          : users[1].id,
+      reserved_to: index === 351 ? users[0].id : null,
+      non_commercial_reason: index === 353 ? 'Teste não comercial' : null,
+    });
+    conversations.push({
+      id: conversation,
+      channel_account_id: account,
+      contact_id: contact,
+      opportunity_id: opportunity,
+      last_message_at: time,
+      last_inbound_at: time,
+    });
+    identities.push({
+      id: randomUUID(),
+      contact_id: contact,
+      provider: 'messenger',
+      channel_account_id: messengerTestConfig.pageId,
+      external_user_id: `synthetic-${index}`,
+    });
+    messages.push({
+      id: randomUUID(),
+      conversation_id: conversation,
+      external_message_id: `mid.list-${index}`,
+      direction: 'inbound',
+      created_at: time,
+      text: 'Sintética',
+      status: 'received',
+      sender_external_id: 'synthetic-private',
+      request_fingerprint: 'internal-test-only',
+    });
+  }
+  await db.collection('contacts').insertMany(contacts);
+  await db.collection('opportunities').insertMany(opportunities);
+  await db.collection('conversations').insertMany(conversations);
+  await db.collection('contact_identities').insertMany(identities);
+  await db.collection('messages').insertMany(messages);
+
+  const client = new MongoClient(replica.getUri(), { monitorCommands: true });
+  await client.connect();
+  const measured = new MongoStore(client, database);
+  const central = new MessengerCentral(new MongoOperations(measured), messengerTestConfig);
+  const commands: string[] = [];
+  client.on('commandStarted', (event) => commands.push(event.commandName));
+  try {
+    const all = await central.list(manager, 'all');
+    t.diagnostic(`100 conversas: ${commands.length} comandos ao MongoDB (${commands.join(', ')})`);
+    assert.equal(all.conversations.length, 100);
+    assert.ok(
+      commands.length <= 8,
+      `100 conversations require a bounded number of commands, got ${commands.length}`,
+    );
+    assert.ok(all.conversations.every((row) => row.unread && row.channel === 'messenger'));
+    assert.deepEqual((await central.list(manager, 'all')).conversations, all.conversations);
+    commands.length = 0;
+    const mine = await central.list(users[0], 'mine');
+    t.diagnostic(`Filtro do consultor: ${commands.length} comandos ao MongoDB`);
+    assert.deepEqual(
+      mine.conversations.map((row) => row.id),
+      [conversations[350].id],
+    );
+    assert.ok(commands.length <= 8, `Ownership scoping remains batched, got ${commands.length}`);
+    assert.deepEqual(
+      (await central.list(users[0], 'reserved')).conversations.map((row) => row.id),
+      [conversations[351].id],
+    );
+    assert.deepEqual(
+      (await central.list(users[0], 'pool')).conversations.map((row) => row.id),
+      [conversations[352].id],
+    );
+    const archived = (await central.list(users[0], 'non_commercial')).conversations;
+    assert.deepEqual(
+      archived.map((row) => row.id),
+      [conversations[353].id],
+    );
+    assert.equal(archived[0].unread, false);
+    assert.equal(archived[0].notifications_muted, true);
+    await assert.rejects(() => central.list(users[0], 'all'), { code: 'FORBIDDEN' });
+    assert.equal(
+      (await central.list({ ...users[0], active: false }, 'pool')).conversations.length,
+      0,
+    );
+    await assert.rejects(() => central.messages(users[0], conversations[0].id), {
+      code: 'FORBIDDEN',
+    });
+    await central.markRead(users[0], conversations[350].id, messages[350].id);
+    await central.setNotificationsMuted(users[0], conversations[350].id, true);
+    const read = (await central.list(users[0], 'mine')).conversations[0];
+    assert.equal(read.unread, false);
+    assert.equal(read.notifications_muted, true);
+    const history = await central.messages(users[0], conversations[350].id);
+    assert.ok(
+      history.messages.every(
+        (row) =>
+          !('_id' in row) && !('sender_external_id' in row) && !('request_fingerprint' in row),
+      ),
+    );
+    // Equal timestamps use the stable message ID ordering used by the chat cursor.
+    const nextId = 'ffffffff-ffff-4fff-bfff-ffffffffffff';
+    await db.insert('messages', {
+      id: nextId,
+      conversation_id: conversations[350].id,
+      external_message_id: 'mid.new-list-message',
+      direction: 'inbound',
+      created_at: messages[350].created_at,
+      text: 'Outra mensagem sintética',
+      status: 'received',
+    });
+    assert.equal((await central.list(users[0], 'mine')).conversations[0].unread, true);
+    await central.markRead(users[0], conversations[350].id, nextId);
+    await central.markRead(users[0], conversations[350].id, messages[350].id);
+    assert.equal((await central.list(users[0], 'mine')).conversations[0].unread, false);
+  } finally {
+    await measured.close();
+  }
+});
+
+test('Mongo: Messenger entra no rodízio, deduplica e responde pela caixa do CRM', async () => {
+  const sends: Array<{ url: string; authorization: string; body: unknown }> = [];
+  const request: typeof fetch = async (input, init) => {
+    if ((init?.method ?? 'GET') === 'POST') {
+      sends.push({
+        url: String(input),
+        authorization: String(new Headers(init.headers).get('Authorization')),
+        body: JSON.parse(String(init.body)),
+      });
+      return new Response(
+        JSON.stringify({ recipient_id: 'mongo-messenger-user', message_id: 'mid.mongo.outbound' }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    assert.equal(
+      new Headers(init?.headers).get('Authorization'),
+      `Bearer ${messengerTestConfig.pageAccessToken}`,
+    );
+    return new Response(
+      JSON.stringify({
+        id: 'mongo-messenger-user',
+        name: 'Contato Messenger Mongo',
+        profile_pic: 'https://lookaside.fbsbx.com/messenger-mongo.jpg',
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  };
+  const central = new MessengerCentral(ops, messengerTestConfig, request);
+  const body = Buffer.from(
+    JSON.stringify({
+      object: 'page',
+      entry: [
+        {
+          id: messengerTestConfig.pageId,
+          time: Date.now(),
+          messaging: [
+            {
+              sender: { id: 'mongo-messenger-user' },
+              recipient: { id: messengerTestConfig.pageId },
+              timestamp: Date.now(),
+              message: { mid: 'mid.mongo.messenger', text: 'Olá pelo Messenger' },
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  const hmac = `sha256=${createHmac('sha256', messengerTestConfig.appSecret)
+    .update(body)
+    .digest('hex')}`;
+  await Promise.all([central.receive(body, hmac), central.receive(body, hmac)]);
+  await Promise.all([
+    central.drain(),
+    new MessengerCentral(ops, messengerTestConfig, request).drain(),
+  ]);
+  await central.drainProfiles();
+  assert.equal(await db.count('opportunities'), 1);
+  assert.equal(await db.count('conversations'), 1);
+  assert.equal(await db.count('messages'), 1);
+  assert.equal(
+    await db.count('push_records', { kind: 'event', 'data.kind': 'message.received' }),
+    1,
+  );
+  assert.equal(
+    await db.count('push_records', { kind: 'event' }),
+    1,
+    'a primeira mensagem gera um único aviso, sem duplicar lead e mensagem',
+  );
+  const opportunity = await db.one<{
+    id: string;
+    version: number;
+    channel: string;
+    reserved_to: string;
+  }>('opportunities', {});
+  const conversation = await db.one<{ id: string }>('conversations', {});
+  assert.ok(opportunity && conversation);
+  assert.equal(opportunity.channel, 'messenger');
+  assert.equal(opportunity.reserved_to, users[0].id);
+  assert.equal((await db.one('contacts', {}))?.name, 'Contato Messenger Mongo');
+  assert.equal(
+    (await ops.detail(users[0], opportunity.id)).profile_picture_url,
+    'https://lookaside.fbsbx.com/messenger-mongo.jpg',
+  );
+  await ops.claim(users[0], opportunity.id, 'reservation', opportunity.version, randomUUID());
+  const listed = await central.list(users[0], 'mine');
+  assert.equal(listed.conversations.length, 1);
+  assert.equal(listed.conversations[0]?.channel, 'messenger');
+  assert.equal(listed.conversations[0]?.can_send, true);
+  const sent = await central.send(users[0], conversation.id, 'Resposta pelo CRM', randomUUID());
+  assert.equal(sent.status, 'sent');
+  assert.equal(sends.length, 1);
+  assert.equal(
+    sends[0].url,
+    `https://graph.facebook.com/${messengerTestConfig.graphApiVersion}/${messengerTestConfig.pageId}/messages`,
+  );
+  assert.equal(sends[0].authorization, `Bearer ${messengerTestConfig.pageAccessToken}`);
+  assert.deepEqual(sends[0].body, {
+    recipient: { id: 'mongo-messenger-user' },
+    messaging_type: 'RESPONSE',
+    message: { text: 'Resposta pelo CRM' },
+  });
+  const current = await db.one<{ version: number }>('opportunities', { id: opportunity.id });
+  await ops.deleteLead(
+    manager,
+    opportunity.id,
+    { expected_version: current!.version, confirmation: 'EXCLUIR' },
+    randomUUID(),
+  );
+  assert.equal(await db.count('messenger_webhook_inbox'), 0);
+  await central.receive(body, hmac);
+  await central.drain();
+  assert.equal(await db.count('messenger_webhook_inbox'), 0);
+  assert.equal(await db.count('opportunities'), 0);
 });
 test('Mongo: Direct do Instagram cria identidade sem telefone, conversa e mensagem', async () => {
   const profileRequests: string[] = [];

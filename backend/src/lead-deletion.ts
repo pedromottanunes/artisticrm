@@ -58,11 +58,15 @@ export async function deleteLeadData(
     const instagramInbox = await tx.many('instagram_webhook_inbox', {
       $or: [{ opportunity_id: id }, { event_id: { $in: events.map((e) => e.external_id) } }],
     });
+    const messengerInbox = await tx.many('messenger_webhook_inbox', {
+      $or: [{ opportunity_id: id }, { event_id: { $in: events.map((e) => e.external_id) } }],
+    });
     const comments = await tx.many('instagram_comments', { opportunity_id: id });
     for (const externalId of new Set([
       ...events.map((e) => e.external_id),
       ...inbox.map((e) => e.event_id),
       ...instagramInbox.map((e) => e.event_id),
+      ...messengerInbox.map((e) => e.event_id),
       ...comments.map((c) => `instagram-comment:${c.account_id}:${c.comment_id}`),
     ]))
       await tx
@@ -101,6 +105,9 @@ export async function deleteLeadData(
     });
     await tx.remove('whatsapp_inbox', inboxFilter);
     await tx.remove('instagram_webhook_inbox', {
+      $or: [{ opportunity_id: id }, { event_id: { $in: events.map((e) => e.external_id) } }],
+    });
+    await tx.remove('messenger_webhook_inbox', {
       $or: [{ opportunity_id: id }, { event_id: { $in: events.map((e) => e.external_id) } }],
     });
     const conversations = await tx.many('conversations', { opportunity_id: id });
@@ -156,6 +163,13 @@ export async function deleteLeadData(
         [id, events.map((event) => event.external_id)],
       )
     ).rows;
+    const messengerInbox = (
+      await tx.query<{ event_id: string }>(
+        `SELECT event_id FROM messenger_webhook_inbox
+         WHERE opportunity_id=$1 OR event_id=ANY($2::text[]) FOR UPDATE`,
+        [id, events.map((event) => event.external_id)],
+      )
+    ).rows;
     const comments = (
       await tx.query<{ account_id: string; comment_id: string }>(
         'SELECT account_id,comment_id FROM instagram_comments WHERE opportunity_id=$1',
@@ -166,6 +180,7 @@ export async function deleteLeadData(
       ...events.map((e) => e.external_id),
       ...inbox.map((e) => e.event_id),
       ...instagramInbox.map((e) => e.event_id),
+      ...messengerInbox.map((e) => e.event_id),
       ...comments.map((c) => `instagram-comment:${c.account_id}:${c.comment_id}`),
     ]))
       await tx.query('INSERT INTO deleted_inbound_events(hash) VALUES($1) ON CONFLICT DO NOTHING', [
@@ -197,6 +212,9 @@ export async function deleteLeadData(
     ]);
     await tx.query('DELETE FROM instagram_webhook_inbox WHERE event_id=ANY($1::text[])', [
       instagramInbox.map((event) => event.event_id),
+    ]);
+    await tx.query('DELETE FROM messenger_webhook_inbox WHERE event_id=ANY($1::text[])', [
+      messengerInbox.map((event) => event.event_id),
     ]);
     await tx.query(
       `DELETE FROM conversation_reads WHERE conversation_id IN

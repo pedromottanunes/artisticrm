@@ -33,7 +33,7 @@ export interface Opportunity {
   interest: string;
   unit: string;
   source: string;
-  channel: 'manual' | 'whatsapp' | 'instagram';
+  channel: 'manual' | 'whatsapp' | 'instagram' | 'messenger';
   source_evidence: string;
   stage: Stage;
   consultation_status: ConsultationStatus;
