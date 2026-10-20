@@ -125,6 +125,7 @@ export function ManagerCentral({
   const query = new URLSearchParams({
     state,
     scope,
+    order: 'RECENT',
     attendant,
     source,
     search: term,
