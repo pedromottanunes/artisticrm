@@ -25,6 +25,7 @@ import { hashPassword } from '../src/auth.js';
 import type { User } from '../src/types.js';
 import { checkDistribution } from './distribution-checks.js';
 import { checkPush } from './push-checks.js';
+import { checkPushRouting } from './push-routing-checks.js';
 import { checkReports } from './report-checks.js';
 import { checkShortcuts } from './shortcut-checks.js';
 import { checkComments } from './comment-checks.js';
@@ -248,6 +249,18 @@ const lose = {
   next_action: '',
 };
 const key = () => randomUUID();
+test('push: aceite, transferência, múltiplos aparelhos e retentativas coerentes (MongoDB)', () =>
+  checkPushRouting(
+    db,
+    ops,
+    manager,
+    users,
+    () => now,
+    (ms) => {
+      now = new Date(now.getTime() + ms);
+    },
+  ));
+
 test('push: entrega privada, fila durável, concorrência, expiração e revogação em MongoDB', async () => {
   await checkPush(
     db,

@@ -11,19 +11,39 @@ async function login(page: Page) {
   return (await (await page.request.get('/api/v1/workspace')).json()).user.id as string;
 }
 
-test('gestão móvel: som dos avisos respeita usuário, silêncio e repetição', async ({ page }) => {
+async function mockAudio(page: Page) {
   await page.addInitScript(() => {
     let pulses = 0;
+    let allowed = false;
+    let latest: TestAudio | undefined;
+    window.addEventListener('pointerdown', () => {
+      allowed = true;
+    });
     Object.defineProperty(window, 'testSoundPulses', { get: () => pulses });
+    Object.defineProperty(window, 'interruptTestAudio', {
+      value: () => {
+        latest!.state = 'interrupted';
+        latest!.onstatechange?.();
+      },
+    });
     class TestAudio {
       state = 'suspended';
-      currentTime = 0;
+      onstatechange: (() => void) | null = null;
+      get currentTime() {
+        return performance.now() / 1000;
+      }
       destination = {};
+      constructor() {
+        latest = this;
+      }
       async resume() {
+        if (!allowed) throw new Error('Gesture required');
         this.state = 'running';
+        this.onstatechange?.();
       }
       createOscillator() {
-        return {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const oscillator = {
           type: '',
           frequency: { value: 0 },
           connect() {},
@@ -31,9 +51,16 @@ test('gestão móvel: som dos avisos respeita usuário, silêncio e repetição'
           start() {
             pulses++;
           },
-          stop() {},
-          onended: null,
+          stop(at?: number) {
+            clearTimeout(timer);
+            timer = setTimeout(
+              () => oscillator.onended?.(),
+              Math.max(0, (at ?? 0) * 1000 - performance.now()),
+            );
+          },
+          onended: null as null | (() => void),
         };
+        return oscillator;
       }
       createGain() {
         return {
@@ -45,48 +72,102 @@ test('gestão móvel: som dos avisos respeita usuário, silêncio e repetição'
     }
     Object.defineProperty(window, 'AudioContext', { value: TestAudio });
   });
+}
+
+const pulses = (page: Page) =>
+  page.evaluate(() => (window as Window & { testSoundPulses?: number }).testSoundPulses);
+
+async function sendPush(page: Page, userId: string, tag: string) {
+  return page.evaluate(
+    ({ userId, tag }) =>
+      new Promise<boolean>((resolve) => {
+        const channel = new MessageChannel();
+        channel.port1.onmessage = (event) => {
+          channel.port1.close();
+          channel.port2.close();
+          resolve(event.data.handled);
+        };
+        navigator.serviceWorker.dispatchEvent(
+          new MessageEvent('message', {
+            data: { type: 'artisti-push', userId, tag, soundDeadline: Date.now() + 900 },
+            ports: [channel.port2],
+          }),
+        );
+      }),
+    { userId, tag },
+  );
+}
+
+test('gestão móvel: som dos avisos respeita usuário, silêncio e repetição', async ({ page }) => {
+  await mockAudio(page);
   const userId = await login(page);
   await page.goto('/#settings');
   const mute = page.getByRole('button', { name: 'Silenciar som no CRM' });
   await expect(mute).toHaveAttribute('aria-pressed', 'true');
-  const send = async (user: string, tag: string) =>
-    page.evaluate(
-      ({ user, tag }) => {
-        navigator.serviceWorker.dispatchEvent(
-          new MessageEvent('message', {
-            data: { type: 'artisti-push', userId: user, tag },
-          }),
-        );
-      },
-      { user, tag },
-    );
-  const pulses = () =>
-    page.evaluate(() => (window as Window & { testSoundPulses?: number }).testSoundPulses);
+  const send = (user: string, tag: string) => sendPush(page, user, tag);
   // Before a gesture, the browser has not unlocked audio.
   await send(userId, 'locked');
-  expect(await pulses()).toBe(0);
+  expect(await pulses(page)).toBe(0);
+  await expect(page.getByText('Áudio aguardando liberação', { exact: false })).toBeVisible();
   await page.getByRole('button', { name: 'Testar som', exact: true }).click();
-  await expect.poll(pulses).toBe(4);
-  await page.waitForTimeout(1150); // Wait for the intentional overlapping-sound guard.
+  await expect.poll(() => pulses(page)).toBe(12);
+  await expect(page.getByText('Áudio preparado', { exact: false })).toBeVisible();
+  await page.waitForTimeout(2750); // The alert is deliberately bounded at 2.64s.
   await send('another-user', 'private');
-  expect(await pulses()).toBe(4);
+  expect(await pulses(page)).toBe(12);
   await send(userId, 'new-message');
-  await expect.poll(pulses).toBe(8);
+  await expect.poll(() => pulses(page)).toBe(24);
   await send(userId, 'new-message');
-  expect(await pulses()).toBe(8);
+  expect(await pulses(page)).toBe(24);
   await mute.click();
   await expect(page.getByRole('button', { name: 'Ativar som no CRM' })).toHaveAttribute(
     'aria-pressed',
     'false',
   );
-  await page.waitForTimeout(1150);
+  await expect(page.getByText('Som silenciado no CRM', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Testar som', exact: true }).click();
+  await expect(
+    page.getByText('Ative o som no CRM antes de testar.', { exact: true }),
+  ).toBeVisible();
   await send(userId, 'muted-message');
-  expect(await pulses()).toBe(8);
+  expect(await pulses(page)).toBe(24);
   await page.reload();
   await expect(page.getByRole('button', { name: 'Ativar som no CRM' })).toBeVisible();
   await page.getByRole('button', { name: 'Ativar som no CRM' }).click();
   await send(userId, 'after-reload');
-  await expect.poll(pulses).toBe(4);
+  await expect.poll(() => pulses(page)).toBe(12);
+});
+
+test('gestão móvel: retoma áudio interrompido e mostra estado real sem reproduzir avisos antigos', async ({
+  page,
+}, testInfo) => {
+  await mockAudio(page);
+  const userId = await login(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/#settings');
+  await page.getByRole('button', { name: 'Testar som', exact: true }).click();
+  await expect.poll(() => pulses(page)).toBe(12);
+  const interrupt = () =>
+    page.evaluate(() =>
+      (window as Window & { interruptTestAudio: () => void }).interruptTestAudio(),
+    );
+  await interrupt();
+  await expect(page.getByText('Áudio aguardando liberação', { exact: false })).toBeVisible();
+  expect(await sendPush(page, userId, 'after-interruption')).toBe(true);
+  await expect.poll(() => pulses(page)).toBe(24);
+  await interrupt();
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(page.getByText('Áudio preparado', { exact: false })).toBeVisible();
+  expect(await pulses(page)).toBe(24, 'returning to CRM must not replay the old sound');
+  expect(await sendPush(page, userId, 'fresh')).toBe(true);
+  await expect.poll(() => pulses(page)).toBe(36);
+  expect(await sendPush(page, userId, 'burst')).toBe(true);
+  expect(await pulses(page)).toBe(36, 'nearby events cannot stack the 2.64s alerts');
+  await page.getByRole('button', { name: 'Testar som', exact: true }).scrollIntoViewIfNeeded();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page
+    .locator('.device-options')
+    .screenshot({ path: testInfo.outputPath('notification-settings.png') });
 });
 
 test('gestão móvel: aviso de mensagem abre a conversa indicada no link', async ({ page }) => {

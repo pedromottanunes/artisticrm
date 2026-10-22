@@ -47,13 +47,19 @@ function handleForegroundSound(client, data) {
   if (!client) return Promise.resolve(false);
   return new Promise((resolve) => {
     const channel = new MessageChannel();
+    let finished = false;
     const finish = (handled) => {
+      if (finished) return;
+      finished = true;
       clearTimeout(timeout);
       channel.port1.close();
       channel.port2.close();
       resolve(handled);
     };
-    const timeout = setTimeout(() => finish(false), 500);
+    // Give an interrupted AudioContext a bounded chance to resume. The client
+    // stops earlier so a late playback cannot follow the OS fallback alert.
+    const deadline = Date.now() + 900;
+    const timeout = setTimeout(() => finish(false), 1000);
     channel.port1.onmessage = (event) => finish(event.data?.handled === true);
     try {
       client.postMessage(
@@ -61,7 +67,7 @@ function handleForegroundSound(client, data) {
           type: 'artisti-push',
           userId: data.userId,
           tag: data.tag,
-          soundDeadline: Date.now() + 500,
+          soundDeadline: deadline,
         },
         [channel.port2],
       );

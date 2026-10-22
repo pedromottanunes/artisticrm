@@ -5,7 +5,9 @@ import { test } from 'node:test';
 import { MessageChannel, type MessagePort } from 'node:worker_threads';
 
 const source = readFileSync(new URL('../../frontend/public/sw.js', import.meta.url), 'utf8');
-function harness(acknowledgement: 'handled' | 'unavailable' | 'timeout' | 'throw' = 'handled') {
+function harness(
+  acknowledgement: 'handled' | 'unavailable' | 'timeout' | 'throw' | 'resumed' = 'handled',
+) {
   const handlers = new Map<string, (event: any) => void>();
   const shown: any[] = [];
   const notices: any[] = [];
@@ -18,7 +20,9 @@ function harness(acknowledgement: 'handled' | 'unavailable' | 'timeout' | 'throw
     postMessage: (data: unknown, ports: MessagePort[]) => {
       notices.push({ i, data });
       if (acknowledgement === 'throw') throw new Error('Client closed');
-      if (acknowledgement !== 'timeout')
+      if (acknowledgement === 'resumed')
+        setTimeout(() => ports[0].postMessage({ handled: true }), 600);
+      else if (acknowledgement !== 'timeout')
         ports[0].postMessage({ handled: acknowledgement === 'handled' });
     },
     navigate: async (url: string) => navigated.push(url),
@@ -74,6 +78,18 @@ test('push worker: a nova versao assume o controle sem esperar o PWA ser fechado
   const worker = harness();
   await worker.dispatch('install', {});
   assert.equal(worker.skipWaitingCalls(), 1);
+});
+
+test('push worker: waits briefly for resumed audio and preserves a single foreground sound', async () => {
+  const worker = harness('resumed');
+  const start = Date.now();
+  await worker.dispatch('push', {
+    data: { json: () => ({ page: 'mine', tag: 'resumed', userId: 'user-a' }) },
+  });
+  assert.equal(worker.shown.length, 1);
+  assert.equal(worker.shown[0].silent, true);
+  const deadline = worker.notices[0].data.soundDeadline;
+  assert.ok(deadline >= start + 800 && deadline < start + 1000);
 });
 for (const response of ['unavailable', 'timeout', 'throw'] as const)
   test(`push worker: OS sound survives foreground ${response}`, async () => {

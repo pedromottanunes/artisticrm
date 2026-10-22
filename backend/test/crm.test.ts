@@ -12,6 +12,7 @@ import { bootstrapManager } from '../src/bootstrap.js';
 import type { User, Opportunity } from '../src/types.js';
 import { checkDistribution } from './distribution-checks.js';
 import { checkPush } from './push-checks.js';
+import { checkPushRouting } from './push-routing-checks.js';
 import { checkReports } from './report-checks.js';
 import { checkPersonalQueueStatus } from './queue-status-checks.js';
 
@@ -70,6 +71,18 @@ const get = async (id: string) =>
   (await db.query<Opportunity>('SELECT * FROM opportunities WHERE id=$1', [id])).rows[0];
 const count = async (table: string) =>
   Number((await db.query<{ count: string }>(`SELECT count(*) FROM ${table}`)).rows[0].count);
+
+test('push: aceite, transferência, múltiplos aparelhos e retentativas coerentes (SQL)', () =>
+  checkPushRouting(
+    db,
+    crm,
+    manager,
+    users,
+    () => now,
+    (ms) => {
+      now = new Date(now.getTime() + ms);
+    },
+  ));
 
 test('personal queue status exposes only next, participating and pause state (SQL)', () =>
   checkPersonalQueueStatus(db, manager, users));

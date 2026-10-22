@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { tokenHash } from './auth.js';
 import { MongoTx } from './mongo-store.js';
-import { DomainError, type User } from './types.js';
+import { DomainError, type Opportunity, type User } from './types.js';
 import {
   cleanPush,
   getPush,
@@ -96,6 +96,49 @@ const subscriptionId = (endpoint: string) =>
   `sub:${createHash('sha256').update(endpoint).digest('hex')}`;
 const later = (now: Date, ms: number) => new Date(now.getTime() + ms).toISOString();
 const MAX_SUBSCRIPTIONS = 500;
+const MAX_EXPANSION_CHECKS = 500;
+const isMessageEvent = (event: PushRecord) =>
+  ['message.received', 'comment.received.owned'].includes(event.data.kind);
+const leadTarget = (lead: Pick<Opportunity, 'state' | 'reserved_to' | 'owner_id'>) =>
+  lead.state === 'RESERVED' ? lead.reserved_to : lead.owner_id;
+const messageRoute = (state: unknown, target: unknown) => JSON.stringify([state, target ?? null]);
+
+// A cache belongs to ONE transaction only. Reuse reads across events/devices,
+// but always take a fresh snapshot before delivery (ownership, mute and access).
+class PushSnapshot {
+  private values = new Map<string, Promise<unknown>>();
+  constructor(readonly tx: PushTx) {}
+  private read<T>(key: string, load: () => Promise<T>): Promise<T> {
+    if (!this.values.has(key)) this.values.set(key, load());
+    return this.values.get(key)! as Promise<T>;
+  }
+  user(id: string) {
+    return this.read(`user:${id}`, () => pushUser(this.tx, id));
+  }
+  opportunity(id: string) {
+    return this.read(`lead:${id}`, () => pushOpportunity(this.tx, id));
+  }
+  muted(userId: string, opportunityId: string) {
+    return this.read(`mute:${userId}:${opportunityId}`, () =>
+      isLeadNotificationMuted(this.tx, userId, opportunityId),
+    );
+  }
+  comment(accountId: string, commentId: string) {
+    return this.read(`comment:${JSON.stringify([accountId, commentId])}`, async () =>
+      this.tx instanceof MongoTx
+        ? this.tx.one<Record<string, any>>('instagram_comments', {
+            account_id: accountId,
+            comment_id: commentId,
+          })
+        : (
+            await this.tx.query<Record<string, any>>(
+              'SELECT * FROM instagram_comments WHERE account_id=$1 AND comment_id=$2',
+              [accountId, commentId],
+            )
+          ).rows[0],
+    );
+  }
+}
 export type PushSender = typeof webpush.sendNotification;
 
 export class PushService {
@@ -185,34 +228,23 @@ export class PushService {
         if (row.data.sessionHash === sessionHash) await removePush(tx, row.id);
     });
   }
-  private async recipient(tx: PushTx, subscription: PushRecord, now: Date) {
+  private async recipient(reads: PushSnapshot, subscription: PushRecord, now: Date) {
     if (
       subscription.expires_at <= now.toISOString() ||
       subscription.data.publicKey !== this.config?.publicKey
     )
       return null;
-    const user = await pushUser(tx, subscription.data.userId);
+    const user = await reads.user(subscription.data.userId);
     return user?.active &&
       !user.must_change_password &&
       user.auth_version === subscription.data.authVersion
       ? user
       : null;
   }
-  private async message(tx: PushTx, event: PushRecord, user: User, now: Date) {
+  private async message(reads: PushSnapshot, event: PushRecord, user: User, now: Date) {
     if (event.data.kind === 'comment.received') {
       if (user.role !== 'manager' && !user.queue_enabled) return null;
-      const comment =
-        tx instanceof MongoTx
-          ? await tx.one('instagram_comments', {
-              account_id: event.data.accountId,
-              comment_id: event.data.commentId,
-            })
-          : (
-              await tx.query<Record<string, any>>(
-                'SELECT * FROM instagram_comments WHERE account_id=$1 AND comment_id=$2',
-                [event.data.accountId, event.data.commentId],
-              )
-            ).rows[0];
+      const comment = await reads.comment(event.data.accountId, event.data.commentId);
       if (
         !comment ||
         comment.ignored ||
@@ -238,7 +270,7 @@ export class PushService {
         tag: `artisti-${createHash('sha256').update(event.id).digest('hex').slice(0, 32)}`,
       };
     }
-    const lead = await pushOpportunity(tx, event.data.opportunityId);
+    const lead = await reads.opportunity(event.data.opportunityId);
     if (!lead || lead.non_commercial_reason) return null;
     const kind = String(event.data.kind);
     const received = kind === 'message.received' || kind === 'comment.received.owned';
@@ -262,7 +294,7 @@ export class PushService {
       if (!manager && lead.state !== 'POOL' && target !== user.id) return null;
       if (!['POOL', 'RESERVED', 'CLAIMED', 'PENDING', 'CANCELLED'].includes(lead.state))
         return null;
-      if (!manager && (await isLeadNotificationMuted(tx, user.id, lead.id))) return null;
+      if (!manager && (await reads.muted(user.id, lead.id))) return null;
     } else if (movement) {
       // Preserve each completed business action. A later action must not erase
       // an earlier notification that was already committed to the audit trail.
@@ -326,7 +358,7 @@ export class PushService {
       if (
         !subscription ||
         subscription.data.userId !== user.id ||
-        !(await this.recipient(tx, subscription, now))
+        !(await this.recipient(new PushSnapshot(tx), subscription, now))
       )
         throw new DomainError(
           'NOT_SUBSCRIBED',
@@ -354,6 +386,105 @@ export class PushService {
     });
     return { ok: true };
   }
+  private deliveryJob(
+    event: PushRecord,
+    subscription: PushRecord,
+    message: Record<string, unknown>,
+    now: Date,
+    routing: string | undefined,
+    attempts = 0,
+  ): PushRecord {
+    return {
+      id: `job:${event.id}:${subscription.id}`,
+      kind: 'job',
+      available_at: now.toISOString(),
+      expires_at: event.expires_at,
+      data: {
+        subId: subscription.id,
+        revision: subscription.data.revision,
+        event,
+        message,
+        routing,
+        attempts,
+      },
+    };
+  }
+  private async keepMessageRouting(
+    tx: PushTx,
+    event: PushRecord,
+    issued: Set<string>,
+    routing: string | undefined,
+  ) {
+    // Dormant until expiry: not polled as pending work. This small checkpoint
+    // prevents a retry/transfer from recreating already delivered or muted jobs.
+    // It uses the existing indexed store and the original one-hour retention.
+    await putPush(tx, {
+      ...event,
+      available_at: event.expires_at,
+      data: { ...event.data, issuedSubscriptions: [...issued], routing },
+    });
+  }
+  private async rerouteMessage(
+    reads: PushSnapshot,
+    job: PushRecord,
+    event: PushRecord,
+    lead: Opportunity,
+    now: Date,
+    releasePrevious: boolean,
+  ) {
+    const checkpoint = await getPush(reads.tx, event.id);
+    const routing = messageRoute(lead.state, leadTarget(lead));
+    const issued = new Set<string>(checkpoint?.data.issuedSubscriptions ?? []);
+    // Other pending devices of the same event can observe the same transfer.
+    // Only the first transaction needs to discover the new recipients.
+    if (checkpoint?.data.routing === routing) {
+      if (releasePrevious && issued.delete(job.data.subId))
+        await this.keepMessageRouting(reads.tx, event, issued, routing);
+      return;
+    }
+    const subscriptions = await readyPush(
+      reads.tx,
+      'subscription',
+      now.toISOString(),
+      MAX_SUBSCRIPTIONS + 1,
+    );
+    if (!checkpoint?.data.issuedSubscriptions) {
+      // Rolling-deploy compatibility: old jobs have no checkpoint. Preserve
+      // their original recipients, and never overwrite a pending/leased job.
+      for (const subscription of subscriptions) {
+        if (subscription.data.createdAt > event.data.createdAt) continue;
+        const user = await reads.user(subscription.data.userId);
+        if (
+          user &&
+          (user.role === 'manager' || event.data.state === 'POOL' || user.id === event.data.target)
+        )
+          issued.add(subscription.id);
+      }
+    }
+    issued.add(job.data.subId);
+    for (const subscription of subscriptions) {
+      if (issued.has(subscription.id) || subscription.data.createdAt > event.data.createdAt)
+        continue;
+      const user = await this.recipient(reads, subscription, now);
+      if (!user) continue;
+      const message = await this.message(reads, event, user, now);
+      if (!message) continue;
+      const next = this.deliveryJob(
+        event,
+        subscription,
+        message,
+        now,
+        routing,
+        Math.max(0, job.data.attempts - 1),
+      );
+      if (!(await getPush(reads.tx, next.id))) await putPush(reads.tx, next);
+      issued.add(subscription.id);
+    }
+    // An undelivered former-owner job may become eligible again on a later
+    // transfer back. Delivered jobs and explicit mutes remain recorded above.
+    if (releasePrevious) issued.delete(job.data.subId);
+    await this.keepMessageRouting(reads.tx, event, issued, routing);
+  }
   // Events are persisted in the same transaction as each distribution change.
   // Expand atomically, lease briefly, then perform network I/O outside the DB lock.
   async tick() {
@@ -361,34 +492,33 @@ export class PushService {
     const jobs = await inPushTransaction(this.db, async (tx) => {
       await cleanPush(tx, now.toISOString());
       if (!this.config) return [];
-      const subscriptions = await readyPush(
-        tx,
-        'subscription',
-        now.toISOString(),
-        MAX_SUBSCRIPTIONS + 1,
+      const reads = new PushSnapshot(tx);
+      const events = await readyPush(tx, 'event', now.toISOString(), 50);
+      const subscriptions = events.length
+        ? await readyPush(tx, 'subscription', now.toISOString(), MAX_SUBSCRIPTIONS + 1)
+        : [];
+      // Bound work under the distribution lock even with many devices. The
+      // remaining events stay durable for subsequent ticks, in the same order.
+      const limit = Math.max(
+        1,
+        Math.floor(MAX_EXPANSION_CHECKS / Math.max(1, subscriptions.length)),
       );
-      for (const event of await readyPush(tx, 'event', now.toISOString(), 50)) {
+      for (const event of events.slice(0, limit)) {
+        const received = isMessageEvent(event);
+        const lead = received ? await reads.opportunity(event.data.opportunityId) : null;
+        const routing = lead ? messageRoute(lead.state, leadTarget(lead)) : undefined;
+        const issued = new Set<string>();
         for (const subscription of subscriptions) {
           if (subscription.data.createdAt > event.data.createdAt) continue;
-          const user = await this.recipient(tx, subscription, now);
+          const user = await this.recipient(reads, subscription, now);
           if (!user) continue;
-          const message = await this.message(tx, event, user, now);
+          const message = await this.message(reads, event, user, now);
           if (!message) continue;
-          await putPush(tx, {
-            id: `job:${event.id}:${subscription.id}`,
-            kind: 'job',
-            available_at: now.toISOString(),
-            expires_at: event.expires_at,
-            data: {
-              subId: subscription.id,
-              revision: subscription.data.revision,
-              event,
-              message,
-              attempts: 0,
-            },
-          });
+          await putPush(tx, this.deliveryJob(event, subscription, message, now, routing));
+          issued.add(subscription.id);
         }
-        await removePush(tx, event.id);
+        if (received && issued.size) await this.keepMessageRouting(tx, event, issued, routing);
+        else await removePush(tx, event.id);
       }
       const pending = await readyPush(tx, 'job', now.toISOString(), 12);
       for (const job of pending) {
@@ -404,26 +534,51 @@ export class PushService {
   }
   private async deliver(job: PushRecord) {
     const now = await this.clock();
-    const subscription = await inPushTransaction(this.db, async (tx) => {
+    const delivery = await inPushTransaction(this.db, async (tx) => {
       const currentJob = await getPush(tx, job.id);
       if (!currentJob || currentJob.data.lease !== job.data.lease) return null;
-      const sub = await getPush(tx, job.data.subId);
-      const user =
-        sub && sub.data.revision === job.data.revision && (await this.recipient(tx, sub, now));
-      if (
-        !user ||
-        job.expires_at <= now.toISOString() ||
-        (job.data.event && !(await this.message(tx, job.data.event, user, now)))
-      ) {
+      if (job.expires_at <= now.toISOString()) {
         await removePush(tx, job.id);
         return null;
       }
-      return sub;
+      const reads = new PushSnapshot(tx);
+      const sub = await getPush(tx, job.data.subId);
+      const user =
+        sub && sub.data.revision === job.data.revision && (await this.recipient(reads, sub, now));
+      const event: PushRecord | undefined = job.data.event;
+      const message =
+        user && (event ? await this.message(reads, event, user, now) : job.data.message);
+      if (event && isMessageEvent(event)) {
+        const lead = await reads.opportunity(event.data.opportunityId);
+        const previousRouting =
+          currentJob.data.routing ?? messageRoute(event.data.state, event.data.target);
+        const routing = lead ? messageRoute(lead.state, leadTarget(lead)) : undefined;
+        if (lead && !lead.non_commercial_reason && routing !== previousRouting) {
+          const releasePrevious =
+            !!user &&
+            user.role !== 'manager' &&
+            !message &&
+            lead.state !== 'POOL' &&
+            leadTarget(lead) !== user.id &&
+            !(await reads.muted(user.id, lead.id));
+          await this.rerouteMessage(reads, currentJob, event, lead, now, releasePrevious);
+          if (message) {
+            currentJob.data.routing = routing;
+            await putPush(tx, currentJob);
+          }
+        }
+      }
+      if (!user || !message) {
+        await removePush(tx, job.id);
+        return null;
+      }
+      return { subscription: sub!, message };
     });
-    if (!subscription || !this.config) return;
+    if (!delivery || !this.config) return;
+    const { subscription, message } = delivery;
     let status = 200;
     try {
-      await this.send(subscription.data.subscription, JSON.stringify(job.data.message), {
+      await this.send(subscription.data.subscription, JSON.stringify(message), {
         vapidDetails: this.config,
         timeout: 8000,
         urgency: 'high',

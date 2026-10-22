@@ -104,8 +104,8 @@ test('push no aparelho: permissão somente por toque, teste e desativação', as
     page.getByText('Notificações ativadas neste aparelho', { exact: true }),
   ).toBeVisible();
   expect(await events()).toEqual(['permission', 'subscribe']);
-  await page.getByRole('button', { name: 'Testar aviso' }).click();
-  await expect(page.getByText('Teste colocado na fila.', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'Testar notificação' }).click();
+  await expect(page.getByText('Teste enviado à fila.', { exact: false })).toBeVisible();
   await page.getByRole('button', { name: 'Central de avisos', exact: true }).click();
   const enabled = page.getByText('Notificações ativadas neste aparelho', { exact: true });
   await expect(enabled).toHaveCount(2);

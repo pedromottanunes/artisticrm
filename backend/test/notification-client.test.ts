@@ -30,6 +30,12 @@ function harness() {
   let audible = true;
   let playable = false;
   let plays = 0;
+  let prepares = 0;
+  let stops = 0;
+  let recoverAudio = false;
+  let deferAudio = false;
+  let now = Date.now();
+  const audioWaiters: Array<(ready: boolean) => void> = [];
   let bindings = 0;
   let storageFails = false;
   let unsubscribeResult = true;
@@ -66,11 +72,12 @@ function harness() {
   Object.defineProperty(worker, 'ready', { get: () => Promise.resolve(registration) });
   window.addEventListener('artisti-push-status', (event: any) => statuses.push(event.detail));
   const exports: any = {};
+  const document = Object.assign(new EventTarget(), { hidden: false });
   runInNewContext(source, {
     exports,
     window,
     navigator: { serviceWorker: worker },
-    document: Object.assign(new EventTarget(), { hidden: false }),
+    document,
     Notification: {
       get permission() {
         return permission;
@@ -90,7 +97,11 @@ function harness() {
     CustomEvent,
     Event,
     AbortSignal,
-    Date,
+    Date: class extends Date {
+      static now() {
+        return now;
+      }
+    },
     Uint8Array,
     btoa,
     atob,
@@ -113,6 +124,16 @@ function harness() {
           : name === './notification-sound'
             ? {
                 soundEnabled: () => audible,
+                prepareNotificationSound: async () => {
+                  prepares++;
+                  if (deferAudio)
+                    return new Promise<boolean>((resolve) => audioWaiters.push(resolve));
+                  if (recoverAudio) playable = true;
+                  return playable;
+                },
+                stopNotificationSound: () => {
+                  stops++;
+                },
                 playNotificationSound: () => {
                   plays++;
                   return playable;
@@ -130,6 +151,27 @@ function harness() {
     flush,
     bindings: () => bindings,
     plays: () => plays,
+    prepares: () => prepares,
+    stops: () => stops,
+    recoverAudio: () => {
+      recoverAudio = true;
+    },
+    deferAudio: () => {
+      deferAudio = true;
+    },
+    resolveAudio: (ready: boolean) => {
+      playable = ready;
+      audioWaiters.splice(0).forEach((resolve) => resolve(ready));
+    },
+    advance: (ms: number) => {
+      now += ms;
+    },
+    focus: () => window.dispatchEvent(new Event('focus')),
+    pageshow: () => window.dispatchEvent(new Event('pageshow')),
+    visibility: (hidden: boolean) => {
+      document.hidden = hidden;
+      document.dispatchEvent(new Event('visibilitychange'));
+    },
     start: () => {
       const cleanup = effects.map((effect) => effect());
       return () => cleanup.forEach((fn) => fn());
@@ -157,7 +199,7 @@ function harness() {
       audible = enabled;
       playable = ready;
     },
-    receive: (tag: string, userId = 'consultant', deadline = Date.now() + 500) => {
+    receive: async (tag: string, userId = 'consultant', deadline = now + 900) => {
       const responses: any[] = [];
       const event = new Event('message');
       Object.assign(event, {
@@ -165,6 +207,7 @@ function harness() {
         ports: [{ postMessage: (value: unknown) => responses.push(value) }],
       });
       worker.dispatchEvent(event);
+      await flush();
       return responses[0]?.handled;
     },
     retry: async (delay = 15_000) => {
@@ -288,16 +331,85 @@ test('push client: sound acknowledgement respects unavailable audio, mute, dupli
   client.permission('default');
   const stop = client.start();
   await client.flush();
-  assert.equal(client.receive('no-audio'), false);
+  assert.equal(await client.receive('no-audio'), false);
   client.sound(true, true);
-  assert.equal(client.receive('audible'), true);
+  assert.equal(await client.receive('audible'), true);
   const played = client.plays();
-  assert.equal(client.receive('audible'), true);
+  assert.equal(await client.receive('audible'), true);
   assert.equal(client.plays(), played);
-  assert.equal(client.receive('wrong-user', 'someone-else'), false);
-  assert.equal(client.receive('late', 'consultant', Date.now() - 1), false);
+  assert.equal(await client.receive('wrong-user', 'someone-else'), false);
+  assert.equal(await client.receive('late', 'consultant', Date.now() - 1), false);
   client.sound(false, false);
-  assert.equal(client.receive('muted'), true);
+  assert.equal(await client.receive('muted'), true);
   assert.equal(client.plays(), played);
+  stop();
+});
+
+test('push client: returning to CRM prepares audio without playing or increasing push checks', async () => {
+  const client = harness();
+  const stop = client.start();
+  await client.flush();
+  const bindings = client.bindings();
+  client.recoverAudio();
+  client.focus();
+  client.pageshow();
+  client.visibility(true);
+  client.focus();
+  assert.equal(client.prepares(), 2);
+  assert.equal(client.stops(), 2, 'both hidden visibility and hidden focus stop old pulses');
+  client.visibility(false);
+  await client.flush();
+  assert.equal(client.prepares(), 3);
+  assert.equal(client.plays(), 0);
+  assert.equal(client.bindings(), bindings);
+  client.sound(false, false);
+  client.focus();
+  assert.equal(client.prepares(), 3, 'explicit mute must not resume audio');
+  stop();
+  client.focus();
+  client.pageshow();
+  assert.equal(client.prepares(), 3, 'logout removes all sound listeners');
+});
+
+test('push client: notification resumes interrupted audio before playing the same alert', async () => {
+  const client = harness();
+  const stop = client.start();
+  await client.flush();
+  client.recoverAudio();
+  assert.equal(await client.receive('resumed'), true);
+  assert.equal(client.prepares(), 1);
+  assert.equal(client.plays(), 1);
+  assert.equal(await client.receive('resumed'), true);
+  assert.equal(client.prepares(), 1, 'duplicate events do not prepare or play again');
+  stop();
+});
+
+for (const change of ['deadline', 'hidden', 'logout', 'mute'] as const)
+  test(`push client: pending audio cannot play after ${change}`, async () => {
+    const client = harness();
+    const stop = client.start();
+    await client.flush();
+    client.deferAudio();
+    const received = client.receive('pending');
+    if (change === 'deadline') client.advance(1000);
+    if (change === 'hidden') client.visibility(true);
+    if (change === 'logout') stop();
+    if (change === 'mute') client.sound(false, false);
+    client.resolveAudio(true);
+    assert.equal(await received, change === 'mute');
+    assert.equal(client.plays(), 0);
+    if (change !== 'logout') stop();
+  });
+
+test('push client: simultaneous duplicate pushes share one audible result after recovery', async () => {
+  const client = harness();
+  const stop = client.start();
+  await client.flush();
+  client.deferAudio();
+  const first = client.receive('same');
+  const second = client.receive('same');
+  client.resolveAudio(true);
+  assert.deepEqual(await Promise.all([first, second]), [true, true]);
+  assert.equal(client.plays(), 1);
   stop();
 });

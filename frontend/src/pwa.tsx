@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Bell, BellOff, Download, Send, Volume2, VolumeX } from 'lucide-react';
 import { api } from './api';
 import {
@@ -6,6 +6,8 @@ import {
   setSoundEnabled,
   prepareNotificationSound,
   playNotificationSound,
+  notificationSoundReady,
+  stopNotificationSound,
 } from './notification-sound';
 
 type InstallEvent = Event & {
@@ -210,26 +212,57 @@ async function reconcileDevicePush(userId: string, publicKey: string | null): Pr
 }
 export function PushBinding({ userId }: { userId: string }) {
   useEffect(() => {
+    let disposed = false;
     const seen = new Set<string>();
     const unlock = () => {
-      if (soundEnabled(userId)) void prepareNotificationSound();
+      if (!document.hidden && soundEnabled(userId))
+        void prepareNotificationSound({ userGesture: true });
     };
-    const receive = (event: MessageEvent) => {
+    const resume = () => {
+      if (document.hidden) stopNotificationSound();
+      else if (soundEnabled(userId)) void prepareNotificationSound();
+    };
+    const preferenceChanged = () => {
+      if (!soundEnabled(userId)) stopNotificationSound();
+    };
+    const receive = async (event: MessageEvent) => {
       const value = event.data;
-      const reply = (handled: boolean) => event.ports?.[0]?.postMessage({ handled });
+      const reply = (handled: boolean) => {
+        try {
+          event.ports?.[0]?.postMessage({ handled });
+        } catch {
+          /* The worker may have already timed out or been replaced. */
+        }
+      };
+      // Old workers without a deadline still get a bounded attempt. Leave a
+      // small margin for the acknowledgement to reach the worker before fallback.
+      const deadline =
+        typeof value?.soundDeadline === 'number' && Number.isFinite(value.soundDeadline)
+          ? value.soundDeadline - 50
+          : Date.now() + 400;
+      const eligible = () => !disposed && !document.hidden && Date.now() < deadline;
       if (
         value?.type !== 'artisti-push' ||
         value.userId !== userId ||
         typeof value.tag !== 'string' ||
-        document.hidden ||
-        (typeof value.soundDeadline === 'number' && Date.now() >= value.soundDeadline)
+        !eligible()
       ) {
         reply(false);
         return;
       }
       // Explicit mute and already-handled retries must stay silent. Otherwise,
       // let the worker fall back to OS sound when Web Audio cannot play.
-      const handled = seen.has(value.tag) || !soundEnabled(userId) || playNotificationSound();
+      let handled = seen.has(value.tag) || !soundEnabled(userId);
+      if (!handled) {
+        const ready = await prepareNotificationSound({ timeoutMs: deadline - Date.now() });
+        // A late resume must not play after OS fallback, logout, mute or hiding.
+        if (!eligible()) {
+          reply(false);
+          return;
+        }
+        handled =
+          seen.has(value.tag) || !soundEnabled(userId) || (ready && playNotificationSound());
+      }
       if (handled) {
         seen.add(value.tag);
         if (seen.size > 200) seen.delete(seen.values().next().value!);
@@ -238,11 +271,23 @@ export function PushBinding({ userId }: { userId: string }) {
     };
     window.addEventListener('pointerdown', unlock);
     window.addEventListener('keydown', unlock);
+    window.addEventListener('focus', resume);
+    window.addEventListener('pageshow', resume);
+    window.addEventListener('artisti-sound-preference', preferenceChanged);
+    window.addEventListener('storage', preferenceChanged);
+    document.addEventListener('visibilitychange', resume);
     navigator.serviceWorker?.addEventListener('message', receive);
     return () => {
+      disposed = true;
       window.removeEventListener('pointerdown', unlock);
       window.removeEventListener('keydown', unlock);
+      window.removeEventListener('focus', resume);
+      window.removeEventListener('pageshow', resume);
+      window.removeEventListener('artisti-sound-preference', preferenceChanged);
+      window.removeEventListener('storage', preferenceChanged);
+      document.removeEventListener('visibilitychange', resume);
       navigator.serviceWorker?.removeEventListener('message', receive);
+      stopNotificationSound();
     };
   }, [userId]);
   useEffect(() => {
@@ -325,14 +370,23 @@ export function DevicePanel({ userId }: { userId: string }) {
   const [verificationError, setVerificationError] = useState('');
   const [notice, setNotice] = useState('');
   const [audible, setAudible] = useState(() => soundEnabled(userId));
+  const [soundReady, setSoundReady] = useState(notificationSoundReady);
+  const soundTestOwner = useRef<string | null>(userId);
   useEffect(() => {
-    const update = () => setAudible(soundEnabled(userId));
+    soundTestOwner.current = userId;
+    const update = () => {
+      setAudible(soundEnabled(userId));
+      setSoundReady(notificationSoundReady());
+    };
     update();
     window.addEventListener('artisti-sound-preference', update);
     window.addEventListener('storage', update);
+    window.addEventListener('artisti-sound-state', update);
     return () => {
+      soundTestOwner.current = null;
       window.removeEventListener('artisti-sound-preference', update);
       window.removeEventListener('storage', update);
+      window.removeEventListener('artisti-sound-state', update);
     };
   }, [userId]);
   const supported =
@@ -374,7 +428,7 @@ export function DevicePanel({ userId }: { userId: string }) {
     try {
       // Safari requires the permission prompt directly inside the tap handler.
       const permissionRequest = Notification.requestPermission();
-      if (soundEnabled(userId)) void prepareNotificationSound();
+      if (soundEnabled(userId)) void prepareNotificationSound({ userGesture: true });
       const allowed = await permissionRequest;
       setPermission(allowed);
       if (allowed !== 'granted') return;
@@ -399,6 +453,7 @@ export function DevicePanel({ userId }: { userId: string }) {
     setNotice('');
     try {
       if (test) {
+        if (soundEnabled(userId)) void prepareNotificationSound({ userGesture: true });
         const registration = await navigator.serviceWorker.getRegistration('/');
         const subscription = await registration?.pushManager.getSubscription();
         if (!subscription) throw new Error('Ative as notificações novamente.');
@@ -406,7 +461,7 @@ export function DevicePanel({ userId }: { userId: string }) {
           method: 'POST',
           body: JSON.stringify({ endpoint: subscription.endpoint }),
         });
-        setNotice('Teste colocado na fila. Aguarde a notificação neste aparelho.');
+        setNotice('Teste enviado à fila. Mantenha o CRM na tela e aguarde o aviso neste aparelho.');
       } else {
         const previouslyOptedOut = optedOut(userId);
         setOptedOut(userId, true);
@@ -491,7 +546,7 @@ export function DevicePanel({ userId }: { userId: string }) {
           <div className="device-actions">
             <button className="button outline" disabled={busy} onClick={() => void action(true)}>
               <Send size={18} />
-              Testar aviso
+              Testar notificação
             </button>
             <button className="button outline" disabled={busy} onClick={() => void action(false)}>
               <BellOff size={18} />
@@ -505,6 +560,13 @@ export function DevicePanel({ userId }: { userId: string }) {
           {busy ? 'Ativando…' : 'Ativar notificações'}
         </button>
       )}
+      <p role="status" className="device-state">
+        {!audible
+          ? 'Som silenciado no CRM'
+          : soundReady
+            ? 'Áudio preparado — confira o volume com o teste abaixo.'
+            : 'Áudio aguardando liberação — toque em “Testar som”.'}
+      </p>
       <div className="device-actions">
         <button
           type="button"
@@ -512,7 +574,7 @@ export function DevicePanel({ userId }: { userId: string }) {
           aria-pressed={audible}
           onClick={() => {
             setSoundEnabled(userId, !audible);
-            if (!audible) void prepareNotificationSound();
+            if (!audible) void prepareNotificationSound({ userGesture: true });
           }}
         >
           {audible ? <VolumeX size={18} /> : <Volume2 size={18} />}
@@ -522,11 +584,14 @@ export function DevicePanel({ userId }: { userId: string }) {
           type="button"
           className="button outline"
           onClick={async () => {
-            const ready = await prepareNotificationSound();
+            const ready = await prepareNotificationSound({ userGesture: true });
+            if (soundTestOwner.current !== userId) return;
             setNotice(
-              ready && playNotificationSound()
+              ready && soundEnabled(userId) && playNotificationSound()
                 ? 'Som de teste reproduzido. Confira o volume do aparelho.'
-                : 'Não foi possível tocar o som. Confira as permissões de áudio do navegador.',
+                : !soundEnabled(userId)
+                  ? 'Ative o som no CRM antes de testar.'
+                  : 'Não foi possível liberar o áudio. Toque novamente em “Testar som”.',
             );
           }}
         >
@@ -534,8 +599,12 @@ export function DevicePanel({ userId }: { userId: string }) {
         </button>
       </div>
       <p>
-        O alerta sonoro toca com o CRM aberto, após sua primeira interação. Com o aplicativo
-        fechado, o som do push depende do aparelho e do modo silencioso.
+        “Testar som” toca o alerta aqui no CRM. “Testar notificação” verifica o envio pelo servidor
+        e o recebimento neste aparelho; entrar na fila não confirma a entrega.
+      </p>
+      <p>
+        Com o CRM visível e o áudio liberado, os avisos usam esse mesmo som. Em outro aplicativo ou
+        com a tela bloqueada, o som depende das configurações do aparelho e do modo silencioso.
       </p>
       <p>
         Os avisos incluem cada nova mensagem, leads, atribuições, consultas e vendas. Ao entrar
