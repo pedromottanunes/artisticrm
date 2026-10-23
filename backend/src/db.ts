@@ -94,6 +94,7 @@ export async function migrate(db: Database) {
       '038_messenger.sql',
       '039_messenger_resilience.sql',
       '040_conversation_portfolio_sharing.sql',
+      '041_commercial_evidence.sql',
     ]) {
       const version = file.split('_')[0];
       const done = await tx.query('SELECT version FROM schema_migrations WHERE version=$1', [

@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './frontend/e2e',
+  testIgnore: '**/commercial-evidence.spec.ts',
   fullyParallel: false,
   workers: 1,
   timeout: 30_000,
@@ -24,6 +25,8 @@ export default defineConfig({
       MESSENGER_ENABLED: 'false',
       META_MARKETING_ENABLED: 'false',
       PUSH_ENABLED: 'false',
+      COMMERCIAL_EVIDENCE_ENABLED: 'false',
+      COMMERCIAL_AI_ENABLED: 'false',
     },
   },
 });

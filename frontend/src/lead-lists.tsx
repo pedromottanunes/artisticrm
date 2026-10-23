@@ -11,6 +11,7 @@ import {
   type Snapshot,
 } from './api';
 import { Empty, Source } from './components';
+import { CommercialList } from './commercial-list';
 
 const categories: { id: LeadListCategory; label: string }[] = [
   { id: 'ALL', label: 'Comerciais' },
@@ -142,6 +143,7 @@ export function LeadLists({
 
   return (
     <section className="lead-lists" aria-label="Listas de leads">
+      <CommercialList user={data.user} users={data.users} revision={revision} onOpen={onOpen} />
       <div className="lead-list-categories" role="group" aria-label="Escolher lista">
         {categories.map((item) => (
           <button

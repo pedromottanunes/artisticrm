@@ -86,7 +86,7 @@ self.addEventListener('push', (event) => {
         /* A malformed push still shows a generic notice. */
       }
       const requestedPage = data.page === 'distribution' ? 'central' : data.page;
-      const page = ['mine', 'pool', 'comments', 'central', 'settings', 'inbox'].includes(
+      const page = ['mine', 'pool', 'comments', 'central', 'settings', 'inbox', 'lists'].includes(
         requestedPage,
       )
         ? requestedPage
@@ -96,7 +96,7 @@ self.addEventListener('push', (event) => {
       const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
       const visible = windows.filter((client) => client.visibilityState === 'visible');
       const client = visible.find((item) => item.focused) || visible[0];
-      const handled = await handleForegroundSound(client, data);
+      const handled = data.silent === true || (await handleForegroundSound(client, data));
       await self.registration.showNotification(data.title || 'Artisti CRM', {
         body: data.body || 'Há uma atualização no CRM. Abra para consultar.',
         icon: '/icons/icon-192.png',
@@ -116,7 +116,7 @@ self.addEventListener('notificationclick', (event) => {
         event.notification.data?.page === 'distribution'
           ? 'central'
           : event.notification.data?.page;
-      const page = ['mine', 'pool', 'comments', 'central', 'settings', 'inbox'].includes(
+      const page = ['mine', 'pool', 'comments', 'central', 'settings', 'inbox', 'lists'].includes(
         requestedPage,
       )
         ? requestedPage

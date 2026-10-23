@@ -1734,6 +1734,7 @@ export class MongoOperations {
             ? `Venda concluída por ${actor.name}.`
             : `Dados da venda atualizados por ${actor.name}.`,
           {
+            beneficiary_id: row.owner_id,
             seller: commercial.sale_seller_name,
             consultant: commercial.consultant,
             total_value_cents: commercial.total_value_cents,

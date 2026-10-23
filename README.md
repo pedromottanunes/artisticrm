@@ -212,7 +212,114 @@ Meta Ads e Google Ads são integrações de relatórios distintas dos canais de 
 - Por decisão comercial, entradas do Instagram sem referência de anúncio recebem o rótulo Orgânica; isso não comprova ausência de influência de publicidade. As regras de medição e ativação estão em [INSTAGRAM.md](INSTAGRAM.md#marketing-api-e-métricas).
 - Não enviar conversões médicas às plataformas automaticamente; relatórios internos são independentes dessa eventual exportação.
 
-## Referências já verificadas na conversa
+## Checagem de sinal e contrato — implementação local de 22/10/2026
+
+O novo módulo está atrás de configuração, desligado por padrão. Não migra campos
+comerciais antigos para pagamentos confirmados e não muda rodízio, Bolsão, mensagens
+ou a semântica de venda registrada dos relatórios existentes.
+
+### Regra comercial confirmada
+
+- R$ 2.000 desde 01/10/2026. Valores históricos exigem evidências e casos que
+  atravessam a vigência ficam para decisão auditada da gestão.
+- Primeiro pagamento parcial ou assinatura inicia o fechamento.
+- Sinal completo **e** contrato assinado, comprovados até o dia 5 do mês seguinte,
+  entram na competência do mês anterior, com previsão de pagamento no dia 10.
+- Se tudo começa em dezembro, não entra no pagamento de 10/12 só por ocorrer até dia 5.
+- Exemplo: sinal em 29/11 e contrato em 05/12 => competência novembro, previsão 10/12.
+- Exemplo: sinal em 30/11 e contrato em 06/12 => competência dezembro, previsão 10/01.
+- Contrato em 28/11 e sinal completo em 05/12 => previsão 10/12.
+- A data efetiva do documento prevalece sobre a data de upload/análise. Evidência
+  validada após a previsão é sinalizada; não produz pagamento retroativo automático.
+- Cirurgia sem data é pendência operacional, não bloqueio de elegibilidade.
+- Não calcula percentual, valor de comissão, estorno ou executa pagamentos.
+
+### Interface e segurança
+
+Na ficha comercial: **Sinal, contrato e comissão**. Em **Listas**: painel recolhível
+com pendências/elegíveis, competência e filtro de consultor para a gestão.
+Vendas registradas sem anexos também aparecem como sinal/contrato pendentes. Leads
+sem venda e sem documentos não são incluídos. Nenhum valor antigo vira pagamento
+confirmado por aparecer nessa lista.
+
+O consultor da apuração é o responsável no **primeiro registro da venda**, preservado
+no histórico mesmo após transferências. O primeiro upload não define beneficiário.
+Vendas históricas registradas por consultor usam esse autor identificado; lançamentos
+antigos da gestão sem identificação não recebem um beneficiário presumido e exibem
+aviso para conferência antes do pagamento. O filtro da lista é pelo responsável atual.
+
+Uma divergência financeira continua bloqueando a elegibilidade durante novas
+tentativas, falhas e leituras inconclusivas. Reanalisar apenas parte de um grupo
+libera as páginas restantes para nova checagem, sem apagar bloqueios não resolvidos.
+Classificar um contato como não comercial cancela a tarefa, mas não resolve uma
+divergência financeira: o bloqueio é preservado caso a gestão restaure o contato.
+Correções/revogações atualizam apenas campos automáticos ainda não salvos: campos
+salvos e edições manuais do consultor não são substituídos pela IA.
+Os controles documentais são independentes do formulário da venda: um rascunho de
+revisão não bloqueia seu registro nem salva o cadastro ao pressionar Enter.
+
+Prints JPG/PNG/WebP de até 8 MB; até quatro imagens da mesma categoria por análise.
+Um pagamento por análise (várias páginas da mesma evidência podem ser agrupadas).
+HEIC e PDF não são aceitos nesta entrega; converter para print legível sem omitir dados.
+
+Os originais são privados no banco, separados do lead: BinData em MongoDB e bytea
+em SQL, abaixo do limite de documento BSON. As prévias são decodificadas e têm
+metadados removidos. Não dependem do disco efêmero do Render. Planejar capacidade,
+backup e retenção antes da ativação; não existe expurgo automático de evidências.
+Exclusão permanente do lead, já restrita à gestão e confirmação explícita, remove
+também arquivos, análises e lançamentos daquele caso na mesma transação.
+
+A IA extrai JSON; regras determinísticas conferem identidade, data, valor,
+destinatário e duplicidade. Não há consulta bancária nem garantia antifraude.
+Chaves exclusivas por transação/documento impedem contabilização concorrente em
+dois pacientes. Arquivo de contrato não é prova de pagamento; nome “signed” não
+prova assinatura. Divergências exigem revisão autorizada com justificativa.
+Conversas compartilhadas não concedem acesso a documentos financeiros.
+
+### Ativação (não realizada automaticamente)
+
+1. Fazer backup e subir a versão com migração SQL 041 / índices MongoDB.
+2. Configurar `COMMERCIAL_EVIDENCE_ENABLED=true` para disponibilizar o módulo.
+3. Configurar `GEMINI_API_KEY`, modelo exato em `COMMERCIAL_AI_MODEL` e
+   `COMMERCIAL_AI_ENABLED=true`. Não existe modelo/chave padrão nem fallback externo.
+4. Cadastrar identificadores exatos dos destinatários autorizados em
+   `COMMERCIAL_PAYMENT_RECIPIENTS` (separados por vírgula). Ausência/máscara não
+   correspondente exige revisão humana, nunca confirmação por aproximação.
+5. Validar imagens autorizadas de cada categoria, precisão e tratamento de dados
+   da conta/provedor. Só então habilitar `COMMERCIAL_AI_AUTO_VALIDATE=true`.
+6. Ajustar `COMMERCIAL_AI_DAILY_LIMIT` (padrão 100 chamadas, incluindo tentativas).
+7. API pode executar uma análise por vez com fila persistente. Para isolar carga,
+   definir `COMMERCIAL_WORKER_ENABLED=false` na API e iniciar processo separado
+   com `npm run commercial:worker -w backend`, mesmo banco/configuração. O worker
+   exige migração prévia; não cria usuários, não migra rodízio e não abre HTTP.
+
+Desativar a IA mantém documentos e fatos já validados; novas evidências não são
+confirmadas por falta de leitura. Não ativar automaticamente em produção nem
+considerar os testes sintéticos como homologação de precisão do modelo.
+
+### Verificação local
+
+```text
+npm run typecheck
+npm run build
+npm test
+node --import tsx --test backend/test/commercial-domain.test.ts backend/test/commercial-evidence.test.ts backend/test/commercial-ai.test.ts
+npx playwright test --config=playwright.commercial.config.ts
+```
+
+Os testes novos usam imagens sintéticas, bancos isolados e simulador de IA, sem
+consumir créditos nem enviar dados de pacientes. WebKit emula iPhone; não substitui
+homologação no aparelho físico. O Node recomendado continua sendo o declarado em
+`package.json` (>=22.23.3).
+
+A cobertura inclui os exemplos comerciais confirmados, upload/reenvio idempotente, permissões,
+comprovantes repetidos, pagamentos parciais, revisão humana, exclusão autorizada,
+concorrência e recuperação de tarefas interrompidas. Reclassificar um contato como
+não comercial cancela sua análise sem interromper a fila dos outros pacientes.
+Os testes do módulo são executados pelo arquivo dedicado do Playwright; a suíte
+normal mantém o módulo desligado para conferir o fluxo anterior dos consultores.
+
+## Referências técnicas e de descoberta
 
 - Site de referência visual: https://artistitransplantecapilar.com.br/
 - Tema: https://artistitransplantecapilar.com.br/wp-content/uploads/elementor/css/post-7.css

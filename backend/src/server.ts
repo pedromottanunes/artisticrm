@@ -10,6 +10,7 @@ import { instagramConfig } from './instagram.js';
 import { messengerConfig } from './messenger.js';
 import { metaMarketingConfig } from './meta-marketing.js';
 import { pushConfig } from './push.js';
+import { commercialConfig } from './commercial-ai.js';
 import { openMongo, initializeMongo, bootstrapMongo } from './mongo-store.js';
 
 const production = process.env.NODE_ENV === 'production';
@@ -63,6 +64,7 @@ const { app } = await buildApp(db, {
   messenger,
   metaMarketing,
   push: pushConfig(process.env),
+  commercial: commercialConfig(process.env),
   appOrigin,
   rateLimitMax: testRateLimitMax,
   staticRoot: production

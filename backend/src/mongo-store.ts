@@ -129,6 +129,28 @@ export async function openMongo(uri: string, databaseName = 'artisti') {
 }
 
 export async function initializeMongo(db: MongoStore) {
+  await db.collection('commercial_records').createIndex({ id: 1 }, { unique: true });
+  await db
+    .collection('commercial_records')
+    .createIndex({ opportunity_id: 1, kind: 1, created_at: 1 });
+  await db
+    .collection('commercial_records')
+    .createIndex({ kind: 1, 'data.status': 1, 'data.available_at': 1 });
+  await db.collection('commercial_records').createIndex(
+    { 'data.transaction_key': 1 },
+    {
+      unique: true,
+      partialFilterExpression: {
+        kind: 'payment',
+        'data.status': 'confirmed',
+        'data.transaction_key': { $type: 'string' },
+      },
+    },
+  );
+  await db.collection('commercial_files').createIndex({ id: 1 }, { unique: true });
+  await db.collection('commercial_files').createIndex({ opportunity_id: 1 });
+  await db.collection('commercial_payment_claims').createIndex({ id: 1 }, { unique: true });
+  await db.collection('commercial_payment_claims').createIndex({ opportunity_id: 1 });
   await db
     .collection('opportunities')
     .updateMany(

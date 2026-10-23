@@ -79,6 +79,21 @@ test('push worker: a nova versao assume o controle sem esperar o PWA ser fechado
   await worker.dispatch('install', {});
   assert.equal(worker.skipWaitingCalls(), 1);
 });
+test('push worker: checagem documental é silenciosa e abre Listas sem dados financeiros', async () => {
+  const worker = harness();
+  await worker.dispatch('push', {
+    data: {
+      json: () => ({ page: 'lists', tag: 'commercial-test', userId: 'user-a', silent: true }),
+    },
+  });
+  assert.equal(worker.notices.length, 0, 'does not play the lead alarm');
+  assert.equal(worker.shown[0].silent, true);
+  assert.equal(worker.shown[0].data.page, 'lists');
+  await worker.dispatch('notificationclick', {
+    notification: { data: worker.shown[0].data, close: () => {} },
+  });
+  assert.deepEqual(worker.navigated, ['https://crm.example.test/#lists']);
+});
 
 test('push worker: waits briefly for resumed audio and preserves a single foreground sound', async () => {
   const worker = harness('resumed');

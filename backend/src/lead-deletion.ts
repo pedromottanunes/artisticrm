@@ -43,6 +43,18 @@ export async function deleteLeadData(
       'O lead mudou. Feche e reabra a ficha antes de excluir.',
     );
 
+  // Same transaction as the explicit permanent deletion. A worker holding an old
+  // lease cannot recreate these records: it must lock/recheck the opportunity.
+  if (tx instanceof MongoTx) {
+    await tx.remove('commercial_records', { opportunity_id: id });
+    await tx.remove('commercial_files', { opportunity_id: id });
+    await tx.remove('commercial_payment_claims', { opportunity_id: id });
+  } else {
+    await tx.query('DELETE FROM commercial_records WHERE opportunity_id=$1', [id]);
+    await tx.query('DELETE FROM commercial_files WHERE opportunity_id=$1', [id]);
+    await tx.query('DELETE FROM commercial_payment_claims WHERE opportunity_id=$1', [id]);
+  }
+
   if (mongo) {
     const contact = await tx.one('contacts', { id: row.contact_id });
     const shared = await tx.count('opportunities', { contact_id: row.contact_id, id: { $ne: id } });

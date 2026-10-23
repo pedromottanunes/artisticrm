@@ -1,5 +1,7 @@
 import { LeadQualityControl } from './lead-quality';
-import { useEffect, useState, useRef, useId, type FormEvent } from 'react';
+import { useEffect, useState, useRef, useId, useCallback, type FormEvent } from 'react';
+import { CommercialPanel } from './commercial-panel';
+import type { CommercialSuggestions } from './commercial-api';
 import {
   ArrowRight,
   Check,
@@ -203,6 +205,66 @@ export function LeadDetail({
   const [saved, setSaved] = useState(false);
   const [confirmSale, setConfirmSale] = useState(false);
   const [hasPack, setHasPack] = useState(detail.has_pack === true);
+  const commercialDirty = useRef(new Set<string>());
+  const [commercialDraftState, setCommercialDraftState] = useState({
+    autofilled: [] as string[],
+    inputs: {
+      total_value: detail.total_value_text || currencyInput(detail.total_value_cents),
+      hair_grade_classification: detail.hair_grade_classification,
+      procedure_date: detail.procedure_date?.slice(0, 10) ?? '',
+      pack_quantity:
+        detail.pack_quantity === null || detail.pack_quantity === undefined
+          ? ''
+          : String(detail.pack_quantity),
+    },
+  });
+  const commercialInputs = commercialDraftState.inputs;
+  const changeCommercial = (field: keyof typeof commercialInputs, value: string) => {
+    commercialDirty.current.add(field);
+    setCommercialDraftState((current) => ({
+      inputs: { ...current.inputs, [field]: value },
+      autofilled: current.autofilled.filter((key) => key !== field),
+    }));
+  };
+  const applyCommercialSuggestions = useCallback(
+    (suggestions: CommercialSuggestions) => {
+      setCommercialDraftState((current) => {
+        const next = { ...current.inputs };
+        const autofilled = new Set(current.autofilled);
+        const fields = {
+          total_value: suggestions.total_value_cents
+            ? currencyInput(Number(suggestions.total_value_cents.value))
+            : undefined,
+          hair_grade_classification: suggestions.hair_grade_classification?.value,
+          procedure_date: suggestions.procedure_date?.value,
+          pack_quantity: suggestions.pack_quantity?.value,
+        };
+        let changed = false;
+        for (const [field, value] of Object.entries(fields)) {
+          const key = field as keyof typeof next;
+          if (commercialDirty.current.has(key)) continue;
+          // Only unsaved, machine-filled values follow corrections/revocations.
+          // Saved values and anything the consultant touched remain theirs.
+          if (!autofilled.has(key) && (current.inputs[key] || value === undefined)) continue;
+          const nextValue = value === undefined ? '' : String(value);
+          if (next[key] !== nextValue || autofilled.has(key) !== (value !== undefined))
+            changed = true;
+          next[key] = nextValue;
+          if (value === undefined) autofilled.delete(key);
+          else autofilled.add(key);
+        }
+        return changed ? { inputs: next, autofilled: [...autofilled] } : current;
+      });
+      if (
+        detail.has_pack === null &&
+        detail.pack_quantity == null &&
+        !commercialDirty.current.has('has_pack') &&
+        !commercialDirty.current.has('pack_quantity')
+      )
+        setHasPack(Number(suggestions.pack_quantity?.value ?? 0) > 0);
+    },
+    [detail.has_pack, detail.pack_quantity],
+  );
   const instagramUsername = detail.instagram?.replace(/^@+/, '').trim();
   const scheduledAppointment = detail.appointments.find(
     (appointment) => appointment.status === 'scheduled',
@@ -257,6 +319,18 @@ export function LeadDetail({
   const formId = useId();
   useEffect(() => {
     setHasPack(detail.has_pack === true);
+    // Match the existing form reset when the saved patient version changes.
+    // Document polling uses a separate revision and never clears this draft.
+    setCommercialDraftState({
+      autofilled: [],
+      inputs: {
+        total_value: detail.total_value_text || currencyInput(detail.total_value_cents),
+        hair_grade_classification: detail.hair_grade_classification,
+        procedure_date: detail.procedure_date?.slice(0, 10) ?? '',
+        pack_quantity: detail.pack_quantity == null ? '' : String(detail.pack_quantity),
+      },
+    });
+    commercialDirty.current.clear();
     setConfirmSale(false);
   }, [detail.id, detail.version, detail.has_pack]);
   const commercialDraft = (form: FormData) => ({
@@ -700,9 +774,8 @@ export function LeadDetail({
                     Valor total
                     <input
                       name="total_value"
-                      defaultValue={
-                        detail.total_value_text || currencyInput(detail.total_value_cents)
-                      }
+                      value={commercialInputs.total_value}
+                      onChange={(event) => changeCommercial('total_value', event.target.value)}
                       maxLength={160}
                       placeholder="Digite livremente"
                       required
@@ -724,7 +797,10 @@ export function LeadDetail({
                     Grau e classificação A
                     <input
                       name="hair_grade_classification"
-                      defaultValue={detail.hair_grade_classification}
+                      value={commercialInputs.hair_grade_classification}
+                      onChange={(event) =>
+                        changeCommercial('hair_grade_classification', event.target.value)
+                      }
                       maxLength={160}
                       placeholder="Ex.: grau 3 A1"
                       required
@@ -735,7 +811,11 @@ export function LeadDetail({
                     <select
                       name="has_pack"
                       value={hasPack ? 'true' : 'false'}
-                      onChange={(event) => setHasPack(event.target.value === 'true')}
+                      onChange={(event) => {
+                        commercialDirty.current.add('has_pack');
+                        commercialDirty.current.add('pack_quantity');
+                        setHasPack(event.target.value === 'true');
+                      }}
                     >
                       <option value="false">Não</option>
                       <option value="true">Sim</option>
@@ -744,7 +824,6 @@ export function LeadDetail({
                   <label>
                     Quantidade de packs
                     <input
-                      key={`${hasPack}:${detail.version}`}
                       name="pack_quantity"
                       type="number"
                       inputMode="numeric"
@@ -752,7 +831,8 @@ export function LeadDetail({
                       max={10000}
                       step={1}
                       disabled={!hasPack}
-                      defaultValue={hasPack ? (detail.pack_quantity ?? '') : 0}
+                      value={hasPack ? commercialInputs.pack_quantity : '0'}
+                      onChange={(event) => changeCommercial('pack_quantity', event.target.value)}
                       placeholder="Quantidade"
                     />
                   </label>
@@ -761,7 +841,8 @@ export function LeadDetail({
                     <input
                       name="procedure_date"
                       type="date"
-                      defaultValue={detail.procedure_date?.slice(0, 10) ?? ''}
+                      value={commercialInputs.procedure_date}
+                      onChange={(event) => changeCommercial('procedure_date', event.target.value)}
                       required={selectedStage === 'CLOSED_WITH_DATE'}
                     />
                   </label>
@@ -779,6 +860,14 @@ export function LeadDetail({
                 </div>
               </section>
             </fieldset>
+            {detail.can_edit && !detail.non_commercial_reason && (
+              <CommercialPanel
+                id={detail.id}
+                opportunityVersion={detail.version}
+                patientName={detail.name}
+                onSuggestions={applyCommercialSuggestions}
+              />
+            )}
             <div className="detail-evidence">
               <LinkEvidence />
               <p>

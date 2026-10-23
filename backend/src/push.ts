@@ -273,6 +273,18 @@ export class PushService {
     const lead = await reads.opportunity(event.data.opportunityId);
     if (!lead || lead.non_commercial_reason) return null;
     const kind = String(event.data.kind);
+    if (kind === 'commercial.checked') {
+      // Private document updates follow current access, never the whole queue.
+      if (user.role !== 'manager' && lead.owner_id !== user.id) return null;
+      return {
+        title: 'Artisti CRM',
+        body: 'Uma checagem documental foi atualizada. Consulte as pendências comerciais em Listas.',
+        page: 'lists',
+        silent: true,
+        userId: user.id,
+        tag: `artisti-commercial-${createHash('sha256').update(event.id).digest('hex').slice(0, 24)}`,
+      };
+    }
     const received = kind === 'message.received' || kind === 'comment.received.owned';
     const movement = [
       'opportunity.claimed',

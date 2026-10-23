@@ -33,6 +33,12 @@ import { DomainError, requireManager, stages, type User } from './types.js';
 import { personalQueueStatus } from './queue-status.js';
 import { attendantPoolCounts } from './pool-counts.js';
 import { commercialFields } from './commercial-fields.js';
+import { registerCommercial } from './commercial-routes.js';
+import {
+  commercialConfig,
+  type CommercialConfig,
+  type CommercialAnalyzer,
+} from './commercial-ai.js';
 import { conversationPortfolioShares, reviewSourceIds } from './conversation-sharing.js';
 
 declare module 'fastify' {
@@ -91,6 +97,8 @@ export async function buildApp(
     push?: PushConfig;
     pushSender?: PushSender;
     rateLimitMax?: number;
+    commercial?: CommercialConfig;
+    commercialAnalyzer?: CommercialAnalyzer;
   } = {},
 ) {
   const app = Fastify({
@@ -133,7 +141,7 @@ export async function buildApp(
         .header('Strict-Transport-Security', 'max-age=31536000')
         .header(
           'Content-Security-Policy',
-          "default-src 'self'; script-src 'self'; worker-src 'self'; manifest-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.cdninstagram.com https://*.fbcdn.net https://lookaside.fbsbx.com https://*.fbsbx.com; media-src 'self' https://*.cdninstagram.com https://*.fbcdn.net https://lookaside.fbsbx.com https://*.fbsbx.com; frame-src 'self' https://www.instagram.com; font-src 'self'; connect-src 'self' https://*.cdninstagram.com https://*.fbcdn.net https://lookaside.fbsbx.com https://*.fbsbx.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
+          "default-src 'self'; script-src 'self'; worker-src 'self'; manifest-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.cdninstagram.com https://*.fbcdn.net https://lookaside.fbsbx.com https://*.fbsbx.com; media-src 'self' https://*.cdninstagram.com https://*.fbcdn.net https://lookaside.fbsbx.com https://*.fbsbx.com; frame-src 'self' https://www.instagram.com; font-src 'self'; connect-src 'self' https://*.cdninstagram.com https://*.fbcdn.net https://lookaside.fbsbx.com https://*.fbsbx.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
         );
     // The router decodes static path segments. Authorize the matched route, not
     // the raw URL (e.g. /%61pi/ must have exactly the same protection as /api/).
@@ -779,6 +787,11 @@ export async function buildApp(
     options.pushSender,
   );
   registerShortcuts(app, db, () => crm.now());
+  const commercial = registerCommercial(app, db, options.commercial ?? commercialConfig({}), {
+    analyzer: options.commercialAnalyzer,
+    clock: options.clock,
+    reconcile: options.reconcile,
+  });
   instagram.comments.register(app, options.reconcile !== false);
   app.get('/api/v1/whatsapp/status', async (request) => {
     requireManager(request.user);
@@ -1084,5 +1097,6 @@ export async function buildApp(
     messenger,
     metaMarketing: metaMarketingRuntime.marketing,
     push,
+    commercial,
   };
 }

@@ -121,6 +121,7 @@ export async function enqueuePushEvent(
       'appointment.updated',
       'sale.completed',
       'sale.updated',
+      'commercial.checked',
       'lead.repeated',
       'message.received',
       'comment.received.owned',
