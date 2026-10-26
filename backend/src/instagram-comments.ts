@@ -722,7 +722,7 @@ export class InstagramComments {
         );
       }
       // Keep the public comment in history without treating it as an inbound Direct/open window.
-      if (reservation?.status === 'waiting' && new Date(reservation.expires_at) > time)
+      if (reservation?.status === 'waiting')
         await finishProspect(
           tx,
           { reservation },

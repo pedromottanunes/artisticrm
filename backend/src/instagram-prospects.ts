@@ -9,8 +9,10 @@ import type { ChannelIdentityInput } from './crm.js';
 type Tx = Sql | MongoTx;
 type Row = Record<string, any>;
 type Table = 'instagram_prospects' | 'users' | 'opportunities' | 'audit_events';
-const DAY = 86_400_000;
 const collation = { locale: 'en', strength: 2 };
+// Keeps rolling deploys safe if an older instance still checks the legacy column.
+// Current ownership rules never use this date and the API never exposes it as a deadline.
+const PERMANENT_RESERVATION_COMPATIBILITY_DATE = new Date('9999-12-31T23:59:59.999Z');
 
 // Only fixed, internal table/column names are accepted by these helpers.
 async function one(tx: Tx, table: Table, filter: Row): Promise<Row | null> {
@@ -129,15 +131,10 @@ export async function findProspect(tx: Tx, accountId: string, username: string) 
 export function prospectBlocksComment(
   row: Row | null | undefined,
   userId: string,
-  now: Date,
+  _now: Date,
   senderId: string,
 ) {
-  if (
-    !row ||
-    row.status === 'cancelled' ||
-    (row.status === 'waiting' && new Date(row.expires_at) <= now)
-  )
-    return false;
+  if (!row || row.status === 'cancelled') return false;
   return (
     row.status === 'review' ||
     row.owner_id !== userId ||
@@ -220,7 +217,7 @@ export async function decideProspect(
   tx: Tx,
   identity: ChannelIdentityInput | undefined,
   routing: ProspectRouting | undefined,
-  now: Date,
+  _now: Date,
 ): Promise<ProspectDecision> {
   if (!identity || identity.provider !== 'instagram' || !routing) return {};
   const reservation = routing.username
@@ -232,7 +229,6 @@ export async function decideProspect(
   const owner = await one(tx, 'users', { id: reservation.owner_id });
   const valid =
     reservation.status === 'waiting' &&
-    new Date(reservation.expires_at) > now &&
     owner?.active &&
     owner.role === 'attendant' &&
     (!reservation.external_user_id || reservation.external_user_id === identity.external_user_id);
@@ -340,11 +336,7 @@ export class InstagramProspects {
               (await tx.query<{ now: Date }>('SELECT clock_timestamp() AS now')).rows[0].now,
             );
       const prior = await findProspect(tx, account, username);
-      if (
-        prior &&
-        prior.status !== 'cancelled' &&
-        (prior.status !== 'waiting' || new Date(prior.expires_at) > now)
-      ) {
+      if (prior && prior.status !== 'cancelled') {
         if (prior.owner_id !== user.id)
           throw new DomainError(
             'PROFILE_RESERVED',
@@ -352,7 +344,7 @@ export class InstagramProspects {
           );
         return { id: prior.id, username, status: prior.status, duplicate: true };
       }
-      // Existing known identities take precedence, even if the old reservation expired.
+      // Existing known identities take precedence over a new reservation.
       const identities =
         tx instanceof MongoTx
           ? await tx
@@ -393,7 +385,7 @@ export class InstagramProspects {
         opportunity_id: null,
         created_at: now,
         updated_at: now,
-        expires_at: new Date(now.getTime() + 30 * DAY),
+        expires_at: PERMANENT_RESERVATION_COMPATIBILITY_DATE,
         version: (prior?.version ?? 0) + 1,
       };
       const id = prior?.id ?? randomUUID();
@@ -449,12 +441,9 @@ export class InstagramProspects {
         id: row.id,
         username: row.username,
         owner_id: row.owner_id,
-        status:
-          row.status === 'waiting' && new Date(row.expires_at) <= new Date()
-            ? 'expired'
-            : row.status,
+        status: row.status,
         source: row.source,
-        expires_at: row.expires_at,
+        expires_at: null,
         version: row.version,
         opportunity_id: row.opportunity_id,
       })),
@@ -488,20 +477,18 @@ export class InstagramProspects {
   }
   async hasReservationsToResolve() {
     if (!this.accountId) return false;
-    const now = new Date();
     if (this.db.kind === 'mongo')
       return !!(await this.db.collection('instagram_prospects').findOne(
         {
           account_id: this.accountId,
           status: { $in: ['waiting', 'matched', 'review'] },
-          expires_at: { $gt: now },
         },
         { projection: { _id: 1 } },
       ));
     return !!(
       await this.db.query(
-        "SELECT id FROM instagram_prospects WHERE account_id=$1 AND status IN ('waiting','matched','review') AND expires_at>$2 LIMIT 1",
-        [this.accountId, now],
+        "SELECT id FROM instagram_prospects WHERE account_id=$1 AND status IN ('waiting','matched','review') LIMIT 1",
+        [this.accountId],
       )
     ).rows.length;
   }

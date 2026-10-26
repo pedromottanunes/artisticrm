@@ -317,6 +317,21 @@ export async function initializeMongo(db: MongoStore) {
         { upsert: true },
       );
   }
+  if (!(await db.one('schema_migrations', { id: '042_permanent_instagram_prospects' }))) {
+    await db
+      .collection('instagram_prospects')
+      .updateMany(
+        { status: { $in: ['waiting', 'matched', 'review'] } },
+        { $set: { expires_at: new Date('9999-12-31T23:59:59.999Z') } },
+      );
+    await db
+      .collection('schema_migrations')
+      .updateOne(
+        { id: '042_permanent_instagram_prospects' },
+        { $setOnInsert: { id: '042_permanent_instagram_prospects' } },
+        { upsert: true },
+      );
+  }
   const legacyInstagramIds = (
     await db.many<{ opportunity_id: string }>('inbound_events', {
       external_id: { $regex: '^instagram:' },

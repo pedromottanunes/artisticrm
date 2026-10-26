@@ -29,6 +29,7 @@ export async function checkProspects(db: Database | MongoStore, manager: User, u
     '10004': 'consultor.inativo',
     '10005': 'simultaneo',
     '10006': 'entrega.recuperavel',
+    '10008': 'reserva.permanente',
   };
   const central = new InstagramCentral(crm, config, async (url) => {
     calls++;
@@ -106,6 +107,12 @@ export async function checkProspects(db: Database | MongoStore, manager: User, u
     source: 'Curtida',
   });
   assert.equal(
+    new Date(
+      (await rows('instagram_prospects')).find((row) => row.id === reserved.id)?.expires_at,
+    ).getUTCFullYear(),
+    9999,
+  );
+  assert.equal(
     (await rows('opportunities')).length,
     countBefore,
     'Reservations are not received leads',
@@ -175,17 +182,22 @@ export async function checkProspects(db: Database | MongoStore, manager: User, u
   });
   assert.equal(reReserved.id, cancelled.id);
   await assert.rejects(service.cancel(users[1], cancelled.id, 1), /mudou/);
-  const expired = await service.create(users[0], { profile: '@vencida.teste', source: 'Curtida' });
-  await set('instagram_prospects', expired.id, { expires_at: new Date(0) });
+  const permanent = await service.create(users[0], {
+    profile: '@reserva.permanente',
+    source: 'Curtida',
+  });
+  // A legacy deadline, even in the past, can no longer release or reassign the profile.
+  await set('instagram_prospects', permanent.id, { expires_at: new Date(0) });
   assert.equal(
-    (await service.list(users[0])).items.find((row) => row.id === expired.id)?.status,
-    'expired',
-  );
-  await service.create(users[1], { profile: '@vencida.teste', source: 'Curtida' });
-  assert.equal(
-    (await service.list(users[1])).items.find((row) => row.id === expired.id)?.status,
+    (await service.list(users[0])).items.find((row) => row.id === permanent.id)?.status,
     'waiting',
   );
+  await assert.rejects(
+    service.create(users[1], { profile: '@reserva.permanente', source: 'Curtida' }),
+    /reserva/,
+  );
+  await deliver('10008');
+  assert.equal((await leadFor('10008'))?.owner_id, users[0].id);
 
   // A matching username with a previously verified different ID is NOT enough to assign.
   const mismatch = await service.create(users[0], {
@@ -250,6 +262,10 @@ export async function checkProspects(db: Database | MongoStore, manager: User, u
   );
 
   await service.create(users[0], { profile: '@simultaneo', source: 'Curtida' });
+  const simultaneous = (await service.list(users[0])).items.find(
+    (row) => row.username === 'simultaneo',
+  )!;
+  await set('instagram_prospects', simultaneous.id, { expires_at: new Date(0) });
   const commentBody = Buffer.from(
     JSON.stringify({
       object: 'instagram',

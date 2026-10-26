@@ -9,8 +9,8 @@ interface Prospect {
   id: string;
   username: string;
   owner_id: string;
-  status: 'waiting' | 'matched' | 'review' | 'expired' | 'cancelled';
-  expires_at: string;
+  status: 'waiting' | 'matched' | 'review' | 'cancelled';
+  expires_at: null;
   opportunity_id: string | null;
   version: number;
 }
@@ -23,7 +23,6 @@ const labels = {
   waiting: 'Aguardando resposta',
   matched: 'Conversa iniciada',
   review: 'Revisão da gestão',
-  expired: 'Reserva vencida',
   cancelled: 'Reserva cancelada',
 };
 
@@ -178,8 +177,8 @@ export function InstagramProspectForm({
               </select>
             </label>
             <small className="full">
-              Reserve antes de abordar pelo Instagram. A reserva vale por 30 dias; a resposta será
-              vinculada após a identificação do perfil.
+              Reserve antes de abordar pelo Instagram. A reserva é permanente até que você a cancele
+              ou o perfil se transforme em atendimento.
             </small>
             <button className="button gold full" disabled={busy || !data?.configured}>
               <Plus size={16} />
@@ -232,9 +231,7 @@ export function InstagramProspectForm({
                     ? ` · ${users.find((user) => user.id === row.owner_id)?.name ?? 'Consultor'}`
                     : ''}
                 </small>
-                {row.status === 'waiting' && (
-                  <small>Válida até {new Date(row.expires_at).toLocaleDateString('pt-BR')}</small>
-                )}
+                {row.status === 'waiting' && <small>Reserva permanente</small>}
               </div>
               <div className="prospect-actions">
                 {row.opportunity_id && (isManager || row.status === 'matched') && (
@@ -245,8 +242,7 @@ export function InstagramProspectForm({
                     Ver atendimento
                   </button>
                 )}
-                {['waiting', 'expired'].includes(row.status) ||
-                (isManager && row.status === 'review') ? (
+                {row.status === 'waiting' || (isManager && row.status === 'review') ? (
                   <button
                     className="button outline compact"
                     disabled={busy}

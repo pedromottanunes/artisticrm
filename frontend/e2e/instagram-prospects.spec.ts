@@ -25,7 +25,7 @@ for (const mobile of [false, true]) {
             owner_id: user.id,
             status: 'waiting',
             version: 1,
-            expires_at: new Date(Date.now() + 86400_000).toISOString(),
+            expires_at: null,
           },
         ];
         return route.fulfill({ status: 201, json: items[0] });
@@ -54,6 +54,8 @@ for (const mobile of [false, true]) {
       'https://www.instagram.com/perfil.teste/',
     );
     await expect(dialog.getByText('Aguardando resposta', { exact: true })).toBeVisible();
+    await expect(dialog.getByText('Reserva permanente', { exact: true })).toBeVisible();
+    await expect(dialog.getByText(/Válida até/)).toHaveCount(0);
     const width = await dialog.evaluate((element) => ({
       scroll: element.scrollWidth,
       client: element.clientWidth,
