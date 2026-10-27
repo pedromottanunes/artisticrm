@@ -124,16 +124,20 @@ export async function checkReports(
       reportsOverview(db, users[0], { from: '2026-09-10', to: '2026-09-10' }, async () => now()),
     { code: 'FORBIDDEN' },
   );
-  assert.throws(() => reportPeriod({ from: '2026-08-01', to: '2026-09-10' }, now()), {
+  assert.throws(() => reportPeriod({ from: '2026-09-10', to: '2026-08-01' }, now()), {
     code: 'INVALID_PERIOD',
   });
   assert.doesNotThrow(() => reportPeriod({ from: '2026-08-12', to: '2026-09-11' }, now()));
+  assert.doesNotThrow(() => reportPeriod({ from: '2026-10-01', to: '2027-01-10' }, now()));
   assert.throws(() => reportPeriod({ from: '2026-02-30', to: '2026-03-01' }, now()), {
     code: 'INVALID_PERIOD',
   });
   const beforeMidnight = reportPeriod({}, new Date('2026-09-16T02:59:59Z'));
-  assert.equal(beforeMidnight.from, '2026-08-16');
+  assert.equal(beforeMidnight.from, '2026-09-15');
   assert.equal(beforeMidnight.to, '2026-09-15');
-  assert.equal(beforeMidnight.start.toISOString(), '2026-08-16T03:00:00.000Z');
+  assert.equal(beforeMidnight.start.toISOString(), '2026-09-15T03:00:00.000Z');
   assert.equal(beforeMidnight.end.toISOString(), '2026-09-16T03:00:00.000Z');
+  const later = reportPeriod({}, new Date('2027-01-10T15:00:00Z'));
+  assert.equal(later.from, '2026-10-01');
+  assert.equal(later.to, '2027-01-10');
 }

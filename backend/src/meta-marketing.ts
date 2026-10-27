@@ -9,6 +9,7 @@ import {
   configurationFingerprint,
 } from './meta-marketing-client.js';
 import { syncInsights } from './meta-marketing-insights.js';
+import { syncInsightsResumable } from './meta-marketing-resumable.js';
 import { enrichMarketingAd } from './meta-marketing-ads.js';
 import {
   cachedAds,
@@ -181,7 +182,7 @@ export class MetaMarketing {
     }
   }
 
-  // Used by the scheduler and integration checks, never by a GET or an inbound message.
+  // Synchronous compatibility helper used by integration checks; the worker resumes pages durably.
   async sync(days = 7) {
     z.number().int().min(1).max(31).parse(days);
     if (!this.syncing)
@@ -338,23 +339,53 @@ export class MetaMarketing {
       const monthDue =
         !control.last_month_sync ||
         Date.parse(control.last_month_sync) <= now.getTime() - 7 * 86_400_000;
-      if (control.requested_from || !(Date.parse(control.next_sync_at ?? '') > now.getTime())) {
+      const scheduled = !(Date.parse(control.next_sync_at ?? '') > now.getTime());
+      const missing =
+        !control.requested_from && !scheduled && today >= HISTORICAL_ACQUISITION_START
+          ? await this.store.firstUncovered(HISTORICAL_ACQUISITION_START, today)
+          : null;
+      if (control.requested_from || scheduled || missing) {
         const requested = Boolean(control.requested_from);
         const from =
-          control.requested_from || shiftedDate(today, monthDue ? -30 : weekDue ? -6 : -1);
-        const target = control.requested_to || today;
+          control.requested_from ||
+          missing ||
+          shiftedDate(today, monthDue ? -30 : weekDue ? -6 : -1);
+        const target =
+          control.requested_to ||
+          (missing && shiftedDate(missing, 6) < today ? shiftedDate(missing, 6) : today);
         const to = shiftedDate(from, 6) < target ? shiftedDate(from, 6) : target;
         await this.syncState('syncing', lease, { started: now, error: null });
-        result = await syncInsights(this.store, client, lease, from, to, this.clock());
+        const batch = await syncInsightsResumable(
+          this.store,
+          client,
+          lease,
+          from,
+          to,
+          control.requested_at ?? '',
+          this.clock,
+        );
+        if (!batch.complete) {
+          await this.store.advance(
+            {
+              requested_from: from,
+              requested_to: target,
+              next_sync_at: new Date(now.getTime() + 60_000).toISOString(),
+            },
+            lease,
+            control.requested_at,
+          );
+          return { rows_synced: 0 };
+        }
+        result = { rows_synced: batch.rows_synced };
         const more = to < target;
         await this.store.advance(
           {
             requested_from: more ? shiftedDate(to, 1) : '',
             requested_to: more ? target : '',
             next_sync_at: new Date(now.getTime() + (more ? 60_000 : 3_600_000)).toISOString(),
-            ...(!requested && monthDue
+            ...(!requested && !missing && monthDue
               ? { last_month_sync: now.toISOString(), last_week_sync: now.toISOString() }
-              : !requested && weekDue
+              : !requested && !missing && weekDue
                 ? { last_week_sync: now.toISOString() }
                 : {}),
             last_error: '',

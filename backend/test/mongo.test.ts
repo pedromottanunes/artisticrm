@@ -49,6 +49,13 @@ test('Mongo: migração preserva campos e não reabre atendimentos duplicados', 
 import { checkProspects } from './prospect-checks.js';
 import { checkManualLeads } from './manual-lead-checks.js';
 import { checkMarketingOrigins } from './marketing-origin-checks.js';
+import {
+  checkLargeMarketingReport,
+  checkLargeMarketingSync,
+  checkResumableMarketingSync,
+  checkAutomaticHistoricalCoverage,
+  checkResumableCyclePreservesData,
+} from './marketing-large-report-checks.js';
 import { checkHistoricalAcquisitionBackfill } from './historical-acquisition-checks.js';
 import { prospectRegressions } from './prospect-regression-checks.js';
 import { checkPersonalQueueStatus } from './queue-status-checks.js';
@@ -61,6 +68,16 @@ import {
 
 let replica: MongoMemoryReplSet, db: MongoStore, ops: MongoOperations, manager: User, users: User[];
 let now: Date;
+test('relatório inclui mais de mil anúncios e pagina os resultados (Mongo)', () =>
+  checkLargeMarketingReport(db));
+test('sincronização aceita mais de mil anúncios em um bloco (Mongo)', () =>
+  checkLargeMarketingSync(db));
+test('sincronização retoma após falha e processa mais de vinte páginas (Mongo)', () =>
+  checkResumableMarketingSync(db));
+test('sincronização preenche automaticamente dias históricos faltantes (Mongo)', () =>
+  checkAutomaticHistoricalCoverage(db));
+test('paginação repetida preserva o relatório anterior (Mongo)', () =>
+  checkResumableCyclePreservesData(db));
 const database = `artisti_test_${randomUUID().replaceAll('-', '')}`;
 const password = 'test-password-only';
 const instagramTestConfig: InstagramConfig = {

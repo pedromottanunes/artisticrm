@@ -561,6 +561,9 @@ export async function initializeMongo(db: MongoStore) {
   await db.collection('meta_marketing_ad_jobs').createIndex({ next_attempt_at: 1, ad_id: 1 });
   await db.collection('meta_marketing_control').createIndex({ account_id: 1 }, { unique: true });
   await db
+    .collection('meta_marketing_sync_staging')
+    .createIndex({ account_id: 1, run_id: 1, kind: 1, record_key: 1 }, { unique: true });
+  await db
     .collection('meta_marketing_daily_coverage')
     .createIndex({ account_id: 1, date_start: 1 }, { unique: true });
   await db

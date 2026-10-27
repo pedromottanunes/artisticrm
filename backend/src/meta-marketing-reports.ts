@@ -174,7 +174,6 @@ async function cohort(
               },
             },
           },
-          { $limit: 1001 },
         ],
         { maxTimeMS: 5000 },
       )
@@ -213,7 +212,7 @@ async function cohort(
       AND ((acquisition->>'occurred_at'>=$1::text AND acquisition->>'occurred_at'<$2::text)
         OR (acquisition IS NULL AND created_at>=$1::timestamptz AND created_at<$2::timestamptz))
       AND ($3::text IS NULL OR acquisition IS NULL OR acquisition->>'channel_account_id'=$3)
-      GROUP BY 1 LIMIT 1001`,
+      GROUP BY 1`,
       [start.toISOString(), end.toISOString(), instagramAccountId ?? null],
     )
   ).rows;
@@ -265,7 +264,6 @@ async function spending(store: MarketingStore, from: string, to: string): Promis
                   clicks: { $sum: '$clicks' },
                 },
               },
-              { $limit: 1001 },
             ],
             { maxTimeMS: 5000 },
           )
@@ -277,7 +275,7 @@ async function spending(store: MarketingStore, from: string, to: string): Promis
         (array_agg(adset_name ORDER BY date_start DESC))[1] AS adset_name,(array_agg(ad_name ORDER BY date_start DESC))[1] AS ad_name,
         (array_agg(currency ORDER BY date_start DESC))[1] AS currency,
         SUM(COALESCE(spend_micros,ROUND(spend*1000000))) AS micros,SUM(clicks) AS clicks,SUM(impressions) AS impressions
-        FROM meta_marketing_daily_insights WHERE account_id=$1 AND date_start BETWEEN $2::date AND $3::date GROUP BY ad_id LIMIT 1001`,
+        FROM meta_marketing_daily_insights WHERE account_id=$1 AND date_start BETWEEN $2::date AND $3::date GROUP BY ad_id`,
             [store.accountId, from, to],
           )
         ).rows;
@@ -314,15 +312,17 @@ export async function marketingReport(
       ...spendRows.map((row) => row.ad_id),
     ]),
   ];
-  const limited = ids.length > 1000 || counts.length > 1000 || spendRows.length > 1000;
   const catalog = new Map((await store.ads(ids)).map((ad) => [ad.ad_id, ad]));
   // Independent bounded reads must not combine pre-sync costs with post-sync coverage.
   const consistent = (await store.control()).report_revision === control.report_revision;
   const costs = new Map(spendRows.map((row) => [row.ad_id, row]));
   const conversions = new Map(counts.map((row) => [row.ad_id, row]));
-  const complete = consistent && !limited && covered === datesBetween(from, to).length;
+  const complete = consistent && covered === datesBetween(from, to).length;
+  const classificationPending = ids.filter((id) => {
+    const ad = catalog.get(id);
+    return !ad || ad.scope === 'unclassified';
+  }).length;
   const rows = ids
-    .slice(0, 1000)
     .map((adId) => {
       const ad = catalog.get(adId),
         cost = costs.get(adId),
@@ -458,6 +458,7 @@ export async function marketingReport(
     eligible_spend: eligibleMicros / 1_000_000,
     coverage_complete: complete,
     covered_days: covered,
+    classification_pending: classificationPending,
     instagram_leads: counts.reduce((sum, row) => sum + row.leads, 0),
     instagram_entries: counts.reduce((sum, row) => sum + row.leads + row.non_commercial, 0),
     non_commercial_leads: nonCommercial,
@@ -468,16 +469,16 @@ export async function marketingReport(
     unattributed_or_organic_leads: conversions.get(null)?.leads ?? 0,
     unattributed_or_organic_non_commercial_leads: conversions.get(null)?.non_commercial ?? 0,
     cpl:
-      complete && eligibleLeads && currencies.size <= 1
+      complete && !classificationPending && eligibleLeads && currencies.size <= 1
         ? eligibleMicros / 1_000_000 / eligibleLeads
         : null,
     ad_groups: adGroups,
-    campaigns: [...campaigns.values()].slice(0, 50),
+    campaigns: [...campaigns.values()],
     ads: focusAd ? visibleRows : visibleRows.slice((page - 1) * 50, page * 50),
     total: visibleRows.length,
     page,
     page_size: 50,
-    limited,
+    limited: false,
     generated_at: now.toISOString(),
     last_sync: null as string | Date | null,
   };

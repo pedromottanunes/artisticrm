@@ -5,6 +5,13 @@ import { CRM } from '../src/crm.js';
 import { seedDemo, DEMO_PASSWORD } from '../src/seed.js';
 import { buildApp } from '../src/app.js';
 import { checkMarketingOrigins } from './marketing-origin-checks.js';
+import {
+  checkLargeMarketingReport,
+  checkLargeMarketingSync,
+  checkResumableMarketingSync,
+  checkAutomaticHistoricalCoverage,
+  checkResumableCyclePreservesData,
+} from './marketing-large-report-checks.js';
 import { checkHistoricalAcquisitionBackfill } from './historical-acquisition-checks.js';
 import {
   MetaMarketing,
@@ -86,6 +93,22 @@ after(async () => db.close());
 
 test('origem, catálogo textual, funil, limites persistidos e retomada (SQL)', async () => {
   await checkMarketingOrigins(db);
+});
+
+test('relatório inclui mais de mil anúncios e pagina os resultados (SQL)', async () => {
+  await checkLargeMarketingReport(db);
+});
+test('sincronização aceita mais de mil anúncios em um bloco (SQL)', async () => {
+  await checkLargeMarketingSync(db);
+});
+test('sincronização retoma após falha e processa mais de vinte páginas (SQL)', async () => {
+  await checkResumableMarketingSync(db);
+});
+test('sincronização preenche automaticamente dias históricos faltantes (SQL)', async () => {
+  await checkAutomaticHistoricalCoverage(db);
+});
+test('paginação repetida preserva o relatório anterior (SQL)', async () => {
+  await checkResumableCyclePreservesData(db);
 });
 
 test('reconstroi somente a origem historica comprovada (SQL)', async () => {
@@ -254,9 +277,10 @@ test('relatório separa leads associados, não associados e orgânicos sem inven
     report.campaigns.find((row) => row.campaign_id === 'campaign-2')?.attributed_leads,
     0,
   );
-  await assert.rejects(() => marketing.report('2026-08-01', '2026-09-23'), {
+  await assert.rejects(() => marketing.report('2026-09-23', '2026-08-01'), {
     code: 'INVALID_PERIOD',
   });
+  assert.equal((await marketing.report('2026-08-01', '2026-09-23')).period.from, '2026-08-01');
 });
 
 test('rotas de Marketing API são exclusivas da gestão', async () => {

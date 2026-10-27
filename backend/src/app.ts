@@ -828,7 +828,7 @@ export async function buildApp(
       .object({
         from: z.string().date(),
         to: z.string().date(),
-        page: z.coerce.number().int().min(1).max(20).default(1),
+        page: z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER).default(1),
         ad_group: z.enum(['with_leads', 'without_leads', 'all']).default('all'),
       })
       .strict()

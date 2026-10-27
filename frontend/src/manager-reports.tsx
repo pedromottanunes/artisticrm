@@ -1,5 +1,5 @@
 import { qualityReasons } from './lead-quality';
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   AlarmClock,
   ArrowUpRight,
@@ -120,6 +120,7 @@ interface MetaAdsReport {
   cpl: number | null;
   eligible_spend: number;
   coverage_complete: boolean;
+  classification_pending?: number;
   limited: boolean;
   total: number;
   page: number;
@@ -156,11 +157,6 @@ const dateValue = (date: Date) => {
       .map((part) => [part.type, part.value]),
   );
   return `${parts.year}-${parts.month}-${parts.day}`;
-};
-
-const shift = (value: string, days: number) => {
-  const [year, month, day] = value.split('-').map(Number);
-  return new Date(Date.UTC(year, month - 1, day + days, 12)).toISOString().slice(0, 10);
 };
 
 const duration = (minutes: number | null | undefined) => {
@@ -338,10 +334,31 @@ export function ManagerReports({
   onConnectionChange: (connected: boolean) => void;
   onSessionExpired: () => Promise<void>;
 }) {
-  const today = useMemo(() => dateValue(new Date()), []);
-  const [from, setFrom] = useState(() => shift(today, -30));
+  const [today, setToday] = useState(() => dateValue(new Date()));
+  const previousToday = useRef(today);
+  const [from, setFrom] = useState(() => (today < '2026-10-01' ? today : '2026-10-01'));
   const [to, setTo] = useState(today);
-  const [query, setQuery] = useState({ from: shift(today, -30), to: today });
+  const [query, setQuery] = useState({
+    from: today < '2026-10-01' ? today : '2026-10-01',
+    to: today,
+  });
+  useEffect(() => {
+    const updateDate = () => {
+      const current = dateValue(new Date());
+      const previous = previousToday.current;
+      if (current === previous) return;
+      previousToday.current = current;
+      setToday(current);
+      setTo((value) => (value === previous ? current : value));
+      setQuery((value) => (value.to === previous ? { ...value, to: current } : value));
+    };
+    const timer = window.setInterval(updateDate, 60_000);
+    window.addEventListener('focus', updateDate);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', updateDate);
+    };
+  }, []);
   const [report, setReport] = useState<ReportOverview | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
@@ -488,7 +505,14 @@ export function ManagerReports({
   );
 
   useEffect(() => {
-    if (!metaUpdatePending) return;
+    if (
+      !metaUpdatePending &&
+      !(
+        metaStatus?.configured &&
+        (metaAds?.coverage_complete === false || (metaAds?.classification_pending ?? 0) > 0)
+      )
+    )
+      return;
     let disposed = false;
     let timer: number | undefined;
     let controller: AbortController | undefined;
@@ -500,13 +524,16 @@ export function ManagerReports({
         });
         if (disposed) return;
         setMetaStatus(status);
-        if (!status.queued && status.state !== 'syncing') {
-          setMetaNotice(
-            'Atualização concluída. O relatório já está usando os dados mais recentes.',
-          );
+        if (!status.queued && status.state !== 'syncing' && metaUpdatePending) {
+          if (status.state !== 'error')
+            setMetaNotice(
+              'Atualização concluída. O relatório já está usando os dados mais recentes.',
+            );
           setMetaReportRevision((value) => value + 1);
           return;
         }
+        if (!status.queued && status.state !== 'syncing')
+          setMetaReportRevision((value) => value + 1);
       } catch (loadError) {
         if (disposed || controller.signal.aborted) return;
         if (loadError instanceof ApiError && loadError.status === 401) {
@@ -522,7 +549,13 @@ export function ManagerReports({
       if (timer !== undefined) window.clearTimeout(timer);
       controller?.abort();
     };
-  }, [metaUpdatePending, onSessionExpired]);
+  }, [
+    metaUpdatePending,
+    metaStatus?.configured,
+    metaAds?.coverage_complete,
+    metaAds?.classification_pending,
+    onSessionExpired,
+  ]);
 
   const apply = (event: FormEvent) => {
     event.preventDefault();
@@ -533,8 +566,8 @@ export function ManagerReports({
     const days = Math.round(
       (new Date(`${to}T12:00:00`).getTime() - new Date(`${from}T12:00:00`).getTime()) / 86_400_000,
     );
-    if (!Number.isFinite(days) || days < 0 || days > 30) {
-      setError('O período não pode ultrapassar 31 dias.');
+    if (!Number.isFinite(days) || days < 0) {
+      setError('A data inicial deve ser anterior à data final.');
       return;
     }
     setQuery({ from, to });
@@ -841,7 +874,11 @@ export function ManagerReports({
               <div className="meta-ads-summary">
                 <article>
                   <CircleDollarSign size={18} />
-                  <span>Investido em anúncios para o Direct</span>
+                  <span>
+                    {!metaAds.coverage_complete || metaAds.classification_pending
+                      ? 'Investimento já identificado para o Direct'
+                      : 'Investido em anúncios para o Direct'}
+                  </span>
                   <strong>{money(metaAds.eligible_spend, metaAds.currency)}</strong>
                   <small>Conta toda: {money(metaAds.spend, metaAds.currency)}</small>
                 </article>
@@ -861,7 +898,7 @@ export function ManagerReports({
                   <CircleDollarSign size={18} />
                   <span>Custo médio por lead</span>
                   <strong>
-                    {metaAds.coverage_complete
+                    {metaAds.coverage_complete && !metaAds.classification_pending
                       ? money(metaAds.cpl, metaAds.currency)
                       : 'Calculando'}
                   </strong>
@@ -943,8 +980,19 @@ export function ManagerReports({
               </section>
               {!metaAds.coverage_complete && (
                 <p className="meta-ads-sync-note">
-                  A atualização deste período ainda está terminando. Os custos médios aparecerão
-                  automaticamente quando todos os dias forem consultados.
+                  {metaUpdatePending
+                    ? 'A atualização do período está em andamento. Os custos médios aparecerão quando todos os dias estiverem disponíveis.'
+                    : 'Ainda faltam dados para este período. O CRM busca os dias pendentes; você também pode clicar em “Atualizar dados”.'}
+                </p>
+              )}
+              {Boolean(metaAds.classification_pending) && (
+                <p className="meta-ads-sync-note">
+                  {metaAds.classification_pending}{' '}
+                  {metaAds.classification_pending === 1
+                    ? 'anúncio ainda aguarda'
+                    : 'anúncios ainda aguardam'}{' '}
+                  identificação do destino. O investimento do Direct e o custo médio serão completos
+                  após essa checagem.
                 </p>
               )}
               {metaAds.limited && (

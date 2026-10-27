@@ -4,7 +4,7 @@ import { MarketingClient, MarketingError } from './meta-marketing-client.js';
 import type { MarketingStore } from './meta-marketing-store.js';
 
 const id = z.string().max(100).min(1);
-const rowSchema = z.object({
+export const rowSchema = z.object({
   date_start: z.string().date(),
   date_stop: z.string().date(),
   account_id: id,
@@ -23,7 +23,7 @@ const rowSchema = z.object({
   impressions: z.string().regex(/^\d+$/).default('0'),
   clicks: z.string().regex(/^\d+$/).default('0'),
 });
-const responseSchema = z.object({
+export const responseSchema = z.object({
   data: z.array(rowSchema).max(500),
   paging: z
     .object({
@@ -98,6 +98,18 @@ export async function syncInsights(
     after = next;
   }
   if (!complete) throw new MarketingError('META_SYNC_LIMIT');
+  return publishInsights(store, lease, from, to, now, [...all.values()]);
+}
+
+export async function publishInsights(
+  store: MarketingStore,
+  lease: string,
+  from: string,
+  to: string,
+  now: Date,
+  sourceRows: z.infer<typeof rowSchema>[],
+) {
+  const all = new Map(sourceRows.map((row) => [`${row.date_start}:${row.ad_id}`, row]));
   const rows = [...all.values()].map((row) => ({
     ...row,
     spend_micros: decimalMicros(row.spend),
@@ -107,7 +119,6 @@ export async function syncInsights(
     clicks: Number(row.clicks),
   }));
   const ads = [...new Map(rows.map((row) => [row.ad_id, row])).values()];
-  if (ads.length > 1000) throw new MarketingError('META_SYNC_LIMIT');
   const dates = datesBetween(from, to);
   const account = await store.control();
   await store.transaction(async (tx) => {
@@ -122,9 +133,7 @@ export async function syncInsights(
           },
           { session: tx.session, projection: { _id: 0, actions: 0 } },
         )
-        .limit(10_001)
         .toArray();
-      if (existing.length > 10_000) throw new MarketingError('META_SYNC_LIMIT');
       const byKey = new Map(existing.map((row) => [`${row.date_start}:${row.ad_id}`, row]));
       const changes = rows.filter((row) => {
         const prior = byKey.get(`${row.date_start}:${row.ad_id}`);
@@ -164,17 +173,15 @@ export async function syncInsights(
       const removed = existing.filter((row) => !all.has(`${row.date_start}:${row.ad_id}`));
       for (let offset = 0; offset < removed.length; offset += 500)
         await tx.collection('meta_marketing_daily_insights').bulkWrite(
-          removed
-            .slice(offset, offset + 500)
-            .map((row) => ({
-              deleteOne: {
-                filter: {
-                  account_id: store.accountId,
-                  date_start: row.date_start,
-                  ad_id: row.ad_id,
-                },
+          removed.slice(offset, offset + 500).map((row) => ({
+            deleteOne: {
+              filter: {
+                account_id: store.accountId,
+                date_start: row.date_start,
+                ad_id: row.ad_id,
               },
-            })),
+            },
+          })),
           { session: tx.session },
         );
       await tx.collection('meta_marketing_accounts').updateOne(
@@ -190,9 +197,9 @@ export async function syncInsights(
         },
         { upsert: true, session: tx.session },
       );
-      if (ads.length)
+      for (let offset = 0; offset < ads.length; offset += 500)
         await tx.collection('meta_marketing_ad_jobs').bulkWrite(
-          ads.map((row) => ({
+          ads.slice(offset, offset + 500).map((row) => ({
             updateOne: {
               filter: { ad_id: row.ad_id },
               update: {

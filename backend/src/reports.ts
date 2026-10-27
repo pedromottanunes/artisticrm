@@ -108,11 +108,11 @@ export function reportPeriod(input: unknown, now: Date) {
   const query = reportsQuery.parse(input);
   const today = localDate(now);
   const to = query.to ?? today;
-  const from = query.from ?? shiftDate(to, -30);
+  const from = query.from ?? (to < '2026-10-01' ? to : '2026-10-01');
   const fromNumber = dateNumber(from);
   const toNumber = dateNumber(to);
-  if (fromNumber > toNumber || (toNumber - fromNumber) / dayMs > 30)
-    throw new DomainError('INVALID_PERIOD', 'O período não pode ultrapassar 31 dias.', 400);
+  if (fromNumber > toNumber)
+    throw new DomainError('INVALID_PERIOD', 'A data inicial deve ser anterior à data final.', 400);
   return {
     from,
     to,

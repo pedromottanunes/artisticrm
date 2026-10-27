@@ -22,6 +22,14 @@ export interface MarketingAd {
   creative_checked_at: string | null;
 }
 export interface MarketingControl {
+  sync_stage?: {
+    id: string;
+    from: string;
+    to: string;
+    request_at: string;
+    cursor: string;
+    complete: boolean;
+  } | null;
   requested_days?: number;
   requested_at?: string;
   requested_from?: string;
@@ -279,8 +287,14 @@ export class MarketingStore {
   }
 
   async ads(ids: string[]): Promise<MarketingAd[]> {
-    const unique = [...new Set(ids)].slice(0, 1000);
+    const unique = [...new Set(ids)];
     if (!unique.length) return [];
+    if (unique.length > 1000) {
+      const batches: MarketingAd[] = [];
+      for (let offset = 0; offset < unique.length; offset += 1000)
+        batches.push(...(await this.ads(unique.slice(offset, offset + 1000))));
+      return batches;
+    }
     const rows =
       this.db.kind === 'mongo'
         ? await this.db
@@ -620,6 +634,34 @@ export class MarketingStore {
       lease,
     );
     return { scanned: rows.length, attributed };
+  }
+
+  async firstUncovered(from: string, to: string): Promise<string | null> {
+    const rows =
+      this.db.kind === 'mongo'
+        ? await this.db
+            .collection('meta_marketing_daily_coverage')
+            .find(
+              { account_id: this.accountId, date_start: { $gte: from, $lte: to } },
+              { projection: { _id: 0, date_start: 1 }, maxTimeMS: 5000 },
+            )
+            .sort({ date_start: 1 })
+            .toArray()
+        : (
+            await this.db.query<{ date_start: string }>(
+              'SELECT date_start FROM meta_marketing_daily_coverage WHERE account_id=$1 AND date_start BETWEEN $2 AND $3 ORDER BY date_start',
+              [this.accountId, from, to],
+            )
+          ).rows;
+    let expected = from;
+    for (const row of rows) {
+      if (row.date_start > expected) break;
+      if (row.date_start === expected)
+        expected = new Date(Date.parse(`${expected}T12:00:00Z`) + 86_400_000)
+          .toISOString()
+          .slice(0, 10);
+    }
+    return expected <= to ? expected : null;
   }
 
   async covered(from: string, to: string): Promise<number> {

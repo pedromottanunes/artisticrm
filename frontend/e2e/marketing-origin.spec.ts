@@ -193,7 +193,9 @@ test('relatório abre lista do anúncio só no clique e solicita atualização e
   page,
 }) => {
   await login(page, 'cadu');
+  await page.clock.setFixedTime(new Date('2026-11-09T15:00:00Z'));
   let selectedPeriod = { from: '', to: '' };
+  let classificationPending = 1;
   let releaseAllAds: (() => void) | undefined;
   let releaseLeads: (() => void) | undefined;
   const allAdsGate = new Promise<void>((resolve) => {
@@ -241,6 +243,7 @@ test('relatório abre lista do anúncio só no clique e solicita atualização e
           unattributed_or_organic_leads: 0,
           unattributed_or_organic_non_commercial_leads: 0,
           coverage_complete: true,
+          classification_pending: classificationPending,
           total: 1,
           page_size: 50,
           ad_groups: { with_leads: 1, without_leads: 0, all: 1 },
@@ -304,11 +307,21 @@ test('relatório abre lista do anúncio só no clique e solicita atualização e
   });
   await page.goto('/#reports');
   await expect(page.getByText('Resultado Carlos', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('De', { exact: true })).toHaveValue('2026-10-01');
+  await expect(page.getByLabel('Até', { exact: true })).toHaveValue('2026-11-09');
+  expect(selectedPeriod).toEqual({ from: '2026-10-01', to: '2026-11-09' });
+  await page.clock.setFixedTime(new Date('2026-11-10T15:00:00Z'));
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(page.getByLabel('Até', { exact: true })).toHaveValue('2026-11-10');
+  await expect.poll(() => selectedPeriod.to).toBe('2026-11-10');
   await expect(page.getByText(/Período analisado:/)).toBeVisible();
   expect(lists).toBe(0);
   await expect(page.getByText('3 contatos não comerciais ficam fora do custo')).toBeVisible();
   await expect(page.getByText('15 · Anúncio identificado')).toBeVisible();
+  await expect(page.getByText(/1 anúncio ainda aguarda identificação/)).toBeVisible();
+  await expect(page.getByText('Investimento já identificado para o Direct')).toBeVisible();
   const metaPanel = page.locator('.meta-ads-panel');
+  classificationPending = 0;
   await page.getByRole('button', { name: 'Todos (1)' }).click();
   await expect(metaPanel).toHaveAttribute('aria-busy', 'true');
   await expect(page.getByText('Resultado Carlos', { exact: true })).toBeVisible();

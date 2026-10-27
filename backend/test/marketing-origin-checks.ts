@@ -210,6 +210,18 @@ export async function checkMarketingOrigins(db: MarketingDB) {
   assert.equal(report.spend, 110);
   assert.equal(report.eligible_spend, 30); // Includes eligible ads without conversions.
   assert.equal(report.cpl, 15); // 30 / 2 eligible acquisitions, not 110 / all Instagram contacts.
+  assert.equal(report.classification_pending, 0);
+  const loadCatalog = marketing.store.ads.bind(marketing.store);
+  marketing.store.ads = async (ids) =>
+    (await loadCatalog(ids)).filter((item) => item.ad_id !== '333');
+  try {
+    const pendingClassification = await marketing.report('2026-09-23', '2026-09-23');
+    assert.equal(pendingClassification.coverage_complete, true);
+    assert.equal(pendingClassification.classification_pending, 1);
+    assert.equal(pendingClassification.cpl, null);
+  } finally {
+    marketing.store.ads = loadCatalog;
+  }
   assert.equal(report.identified_paid_leads, 3);
   assert.equal(report.identified_paid_non_commercial_leads, 1);
   assert.equal(report.non_commercial_leads, 1);
