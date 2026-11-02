@@ -1684,7 +1684,6 @@ export function InstagramInbox({
                   <ArrowLeft size={20} />
                 </button>
                 <div>
-                  <span>ATENDIMENTO PELO CRM</span>
                   <h2>{selectedConversation?.contact_name ?? 'Contato'}</h2>
                   {user.role === 'manager' && selectedConversation && (
                     <p className="thread-owner">Responsável: {ownerLabel(selectedConversation)}</p>
@@ -1869,16 +1868,20 @@ export function InstagramInbox({
                   placeholder="Digite a resposta…"
                   aria-label={`Mensagem para o ${selectedConversation?.channel === 'messenger' ? 'Messenger' : 'Instagram'}`}
                 />
-                <button className="button gold" disabled={!draft.trim() || sending || !connected}>
+                <button
+                  className="button gold thread-send"
+                  aria-label={sending ? 'Enviando…' : 'Enviar'}
+                  disabled={!draft.trim() || sending || !connected}
+                >
                   <Send size={17} />
-                  {sending ? 'Enviando…' : 'Enviar'}
+                  <span>{sending ? 'Enviando…' : 'Enviar'}</span>
                 </button>
               </form>
             ) : (
               <div className="thread-locked">
                 <AlertTriangle size={18} />
                 {user.role === 'manager'
-                  ? 'A gestão pode acompanhar o histórico. A resposta pertence à atendente responsável.'
+                  ? 'Gestão: somente leitura. Respostas pela consultora responsável.'
                   : selectedConversation?.review_shared
                     ? 'Esta conversa está disponível somente para leitura. Assuma para movê-la aos seus atendimentos e poder responder.'
                     : thread.messaging_mode === 'waiting_reply'

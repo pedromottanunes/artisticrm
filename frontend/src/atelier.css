@@ -905,6 +905,95 @@ body:has(.app-shell),
   :where(.app-shell) .topbar .mobile-inbox-header-slot:has(.thread-open) {
     display: none;
   }
+  :where(.app-shell) .instagram-inbox .thread-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: 8px 10px;
+    flex-shrink: 0;
+  }
+  :where(.app-shell) .instagram-inbox .thread-heading {
+    gap: 4px;
+  }
+  :where(.app-shell) .instagram-inbox .thread-heading h2 {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.35;
+  }
+  :where(.app-shell) .thread-owner {
+    margin-top: 3px;
+    font-size: 11px;
+    line-height: 1.35;
+  }
+  :where(.app-shell) .instagram-inbox .thread-actions {
+    width: 100px;
+    max-width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 4px;
+    margin: 0;
+  }
+  :where(.app-shell) .thread-actions > .quality-trigger,
+  :where(.app-shell) .thread-actions > .button.gold {
+    width: 100%;
+    min-height: 44px;
+    padding: 5px 6px;
+    font-size: 11px;
+    line-height: 1.3;
+    white-space: normal;
+  }
+  :where(.app-shell) .thread-actions .quality-trigger > svg {
+    display: none;
+  }
+  :where(.app-shell) .thread-actions .quality-trigger > span {
+    font-size: 11px;
+    line-height: 1.3;
+    color: inherit;
+  }
+  :where(.app-shell) .thread-header .thread-back,
+  :where(.app-shell) .thread-actions .thread-notification-button,
+  :where(.app-shell) .thread-actions .thread-lead-button {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+    padding: 0;
+  }
+  :where(.app-shell) .thread-locked {
+    flex-shrink: 0;
+    gap: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  :where(.app-shell) .thread-locked > svg {
+    flex-shrink: 0;
+  }
+  :where(.app-shell) .thread-composer {
+    flex-shrink: 0;
+    padding: 8px;
+  }
+  :where(.app-shell) .thread-composer .thread-send {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    padding: 0;
+  }
+  :where(.app-shell) .thread-send > span {
+    display: none;
+  }
+}
+
+@media (min-width: 375px) and (max-width: 760px) {
+  :where(.app-shell) .instagram-inbox .thread-actions {
+    width: auto;
+    flex-wrap: nowrap;
+  }
+  :where(.app-shell) .thread-actions > .quality-trigger,
+  :where(.app-shell) .thread-actions > .button.gold {
+    width: 80px;
+    flex: 0 0 80px;
+  }
 }
 
 :where(.app-shell) .sidebar nav {
