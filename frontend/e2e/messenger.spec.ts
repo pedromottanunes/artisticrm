@@ -72,6 +72,12 @@ for (const width of [390, 1280]) {
     await expect(page.getByText('Histórico messenger', { exact: true })).toBeVisible();
     const messenger = page.getByLabel('Mensagem para o Messenger');
     await messenger.fill('Rascunho Messenger');
+    // Simulate the asynchronous backend profile update while the consultant types.
+    conversations[0].contact_name = 'Maria Almeida Messenger';
+    await expect(
+      page.getByRole('heading', { name: 'Maria Almeida Messenger', exact: true }),
+    ).toBeVisible({ timeout: 12_000 });
+    await expect(messenger).toHaveValue('Rascunho Messenger');
     if (width < 720) await page.getByRole('button', { name: 'Voltar para conversas' }).click();
     await expect(page.getByText('Facebook Messenger', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Contato Instagram', exact: true }).click();
@@ -79,7 +85,7 @@ for (const width of [390, 1280]) {
     await expect(instagram).toHaveValue('');
     await instagram.fill('Rascunho Instagram');
     if (width < 720) await page.getByRole('button', { name: 'Voltar para conversas' }).click();
-    await page.getByRole('button', { name: 'Contato Messenger', exact: true }).click();
+    await page.getByRole('button', { name: 'Maria Almeida Messenger', exact: true }).click();
     await expect(messenger).toHaveValue('Rascunho Messenger');
     await page.getByRole('button', { name: 'Enviar', exact: true }).click();
     await expect(messenger).toHaveValue('');

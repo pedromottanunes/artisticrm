@@ -657,6 +657,33 @@ export async function initializeMongo(db: MongoStore) {
         { upsert: true },
       );
   }
+  if (!(await db.one('schema_migrations', { id: '044_messenger_profile_recovery' }))) {
+    // Only enqueue unnamed Messenger contacts. The profile worker calls Meta later,
+    // in bounded batches. Existing retries and all routing data remain unchanged.
+    const candidates = db
+      .collection('contact_identities')
+      .find(
+        { provider: 'messenger', profile_pending: { $ne: true } },
+        { projection: { id: 1, contact_id: 1 } },
+      )
+      .batchSize(100);
+    for await (const identity of candidates) {
+      if (!(await db.one('contacts', { id: identity.contact_id, name: 'Contato Messenger' })))
+        continue;
+      await db.update(
+        'contact_identities',
+        { id: identity.id, provider: 'messenger', profile_pending: { $ne: true } },
+        { $set: { profile_pending: true, profile_check_after: new Date(0) } },
+      );
+    }
+    await db
+      .collection('schema_migrations')
+      .updateOne(
+        { id: '044_messenger_profile_recovery' },
+        { $setOnInsert: { id: '044_messenger_profile_recovery' } },
+        { upsert: true },
+      );
+  }
   const users = await db.many<{ id: string; queue_position: number | null; version: number }>(
     'users',
     { role: 'attendant' },

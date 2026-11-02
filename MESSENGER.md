@@ -47,4 +47,12 @@ O diagnóstico autenticado da gestão está em `GET /api/v1/messenger/status`. E
 - As consultas de nome/foto rodam separadas da entrada de leads, em lotes de até três. Falhas transitórias ou limites da Meta pausam a fila de perfis por pelo menos 15 minutos, respeitando um `Retry-After` maior. A pausa fica no banco e sobrevive ao reinício.
 - A migração SQL `039_messenger_resilience.sql` adiciona apenas o campo de pausa em `channel_accounts`. No MongoDB, o campo é gravado quando necessário.
 
+## Nome dos contatos
+
+- O nome retornado pela Meta substitui `Contato Messenger` no cadastro usado pela conversa e pelas listas. Nomes alterados manualmente são preservados. Nome e sobrenome também são aceitos quando a resposta não traz o campo `name`, e uma foto inválida não impede o preenchimento do nome.
+- A consulta permanece pendente durante a chamada e em caso de falha, inclusive após reiniciar o servidor. Respostas sem nome ou inválidas são tentadas novamente após 15 minutos. Outros erros de perfil sem pausa global aguardam 24 horas para evitar insistência em contatos indisponíveis. A recuperação não depende de uma nova mensagem do paciente.
+- A migração `044_messenger_profile_recovery` recoloca na fila os contatos antigos do Messenger ainda chamados `Contato Messenger` cuja consulta havia sido encerrada. No SQL, adiciona `profile_last_error`; no MongoDB, a migração tem um marcador próprio. Não muda responsáveis, rodízio, mensagens ou outros canais. O worker existente processa até três perfis a cada 15 segundos, respeitando pausas da Meta.
+- Falhas ficam registradas em `contact_identities.profile_last_error` e nos logs com a mensagem `Messenger profile lookup deferred`, código técnico e próxima tentativa. Nenhum token, nome, identificador do paciente ou corpo de resposta da Meta é incluído nesse diagnóstico. Erros de permissão também pausam a fila e permitem identificar a necessidade de revisar o token/permissões da Página.
+- Após o deploy, conferir uma conversa antiga e uma nova do Messenger. Quando a Meta disponibilizar o nome, a próxima atualização normal da lista o exibirá. Se continuar genérico, verificar o código registrado no servidor. O CRM não inventa nomes quando a Meta não autoriza ou não fornece o perfil.
+
 Os testes automatizados usam dados sintéticos e uma API simulada. Eles não substituem a validação final do webhook, permissões e entrega no ambiente da Meta.

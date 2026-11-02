@@ -1,16 +1,27 @@
 import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac, randomUUID } from 'node:crypto';
+import { Writable } from 'node:stream';
+import Fastify from 'fastify';
 import { openDatabase, migrate, type Database } from '../src/db.js';
 import { CRM } from '../src/crm.js';
 import { Operations } from '../src/operations.js';
 import { seedDemo, DEMO_PASSWORD } from '../src/seed.js';
 import { buildApp } from '../src/app.js';
-import { MessengerCentral, messengerConfig, type MessengerConfig } from '../src/messenger.js';
+import {
+  MessengerCentral,
+  messengerConfig,
+  registerMessenger,
+  type MessengerConfig,
+} from '../src/messenger.js';
 import type { User } from '../src/types.js';
 import {
   checkMessengerProfileBackoff,
   checkMessengerSendAuthorization,
+  messengerProfileCases,
+  checkMessengerProfileRecovery,
+  checkMessengerProfileMigration,
+  checkMessengerProfileDeployRecovery,
 } from './messenger-resilience-checks.js';
 
 const config: MessengerConfig = {
@@ -106,6 +117,102 @@ test('Messenger fica desligado por padrão e configuração parcial falha fechad
 test('Messenger SQL: envio revalida responsável, sessão e janela dentro da transação', () =>
   checkMessengerSendAuthorization(crm, manager, attendants));
 
+test('Messenger SQL: workers concorrentes, edição manual e reinício após falha no banco', () =>
+  checkMessengerProfileDeployRecovery(crm));
+
+test('Messenger: falha de perfil aparece no nível de log de produção sem dados sensíveis', async () => {
+  let output = '';
+  const stream = new Writable({
+    write(chunk, _encoding, done) {
+      output += chunk.toString();
+      done();
+    },
+  });
+  const app = Fastify({ logger: { level: 'error', stream } });
+  try {
+    const central = await registerMessenger(app, crm, config, false, async () =>
+      Response.json(
+        { error: { code: 10, message: `Paciente privado ${config.pageAccessToken}` } },
+        { status: 400 },
+      ),
+    );
+    const body = raw(payload());
+    await central.receive(body, signature(body));
+    await central.drain();
+    await central.drainProfiles();
+    const logs = output
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].level, 50);
+    assert.equal(logs[0].msg, 'Messenger profile lookup deferred');
+    assert.equal(logs[0].code, 'META_PERMISSION_DENIED:HTTP_400:CODE_10:SUBCODE_0');
+    assert.ok(new Date(logs[0].retry_at).getTime() > Date.now());
+    for (const secret of [
+      config.pageAccessToken,
+      config.appSecret,
+      'Paciente privado',
+      'psid-synthetic-1',
+    ])
+      assert.ok(!output.includes(secret));
+  } finally {
+    await app.close();
+  }
+});
+
+test('Messenger: nome atualizado invalida a revisão da lista sem precisar de nova mensagem', async () => {
+  const { app, messenger } = await buildApp(db, {
+    messenger: config,
+    messengerFetch: profileFetch,
+    reconcile: false,
+  });
+  try {
+    const body = raw(payload());
+    await messenger.receive(body, signature(body));
+    await messenger.drain();
+    const login = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: { 'x-artisti-client': 'web' },
+      payload: { email: manager.email, password: DEMO_PASSWORD },
+    });
+    assert.equal(login.statusCode, 200, login.body);
+    const headers = { cookie: `artisti_session=${login.cookies[0].value}` };
+    const first = await app.inject({ url: '/api/v1/conversations?view=all', headers });
+    assert.equal(first.statusCode, 200);
+    const original = first.json();
+    assert.equal(original.conversations[0].contact_name, 'Contato Messenger');
+    const url = `/api/v1/conversations?view=all&revision=${original.revision}`;
+    assert.equal((await app.inject({ url, headers })).json().unchanged, true);
+    await messenger.drainProfiles();
+    const refreshed = (await app.inject({ url, headers })).json();
+    assert.notEqual(refreshed.revision, original.revision);
+    assert.equal(refreshed.conversations[0].contact_name, 'Maria Messenger');
+    assert.equal(refreshed.conversations[0].id, original.conversations[0].id);
+    assert.equal(
+      refreshed.conversations[0].last_message_at,
+      original.conversations[0].last_message_at,
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+for (const [name, response, error] of messengerProfileCases)
+  test(`Messenger SQL: nome do contato — ${name}`, () =>
+    checkMessengerProfileRecovery(crm, manager, attendants, response, error));
+
+test('Messenger SQL: migração recupera nomes antigos sem alterar atendimento', async () => {
+  await db.query('ALTER TABLE contact_identities DROP COLUMN profile_last_error');
+  await db.query("DELETE FROM schema_migrations WHERE version='044'");
+  try {
+    await checkMessengerProfileMigration(crm, manager, () => migrate(db));
+  } finally {
+    await migrate(db);
+  }
+});
+
 for (const [name, failure, minimumPauseMs] of [
   [
     'HTTP 429 com Retry-After',
@@ -124,6 +231,11 @@ for (const [name, failure, minimumPauseMs] of [
   [
     'Graph code 4 em HTTP 400',
     () => Response.json({ error: { code: 4 } }, { status: 400 }),
+    15 * 60_000,
+  ],
+  [
+    'permissão Graph code 10 em HTTP 400',
+    () => Response.json({ error: { code: 10 } }, { status: 400 }),
     15 * 60_000,
   ],
   ['falha transitória HTTP 503', () => new Response('', { status: 503 }), 15 * 60_000],

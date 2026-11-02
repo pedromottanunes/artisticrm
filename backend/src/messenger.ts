@@ -106,13 +106,17 @@ const envelopeSchema = z.object({
 });
 const profileSchema = z
   .object({
-    id: identifier,
+    id: identifier.optional(),
     name: z.string().trim().max(200).nullish(),
     first_name: z.string().trim().max(100).nullish(),
     last_name: z.string().trim().max(100).nullish(),
-    profile_pic: z.string().url().max(4096).nullish(),
+    // An unavailable photo must not discard an otherwise valid name.
+    profile_pic: z.string().url().max(4096).nullish().catch(undefined),
   })
   .passthrough();
+
+type MessengerProfile = { expires: number; name: string; picture?: string };
+type ProfileLookup = { profile: MessengerProfile } | { error: string; retryAt: number };
 
 type Referral = z.infer<typeof referralSchema>;
 interface MessengerEvent {
@@ -243,7 +247,7 @@ function imageExtension(contentType: string) {
 }
 
 export class MessengerCentral {
-  private profileCache = new Map<string, { expires: number; name?: string; picture?: string }>();
+  private profileCache = new Map<string, MessengerProfile>();
   private profilePausedUntil = 0;
   private mediaProxy: MediaProxy;
 
@@ -251,6 +255,7 @@ export class MessengerCentral {
     readonly crm: CRM | MongoOperations,
     private config?: MessengerConfig,
     private request: MessengerFetch = fetch,
+    private profileWarning?: (error: string, retryAt: Date) => void,
   ) {
     this.mediaProxy = new MediaProxy(request);
   }
@@ -344,9 +349,9 @@ export class MessengerCentral {
       );
   }
 
-  private async profile(senderId: string) {
+  private async profile(senderId: string): Promise<ProfileLookup> {
     const cached = this.profileCache.get(senderId);
-    if (cached && cached.expires > Date.now()) return cached;
+    if (cached && cached.expires > Date.now()) return { profile: cached };
     const config = this.config!;
     const url = new URL(
       `https://graph.facebook.com/${config.graphApiVersion}/${encodeURIComponent(senderId)}`,
@@ -363,11 +368,15 @@ export class MessengerCentral {
       body = await response.json().catch(() => null);
     } catch {
       await this.pauseProfiles(Date.now() + 15 * 60_000);
-      return;
+      return { error: 'META_NETWORK_ERROR', retryAt: this.profilePausedUntil };
     }
     const error = z
       .object({
-        error: z.object({ code: z.number().optional(), is_transient: z.boolean().optional() }),
+        error: z.object({
+          code: z.number().optional(),
+          error_subcode: z.number().optional(),
+          is_transient: z.boolean().optional(),
+        }),
       })
       .safeParse(body);
     const retry = response.headers.get('retry-after')?.trim();
@@ -380,12 +389,16 @@ export class MessengerCentral {
       response.status === 429 ||
       (error.success &&
         [4, 17, 32, 613, 80000, 80001, 80002, 80004, 80006].includes(error.data.error.code ?? 0));
+    const permissionDenied =
+      [401, 403].includes(response.status) ||
+      (error.success &&
+        ([10, 102, 190, 200, 230, 2018247].includes(error.data.error.code ?? 0) ||
+          error.data.error.error_subcode === 2018247));
     if (
       rateLimited ||
       response.status >= 500 ||
-      [401, 403].includes(response.status) ||
-      (error.success &&
-        (error.data.error.is_transient || [102, 190].includes(error.data.error.code ?? 0))) ||
+      permissionDenied ||
+      (error.success && error.data.error.is_transient) ||
       (Number.isFinite(retryUntil) && retryUntil > Date.now())
     )
       await this.pauseProfiles(
@@ -394,13 +407,29 @@ export class MessengerCentral {
           Number.isFinite(retryUntil) && retryUntil <= 8.64e15 ? retryUntil : 0,
         ),
       );
-    if (!response.ok || error.success) return;
+    if (!response.ok || error.success) {
+      const reason = permissionDenied
+        ? 'META_PERMISSION_DENIED'
+        : rateLimited
+          ? 'META_RATE_LIMIT'
+          : 'META_PROFILE_ERROR';
+      // Persist only technical codes, never Meta's raw response, token or personal data.
+      return {
+        error: `${reason}:HTTP_${response.status}${error.success ? `:CODE_${error.data.error.code ?? 0}:SUBCODE_${error.data.error.error_subcode ?? 0}` : ''}`,
+        retryAt: Math.max(
+          this.profilePausedUntil,
+          Date.now() + (this.profilePausedUntil > Date.now() ? 15 * 60_000 : 24 * 60 * 60_000),
+        ),
+      };
+    }
     const parsed = profileSchema.safeParse(body);
-    if (!parsed.success || parsed.data.id !== senderId) return;
+    if (!parsed.success || (parsed.data.id !== undefined && parsed.data.id !== senderId))
+      return { error: 'META_INVALID_PROFILE', retryAt: Date.now() + 15 * 60_000 };
     const name =
-      parsed.data.name ??
-      ([parsed.data.first_name, parsed.data.last_name].filter(Boolean).join(' ').trim() ||
-        undefined);
+      parsed.data.name ||
+      [parsed.data.first_name, parsed.data.last_name].filter(Boolean).join(' ').trim();
+    if (!name || name === 'Contato Messenger')
+      return { error: 'META_PROFILE_NAME_MISSING', retryAt: Date.now() + 15 * 60_000 };
     const value = {
       expires: Date.now() + 24 * 60 * 60_000,
       name,
@@ -409,23 +438,28 @@ export class MessengerCentral {
     if (this.profileCache.size >= 2_000)
       this.profileCache.delete(this.profileCache.keys().next().value!);
     this.profileCache.set(senderId, value);
-    return value;
+    return { profile: value };
   }
 
-  private async refreshProfile(senderId: string, opportunityId: string) {
+  private async refreshProfile(senderId: string) {
     const config = this.config!;
-    const profile = await this.profile(senderId);
-    if (!profile) return;
+    const result = await this.profile(senderId);
+    if ('error' in result) return result;
+    const { profile } = result;
     const db = this.crm.db;
     if (db.kind === 'mongo')
       await db.atomic(async (tx) => {
         const now = await tx.now();
-        const opportunity = await tx.one<Opportunity>('opportunities', { id: opportunityId });
-        if (!opportunity) return;
+        const identity = await tx.one('contact_identities', {
+          provider: 'messenger',
+          channel_account_id: config.pageId,
+          external_user_id: senderId,
+        });
+        if (!identity) return;
         await tx.update(
           'contact_identities',
           {
-            contact_id: opportunity.contact_id,
+            id: identity.id,
             provider: 'messenger',
             channel_account_id: config.pageId,
             external_user_id: senderId,
@@ -435,6 +469,8 @@ export class MessengerCentral {
               ...(profile.name ? { display_name: profile.name } : {}),
               ...(profile.picture ? { profile_picture_url: profile.picture } : {}),
               profile_updated_at: now,
+              profile_pending: false,
+              profile_last_error: null,
               profile_check_after: new Date(now.getTime() + 24 * 60 * 60_000),
             },
           },
@@ -442,7 +478,7 @@ export class MessengerCentral {
         if (profile.name)
           await tx.update(
             'contacts',
-            { id: opportunity.contact_id, name: 'Contato Messenger' },
+            { id: identity.contact_id, name: 'Contato Messenger' },
             { $set: { name: profile.name } },
           );
       });
@@ -451,14 +487,14 @@ export class MessengerCentral {
         const row = (
           await tx.query<{ contact_id: string }>(
             `UPDATE contact_identities ci SET
-               display_name=CASE WHEN $3='' THEN ci.display_name ELSE $3 END,
+               display_name=$3,
                profile_picture_url=CASE WHEN $4='' THEN ci.profile_picture_url ELSE $4 END,
-               profile_updated_at=clock_timestamp(),profile_check_after=clock_timestamp()+interval '24 hours'
-             FROM opportunities o
-             WHERE o.id=$1 AND ci.contact_id=o.contact_id AND ci.provider='messenger'
-               AND ci.channel_account_id=$2 AND ci.external_user_id=$5
+               profile_updated_at=clock_timestamp(),profile_check_after=clock_timestamp()+interval '24 hours',
+               profile_pending=false,profile_last_error=NULL
+             WHERE ci.provider='messenger'
+               AND ci.channel_account_id=$1 AND ci.external_user_id=$2
              RETURNING ci.contact_id`,
-            [opportunityId, config.pageId, profile.name ?? '', profile.picture ?? '', senderId],
+            [config.pageId, senderId, profile.name, profile.picture ?? ''],
           )
         ).rows[0];
         if (row && profile.name)
@@ -496,11 +532,15 @@ export class MessengerCentral {
       };
       const candidate =
         db.kind === 'mongo'
-          ? await db.collection('contact_identities').findOne(filter, { projection: { id: 1 } })
+          ? await db.collection('contact_identities').findOne(filter, {
+              projection: { id: 1 },
+              sort: { profile_check_after: 1, id: 1 },
+            })
           : (
               await db.query(
                 `SELECT id FROM contact_identities WHERE provider='messenger' AND channel_account_id=$1
-                 AND profile_pending AND profile_check_after<=clock_timestamp() LIMIT 1`,
+                 AND profile_pending AND profile_check_after<=clock_timestamp()
+                 ORDER BY profile_check_after,id LIMIT 1`,
                 [config.pageId],
               )
             ).rows[0];
@@ -516,38 +556,36 @@ export class MessengerCentral {
                 { id: identity.id },
                 {
                   $set: {
-                    profile_pending: false,
+                    // Keep the work durable even if this process stops during the HTTP call.
+                    profile_pending: true,
                     profile_check_after: new Date(now.getTime() + 15 * 60_000),
                   },
                 },
               );
               return {
                 sender: identity.external_user_id as string,
-                opportunity: identity.profile_opportunity_id as string,
               };
             })
           : await db.transaction(async (tx) => {
               const identity = (
-                await tx.query<{ external_user_id: string; profile_opportunity_id: string }>(
-                  `UPDATE contact_identities SET profile_pending=false,
+                await tx.query<{ external_user_id: string }>(
+                  `UPDATE contact_identities SET
                      profile_check_after=clock_timestamp()+interval '15 minutes'
                    WHERE id=$1 AND profile_pending AND profile_check_after<=clock_timestamp()
-                   RETURNING external_user_id,profile_opportunity_id`,
+                   RETURNING external_user_id`,
                   [candidate.id],
                 )
               ).rows[0];
               return identity
                 ? {
                     sender: identity.external_user_id,
-                    opportunity: identity.profile_opportunity_id,
                   }
                 : undefined;
             });
-      if (job?.opportunity) {
-        await this.refreshProfile(job.sender, job.opportunity);
-        if (this.profilePausedUntil > Date.now()) {
-          // Preserve the job during transient failures, without retrying other profiles meanwhile.
-          const retryAt = new Date(this.profilePausedUntil);
+      if (job) {
+        const failure = await this.refreshProfile(job.sender);
+        if (failure) {
+          const retryAt = new Date(failure.retryAt);
           if (db.kind === 'mongo')
             await db.update(
               'contact_identities',
@@ -556,15 +594,20 @@ export class MessengerCentral {
                 channel_account_id: config.pageId,
                 external_user_id: job.sender,
               },
-              { $set: { profile_pending: true }, $max: { profile_check_after: retryAt } },
+              {
+                $set: { profile_pending: true, profile_last_error: failure.error },
+                $max: { profile_check_after: retryAt },
+              },
             );
           else
             await db.query(
-              `UPDATE contact_identities SET profile_pending=true,profile_check_after=GREATEST(profile_check_after,$3)
+              `UPDATE contact_identities SET profile_pending=true,profile_check_after=GREATEST(profile_check_after,$3),
+               profile_last_error=$4
               WHERE provider='messenger' AND channel_account_id=$1 AND external_user_id=$2`,
-              [config.pageId, job.sender, retryAt],
+              [config.pageId, job.sender, retryAt, failure.error],
             );
-          return;
+          this.profileWarning?.(failure.error, retryAt);
+          if (this.profilePausedUntil > Date.now()) return;
         }
       }
     }
@@ -1989,7 +2032,11 @@ export async function registerMessenger(
   runWorker = true,
   request?: MessengerFetch,
 ) {
-  const central = new MessengerCentral(crm, config, request);
+  const central = new MessengerCentral(crm, config, request, (code, retryAt) => {
+    // Production logs use level=error. Keep lookup failures visible without
+    // enabling verbose logging of unrelated requests or provider payloads.
+    app.log.error({ code, retry_at: retryAt.toISOString() }, 'Messenger profile lookup deferred');
+  });
   await app.register(async (scope) => {
     scope.removeContentTypeParser('application/json');
     scope.addContentTypeParser('application/json', { parseAs: 'buffer' }, (_req, body, done) =>

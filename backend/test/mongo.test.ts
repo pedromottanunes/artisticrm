@@ -19,6 +19,10 @@ import { MessengerCentral, type MessengerConfig } from '../src/messenger.js';
 import {
   checkMessengerProfileBackoff,
   checkMessengerSendAuthorization,
+  messengerProfileCases,
+  checkMessengerProfileRecovery,
+  checkMessengerProfileMigration,
+  checkMessengerProfileDeployRecovery,
 } from './messenger-resilience-checks.js';
 import { MetaMarketing, type MetaMarketingConfig } from '../src/meta-marketing.js';
 import { hashPassword } from '../src/auth.js';
@@ -1314,6 +1318,18 @@ test('Mongo: webhook assinado persiste lote, deduplica e retoma após nova conex
 test('Mongo: Messenger revalida responsável, sessão e janela dentro da transação', () =>
   checkMessengerSendAuthorization(ops, manager, users));
 
+test('Mongo: Messenger workers concorrentes, edição manual e reinício após falha no banco', () =>
+  checkMessengerProfileDeployRecovery(ops));
+
+for (const [name, response, error] of messengerProfileCases)
+  test(`Mongo: Messenger nome do contato — ${name}`, () =>
+    checkMessengerProfileRecovery(ops, manager, users, response, error));
+
+test('Mongo: Messenger migração recupera nomes antigos sem alterar atendimento', async () => {
+  await db.collection('schema_migrations').deleteOne({ id: '044_messenger_profile_recovery' });
+  await checkMessengerProfileMigration(ops, manager, () => initializeMongo(db));
+});
+
 for (const [name, failure, minimumPauseMs] of [
   [
     'HTTP 429 com Retry-After',
@@ -1332,6 +1348,11 @@ for (const [name, failure, minimumPauseMs] of [
   [
     'Graph code 4 em HTTP 400',
     () => Response.json({ error: { code: 4 } }, { status: 400 }),
+    15 * 60_000,
+  ],
+  [
+    'permissão Graph code 10 em HTTP 400',
+    () => Response.json({ error: { code: 10 } }, { status: 400 }),
     15 * 60_000,
   ],
   ['falha transitória HTTP 503', () => new Response('', { status: 503 }), 15 * 60_000],
