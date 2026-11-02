@@ -315,9 +315,18 @@ for (const kind of ['SQL', 'Mongo'] as const)
             expected_revision: state.revision,
             decision: 'confirm',
             result: extraction,
-            reason: 'Pagamento por familiar conferido pela gestão.',
           };
           const url = `/api/v1/opportunities/${id}/commercial/analyses/${job}/review`;
+          const rejectionWithoutReason = await app.inject({
+            method: 'POST',
+            url,
+            headers: { ...master, 'idempotency-key': randomUUID() },
+            payload: {
+              expected_revision: state.revision,
+              decision: 'reject',
+            },
+          });
+          assert.equal(rejectionWithoutReason.statusCode, 400);
           assert.equal(
             (
               await app.inject({
@@ -338,6 +347,11 @@ for (const kind of ['SQL', 'Mongo'] as const)
           assert.equal(confirmed.statusCode, 200, confirmed.body);
           state = await get(id);
           assert.equal(state.assessment.confirmed_cents, 50000);
+          assert.ok(
+            state.history.some(
+              (entry: any) => entry.action === 'evidence.reviewed' && entry.reason === null,
+            ),
+          );
           const response = await app.inject({
             method: 'POST',
             url: `/api/v1/opportunities/${id}/commercial/evidence/${eid}/supersede`,

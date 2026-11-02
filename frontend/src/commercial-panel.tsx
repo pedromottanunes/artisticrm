@@ -609,7 +609,7 @@ export function CommercialPanel({
                 expected_revision: data.revision,
                 decision,
                 ...(decision === 'confirm' ? { result } : {}),
-                reason,
+                ...(reason.trim() ? { reason: reason.trim() } : {}),
               });
               setReview(null);
             })
@@ -902,12 +902,13 @@ function HumanReview({
         )}
       </div>
       <label>
-        Justificativa da decisão
+        Justificativa da decisão <small>(opcional ao confirmar)</small>
         <textarea
           form=""
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           maxLength={500}
+          placeholder="Obrigatória somente para rejeitar a evidência"
         />
       </label>
       <label className="ce-check">
@@ -934,7 +935,7 @@ function HumanReview({
         <button
           type="button"
           className="button gold"
-          disabled={busy || !checked || reason.trim().length < 10}
+          disabled={busy || !checked}
           onClick={() => onSubmit('confirm', result, reason)}
         >
           Confirmar fatos conferidos

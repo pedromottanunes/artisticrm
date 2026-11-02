@@ -752,7 +752,7 @@ export class CommercialService {
     revision: number,
     decision: 'confirm' | 'reject',
     result: Extraction | undefined,
-    reason: string,
+    reason?: string,
   ) {
     if (actor.role !== 'manager')
       throw new DomainError('FORBIDDEN', 'Somente a gestão pode resolver exceções.', 403);
@@ -760,7 +760,7 @@ export class CommercialService {
       actor,
       id,
       key,
-      { jobId, revision, decision, result, reason },
+      { jobId, revision, decision, result, ...(reason ? { reason } : {}) },
       revision,
       'evidence.reviewed',
       async (tx, row, state, now) => {
