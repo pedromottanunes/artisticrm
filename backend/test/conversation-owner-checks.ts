@@ -37,7 +37,7 @@ export async function checkConversationOwners(
   const targetLeads: string[] = [];
   const archivedLeads: string[] = [];
   const change = async (
-    table: 'opportunities' | 'conversations',
+    table: 'opportunities' | 'conversations' | 'contacts',
     id: string,
     field: string,
     value: unknown,
@@ -84,6 +84,27 @@ export async function checkConversationOwners(
       leads.push(String(row.opportunity_id));
       const owner = index === 0 ? users[1].id : index === 4 ? null : users[0].id;
       await change('opportunities', String(row.opportunity_id), 'owner_id', owner);
+      const lead =
+        db.kind === 'mongo'
+          ? await db.one('opportunities', { id: row.opportunity_id })
+          : (
+              await db.query<{ contact_id: string }>(
+                'SELECT contact_id FROM opportunities WHERE id=$1',
+                [row.opportunity_id],
+              )
+            ).rows[0];
+      await change(
+        'contacts',
+        String(lead!.contact_id),
+        'name',
+        [
+          'Carlos de outra consultora',
+          'Mariana recente',
+          'Mariana [Antiga] 100%',
+          'Mariana não comercial',
+          'Mariana sem responsável',
+        ][index],
+      );
       await change(
         'conversations',
         String(row.id),
@@ -94,6 +115,80 @@ export async function checkConversationOwners(
     await change('opportunities', leads[3], 'non_commercial_reason', 'ADVERTISING');
     targetLeads.push(leads[2]);
     archivedLeads.push(leads[3]);
+    const search = (
+      text: string,
+      user = users[0],
+      view: 'mine' | 'all' | 'non_commercial' | 'review' = 'mine',
+    ) =>
+      central.list(
+        user,
+        view,
+        undefined,
+        1,
+        view === 'review' ? [users[0].id] : undefined,
+        undefined,
+        undefined,
+        text,
+      );
+    const found = await search('aNtIgA');
+    assert.deepEqual(
+      found.conversations.map((row) => row.id),
+      [ids[2]],
+      'Name search runs before pagination, including older conversations',
+    );
+    assert.equal(found.has_more, false);
+    assert.deepEqual(
+      (await search('[Antiga]')).conversations.map((row) => row.id),
+      [ids[2]],
+      'Regex characters are literal',
+    );
+    assert.deepEqual(
+      (await search('%')).conversations.map((row) => row.id),
+      [ids[2]],
+      'SQL wildcard characters are literal',
+    );
+    assert.deepEqual((await search('.*')).conversations, []);
+    assert.deepEqual(
+      (await search('antiga', users[1])).conversations,
+      [],
+      "Searching cannot expose another consultant's lead",
+    );
+    assert.deepEqual((await search('não comercial')).conversations, []);
+    assert.deepEqual(
+      (await search('não comercial', users[0], 'non_commercial')).conversations.map(
+        (row) => row.id,
+      ),
+      [ids[3]],
+    );
+    assert.deepEqual(
+      (await search('antiga', manager, 'all')).conversations.map((row) => row.id),
+      [ids[2]],
+    );
+    assert.deepEqual(
+      (await search('antiga', users[1], 'review')).conversations.map((row) => row.id),
+      [ids[2]],
+    );
+    const searchFirst = await search('mariana');
+    assert.deepEqual(
+      searchFirst.conversations.map((row) => row.id),
+      [ids[1]],
+    );
+    assert.equal(searchFirst.has_more, true);
+    const searchNext = await central.list(
+      users[0],
+      'mine',
+      { at: new Date(String(searchFirst.conversations[0].last_message_at)), id: ids[1] },
+      1,
+      undefined,
+      undefined,
+      undefined,
+      'mariana',
+    );
+    assert.deepEqual(
+      searchNext.conversations.map((row) => row.id),
+      [ids[2]],
+    );
+    assert.equal(searchNext.has_more, false);
     const exact = await central.list(manager, 'all', undefined, 1, undefined, undefined, leads[2]);
     assert.deepEqual(
       exact.conversations.map((row) => row.id),
@@ -173,6 +268,39 @@ export async function checkConversationOwners(
       return { cookie: `artisti_session=${response.cookies[0].value}` };
     };
     const headers = await login(manager);
+    const searchUrl = '/api/v1/conversations?search=%20aNTIGA%20';
+    const searched = await app.inject({ url: searchUrl, headers: await login(users[0]) });
+    assert.equal(searched.statusCode, 200, searched.body);
+    assert.deepEqual(
+      new Set(
+        searched.json().conversations.map((row: { opportunity_id: string }) => row.opportunity_id),
+      ),
+      new Set(targetLeads),
+    );
+    assert.equal(
+      (await app.inject({ url: searchUrl, headers: await login(users[1]) })).json().conversations
+        .length,
+      0,
+    );
+    const changedSearch = await app.inject({
+      url: `/api/v1/conversations?search=inexistente&revision=${searched.json().revision}`,
+      headers: await login(users[0]),
+    });
+    assert.deepEqual(
+      changedSearch.json().conversations,
+      [],
+      'A cached search must not hide the result of another term',
+    );
+    const filteredSearch = await app.inject({
+      url: `${searchUrl}&owner_id=${users[1].id}`,
+      headers,
+    });
+    assert.deepEqual(filteredSearch.json().conversations, []);
+    assert.equal(
+      (await app.inject({ url: `/api/v1/conversations?search=${'a'.repeat(101)}`, headers }))
+        .statusCode,
+      400,
+    );
     const url = `/api/v1/conversations?view=all&owner_id=${users[0].id}`;
     const response = await app.inject({ url, headers });
     assert.equal(response.statusCode, 200, response.body);

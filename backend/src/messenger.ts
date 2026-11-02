@@ -1015,6 +1015,7 @@ export class MessengerCentral {
     providedReviewOwners?: string[],
     ownerId?: string | null,
     opportunityId?: string,
+    search = '',
   ) {
     if (
       (ownerId !== undefined || opportunityId !== undefined) &&
@@ -1059,6 +1060,14 @@ export class MessengerCentral {
       if (account) {
         const all =
           user.role === 'manager' && view === 'all' && ownerId === undefined && !opportunityId;
+        const contactLookup = {
+          $lookup: {
+            from: 'contacts',
+            localField: 'contact_id',
+            foreignField: 'id',
+            as: 'contact',
+          },
+        };
         const visibility =
           ownerId !== undefined
             ? { owner_id: ownerId }
@@ -1152,16 +1161,22 @@ export class MessengerCentral {
                   },
                 ]
               : []),
+            ...(search
+              ? [
+                  contactLookup,
+                  {
+                    $match: {
+                      'contact.name': {
+                        $regex: search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+                        $options: 'i',
+                      },
+                    },
+                  },
+                ]
+              : []),
             { $sort: { last_message_at: -1, id: 1 } },
             { $limit: limit + 1 },
-            {
-              $lookup: {
-                from: 'contacts',
-                localField: 'contact_id',
-                foreignField: 'id',
-                as: 'contact',
-              },
-            },
+            ...(!search ? [contactLookup] : []),
             {
               $lookup: {
                 from: 'contact_identities',
@@ -1234,7 +1249,8 @@ export class MessengerCentral {
              AND i.provider='messenger' AND i.channel_account_id=ca.external_account_id LIMIT 1) ci ON TRUE
            WHERE ca.provider='messenger' AND ca.external_account_id=$1
              AND o.non_commercial_reason IS ${archived ? 'NOT NULL' : 'NULL'} AND (${visibility})
-             ${opportunityId ? 'AND o.id=$6::uuid' : ''}
+             AND ($6='' OR strpos(lower(c.name),lower($6))>0)
+             ${opportunityId ? 'AND o.id=$7::uuid' : ''}
               AND ($3::timestamptz IS NULL OR cv.last_message_at<$3::timestamptz
                    OR (cv.last_message_at=$3::timestamptz AND cv.id>$4::uuid))
             ORDER BY cv.last_message_at DESC,cv.id LIMIT $5`,
@@ -1244,6 +1260,7 @@ export class MessengerCentral {
             cursor?.at ?? null,
             cursor?.id ?? null,
             limit + 1,
+            search,
             ...(opportunityId ? [opportunityId] : []),
           ],
         )

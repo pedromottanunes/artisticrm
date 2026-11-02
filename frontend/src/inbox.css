@@ -92,6 +92,18 @@
   padding: 16px 18px;
   border-bottom: 1px solid var(--border, #e8e4dc);
 }
+.inbox-search {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border, #e8e4dc);
+}
+.inbox-search .search-field {
+  width: 100%;
+  min-width: 0;
+}
+.inbox-search input {
+  min-width: 0;
+  min-height: 44px;
+}
 .inbox-owner-filter label {
   font-size: 12px;
   font-weight: 600;

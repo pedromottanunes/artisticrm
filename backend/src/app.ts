@@ -858,6 +858,7 @@ export async function buildApp(
     const query = z
       .object({
         view: z.enum(['mine', 'reserved', 'pool', 'all', 'non_commercial', 'review']).optional(),
+        search: z.string().trim().max(100).default(''),
         owner_id: z.union([uuid, z.literal('unassigned')]).optional(),
         target_opportunity_id: uuid.optional(),
         before_at: z.string().datetime({ offset: true }).optional(),
@@ -888,8 +889,26 @@ export async function buildApp(
         : undefined;
     const reviewOwners = view === 'review' ? await reviewSourceIds(db, request.user.id) : undefined;
     const [instagramResult, messengerResult] = await Promise.all([
-      instagram.list(request.user, view, cursor, 101, reviewOwners, ownerId),
-      messenger.list(request.user, view, cursor, 101, reviewOwners, ownerId),
+      instagram.list(
+        request.user,
+        view,
+        cursor,
+        101,
+        reviewOwners,
+        ownerId,
+        undefined,
+        query.search,
+      ),
+      messenger.list(
+        request.user,
+        view,
+        cursor,
+        101,
+        reviewOwners,
+        ownerId,
+        undefined,
+        query.search,
+      ),
     ]);
     const merged = [...instagramResult.conversations, ...messengerResult.conversations].sort(
       (left, right) => {
@@ -924,6 +943,7 @@ export async function buildApp(
           undefined,
           ownerId,
           query.target_opportunity_id,
+          query.search,
         ),
         messenger.list(
           request.user,
@@ -933,6 +953,7 @@ export async function buildApp(
           undefined,
           ownerId,
           query.target_opportunity_id,
+          query.search,
         ),
       ]);
       targetConversation = targets.flatMap((result) => result.conversations)[0];

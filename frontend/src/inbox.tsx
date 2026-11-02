@@ -13,6 +13,7 @@ import {
   Maximize2,
   MessageCircle,
   RefreshCw,
+  Search,
   Send,
   X,
   Zap,
@@ -467,6 +468,8 @@ export function InstagramInbox({
   const [archive, setArchive] = useState(targetArchived);
   const [review, setReview] = useState(false);
   const [ownerFilter, setOwnerFilter] = useState('');
+  const [search, setSearch] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
   const [managerPages, setManagerPages] = useState<Array<{ at: string; id: string }>>([]);
   const [managerListChanging, setManagerListChanging] = useState(false);
   const [configured, setConfigured] = useState(true);
@@ -793,18 +796,22 @@ export function InstagramInbox({
                   ? 'all'
                   : 'mine';
         const params = new URLSearchParams({ view });
+        const activeSearch = targetOpportunityId ? '' : searchTerm;
+        if (activeSearch) params.set('search', activeSearch);
         if (user.role === 'manager') {
           // A new external target starts from the first page, independently of the
           // previous filter. Manual navigation consumes it and resumes normal paging.
           if (!targetOpportunityId) {
             if (ownerFilter) params.set('owner_id', ownerFilter);
-            const cursor = managerPages.at(-1);
-            if (cursor) {
-              params.set('before_at', cursor.at);
-              params.set('before_id', cursor.id);
-            }
           }
           if (requestedTarget) params.set('target_opportunity_id', requestedTarget);
+        }
+        if (!targetOpportunityId && (user.role === 'manager' || activeSearch)) {
+          const cursor = managerPages.at(-1);
+          if (cursor) {
+            params.set('before_at', cursor.at);
+            params.set('before_id', cursor.id);
+          }
         }
         const requestScope = params.toString();
         // Revisions belong to one filter/page, never to the previously selected consultant.
@@ -825,10 +832,15 @@ export function InstagramInbox({
         pollFailures.current = 0;
         retryAfter.current = 0;
         setConfigured(result.configured);
-        const scope = `${view}:${[...(result.review_source_ids ?? [])].sort().join('|')}`;
+        const scope = JSON.stringify([
+          view,
+          activeSearch,
+          [...(result.review_source_ids ?? [])].sort(),
+        ]);
         const previousPagination = listPagination.current;
         const preserveLoadedPages =
           review &&
+          !activeSearch &&
           result.conversations.length > 0 &&
           previousPagination.loadedBeyondFirst &&
           previousPagination.scope === scope;
@@ -897,7 +909,9 @@ export function InstagramInbox({
           : keepConversationSelected
             ? nextConversations.some((item) => item.id === selectedIdRef.current)
               ? selectedIdRef.current
-              : (nextConversations[0]?.id ?? '')
+              : activeSearch
+                ? ''
+                : (nextConversations[0]?.id ?? '')
             : '';
         const previous = selectedIdRef.current;
         selectedIdRef.current = next;
@@ -988,12 +1002,22 @@ export function InstagramInbox({
       user.role,
       ownerFilter,
       managerPages,
+      searchTerm,
     ],
   );
+  const latestRefresh = useRef(refresh);
 
   const loadMoreConversations = useCallback(async () => {
     const page = listPagination.current;
-    if (!review || listLoadingMore || !page.hasMore || !page.beforeAt || !page.beforeId) return;
+    if (
+      !review ||
+      searchTerm ||
+      listLoadingMore ||
+      !page.hasMore ||
+      !page.beforeAt ||
+      !page.beforeId
+    )
+      return;
     const expectedScope = page.scope;
     setListLoadingMore(true);
     try {
@@ -1003,7 +1027,11 @@ export function InstagramInbox({
         before_id: page.beforeId,
       });
       const result = await api<ListResponse>(`/conversations?${params.toString()}`);
-      const resultScope = `review:${[...(result.review_source_ids ?? [])].sort().join('|')}`;
+      const resultScope = JSON.stringify([
+        params.get('view'),
+        searchTerm,
+        [...(result.review_source_ids ?? [])].sort(),
+      ]);
       if (!mounted.current || listPagination.current.scope !== expectedScope) return;
       if (resultScope !== expectedScope) {
         listCache.current = null;
@@ -1041,9 +1069,10 @@ export function InstagramInbox({
     } finally {
       if (mounted.current) setListLoadingMore(false);
     }
-  }, [handleError, listLoadingMore, onConnectionChange, refresh, review]);
+  }, [handleError, listLoadingMore, onConnectionChange, refresh, review, searchTerm]);
 
   useEffect(() => {
+    latestRefresh.current = refresh;
     void refresh();
     const timer = window.setInterval(() => {
       if (!document.hidden) void refresh(true);
@@ -1053,6 +1082,8 @@ export function InstagramInbox({
 
   useEffect(() => {
     if (!targetOpportunityId) return;
+    setSearch('');
+    setSearchTerm('');
     listCache.current = null;
     listPagination.current = {
       scope: '',
@@ -1145,7 +1176,7 @@ export function InstagramInbox({
     void loadThread(id);
   };
 
-  const returnToConversationList = () => {
+  const returnToConversationList = useCallback(() => {
     threadRequest.current?.controller.abort();
     threadRequest.current = null;
     setShortcutPickerOpen(false);
@@ -1156,7 +1187,7 @@ export function InstagramInbox({
     threadSequence.current += 1;
     threadRef.current = null;
     setThread(null);
-  };
+  }, []);
 
   const sendText = async (value: string, clearDraft: boolean) => {
     const text = value.trim();
@@ -1203,7 +1234,7 @@ export function InstagramInbox({
           'O envio ainda não foi confirmado pela Meta. Confira a conversa antes de tentar novamente.',
         );
       if (selectedIdRef.current === conversationId) await loadThread(conversationId, false, true);
-      await refresh(true);
+      await latestRefresh.current(true);
     } catch (error) {
       if (
         error instanceof ApiError &&
@@ -1234,7 +1265,7 @@ export function InstagramInbox({
       users.find((item) => item.id === conversation.owner_id)?.name ?? 'Consultor indisponível'
     );
   };
-  const clearManagerList = () => {
+  const clearManagerList = useCallback(() => {
     managerTarget.current = '';
     preventAutoSelection.current = false;
     if (targetOpportunityId) onTargetConsumed();
@@ -1248,9 +1279,27 @@ export function InstagramInbox({
     setConversations([]);
     setListHasMore(false);
     setManagerListChanging(true);
-  };
+  }, [onTargetConsumed, targetOpportunityId, returnToConversationList]);
+  useEffect(() => {
+    const term = search.trim();
+    if (term === searchTerm) return;
+    const timer = setTimeout(() => {
+      clearManagerList();
+      preventAutoSelection.current = true;
+      setManagerPages((pages) => (pages.length ? [] : pages));
+      listPagination.current = {
+        scope: '',
+        loadedBeyondFirst: false,
+        hasMore: false,
+        beforeAt: null,
+        beforeId: null,
+      };
+      setSearchTerm(term);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search, searchTerm, clearManagerList]);
   const resetConversationPagination = () => {
-    if (user.role === 'manager') {
+    if (user.role === 'manager' || searchTerm) {
       clearManagerList();
       setManagerPages([]);
     }
@@ -1296,6 +1345,7 @@ export function InstagramInbox({
         beforeId: null,
       };
       setListHasMore(false);
+      setManagerPages((pages) => (pages.length ? [] : pages));
       setReview(false);
       setArchive(false);
       onNotice('Conversa assumida. Ela agora está em seus atendimentos.');
@@ -1354,7 +1404,7 @@ export function InstagramInbox({
       notificationSavingRef.current = false;
       if (mounted.current) {
         setNotificationSaving(false);
-        void refresh(true);
+        void latestRefresh.current(true);
       }
     }
   };
@@ -1398,6 +1448,19 @@ export function InstagramInbox({
             <RefreshCw size={17} />
           </button>
         </header>
+        <div className="inbox-search">
+          <label className="search-field">
+            <Search size={17} aria-hidden="true" />
+            <input
+              type="search"
+              aria-label="Buscar lead por nome"
+              placeholder="Buscar lead por nome"
+              maxLength={100}
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </label>
+        </div>
         {user.role === 'manager' && (
           <div className="inbox-owner-filter">
             <label htmlFor="inbox-consultant">Consultor responsável</label>
@@ -1506,7 +1569,7 @@ export function InstagramInbox({
               <time>{time(conversation.last_message_at)}</time>
             </button>
           ))}
-          {review && listHasMore && (
+          {review && !searchTerm && listHasMore && (
             <button
               type="button"
               className="inbox-load-more"
@@ -1526,18 +1589,20 @@ export function InstagramInbox({
               <Inbox size={27} />
               <strong>Nenhuma conversa</strong>
               <span>
-                {user.role === 'manager'
-                  ? ownerFilter
-                    ? 'Nenhuma conversa deste responsável nesta categoria.'
-                    : 'As novas mensagens do Instagram e Messenger aparecerão aqui.'
-                  : review
-                    ? 'A gestão ainda não compartilhou uma carteira com você.'
-                    : 'Depois de assumir um lead, a conversa aparecerá aqui.'}
+                {searchTerm
+                  ? 'Nenhuma conversa encontrada com esse nome nesta categoria.'
+                  : user.role === 'manager'
+                    ? ownerFilter
+                      ? 'Nenhuma conversa deste responsável nesta categoria.'
+                      : 'As novas mensagens do Instagram e Messenger aparecerão aqui.'
+                    : review
+                      ? 'A gestão ainda não compartilhou uma carteira com você.'
+                      : 'Depois de assumir um lead, a conversa aparecerá aqui.'}
               </span>
             </div>
           )}
         </div>
-        {user.role === 'manager' && (managerPages.length > 0 || listHasMore) && (
+        {(user.role === 'manager' || searchTerm) && (managerPages.length > 0 || listHasMore) && (
           <nav className="inbox-list-pagination" aria-label="Páginas de conversas">
             <button
               type="button"

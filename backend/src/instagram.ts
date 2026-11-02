@@ -1228,6 +1228,7 @@ export class InstagramCentral {
     providedReviewOwners?: string[],
     ownerId?: string | null,
     opportunityId?: string,
+    search = '',
   ) {
     if (
       (ownerId !== undefined || opportunityId !== undefined) &&
@@ -1277,6 +1278,14 @@ export class InstagramCentral {
       if (!account) return { configured: true, conversations: [], has_more: false };
       const all =
         user.role === 'manager' && view === 'all' && ownerId === undefined && !opportunityId;
+      const contactLookup = {
+        $lookup: {
+          from: 'contacts',
+          localField: 'contact_id',
+          foreignField: 'id',
+          as: 'contact',
+        },
+      };
       let conversations = await db
         .collection(all ? 'conversations' : 'opportunities')
         .aggregate<Record<string, unknown>>([
@@ -1350,16 +1359,22 @@ export class InstagramCentral {
                 },
               ]
             : []),
+          ...(search
+            ? [
+                contactLookup,
+                {
+                  $match: {
+                    'contact.name': {
+                      $regex: search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+                      $options: 'i',
+                    },
+                  },
+                },
+              ]
+            : []),
           { $sort: { last_message_at: -1, id: 1 } },
           { $limit: limit + 1 },
-          {
-            $lookup: {
-              from: 'contacts',
-              localField: 'contact_id',
-              foreignField: 'id',
-              as: 'contact',
-            },
-          },
+          ...(!search ? [contactLookup] : []),
           { $set: { contact: { $first: '$contact' } } },
           {
             $lookup: {
@@ -1499,7 +1514,8 @@ export class InstagramCentral {
            ORDER BY i.username DESC LIMIT 1) ci ON TRUE
           WHERE ca.provider='instagram' AND ca.external_account_id=$1
             AND o.non_commercial_reason IS ${archived ? 'NOT NULL' : 'NULL'} AND (${visibility})
-            ${opportunityId ? 'AND o.id=$6::uuid' : ''}
+            AND ($6='' OR strpos(lower(c.name),lower($6))>0)
+            ${opportunityId ? 'AND o.id=$7::uuid' : ''}
             AND ($3::timestamptz IS NULL OR cv.last_message_at<$3::timestamptz
                  OR (cv.last_message_at=$3::timestamptz AND cv.id>$4::uuid))
           ORDER BY cv.last_message_at DESC,cv.id LIMIT $5`,
@@ -1509,6 +1525,7 @@ export class InstagramCentral {
           cursor?.at ?? null,
           cursor?.id ?? null,
           limit + 1,
+          search,
           ...(opportunityId ? [opportunityId] : []),
         ],
       )
