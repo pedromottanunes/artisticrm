@@ -21,6 +21,7 @@ import './lead-lists.css';
 import './public-legal.css';
 import './lead-mobile.css';
 import './settings.css';
+import './atelier.css';
 import { registerDeviceWorker } from './pwa';
 import { PublicLegalPage, type PublicLegalPageName } from './public-legal';
 

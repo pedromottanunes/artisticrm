@@ -72,9 +72,6 @@ test('documentos: envio real, revisão da gestão e layout adaptável', async ({
   await review.getByLabel('Situação da transação').selectOption('completed');
   await review.getByLabel('Identificador da transação').fill(`TEST-${randomUUID()}`);
   await review
-    .getByLabel('Justificativa da decisão')
-    .fill('Comprovante sintético conferido no teste automatizado.');
-  await review
     .getByLabel('Conferi os documentos, o vínculo com o paciente e os dados acima.')
     .check();
   await review.getByRole('button', { name: 'Confirmar fatos conferidos' }).click();

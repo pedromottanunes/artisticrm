@@ -420,9 +420,10 @@ test('gestão móvel: todas as telas pela barra inferior, cartões e formulário
     expect(
       await logo.evaluate((element: HTMLImageElement) => element.naturalWidth),
     ).toBeGreaterThan(0);
-    expect((await logo.boundingBox())!.x + (await logo.boundingBox())!.width).toBeLessThanOrEqual(
-      (await page.locator('.breadcrumbs').boundingBox())!.x,
-    );
+    const logoBounds = (await logo.boundingBox())!;
+    const titleBounds = (await page.locator('.breadcrumbs').boundingBox())!;
+    // The Atelier mobile header gives the title its own row below the logo.
+    expect(logoBounds.y + logoBounds.height).toBeLessThanOrEqual(titleBounds.y);
     for (const name of [
       'Central de atendimentos',
       'Funil',
@@ -442,7 +443,7 @@ test('gestão móvel: todas as telas pela barra inferior, cartões e formulário
         await navigation.evaluate((el) =>
           Math.abs(el.getBoundingClientRect().bottom - innerHeight),
         ),
-      ).toBeLessThan(2);
+      ).toBeLessThanOrEqual(10); // Floating navigation keeps its 9px bottom margin.
       const box = await button.boundingBox();
       expect(box!.height).toBeGreaterThanOrEqual(44);
     }
@@ -779,7 +780,7 @@ test('gestão móvel: status compacto e ficha pelo nome na central', async ({ pa
   await expect(page.getByRole('dialog')).toBeVisible();
 });
 
-test('tema clínico contemporâneo mantém as superfícies claras em toda a gestão', async ({
+test('tema Atelier mantém conteúdo claro e destaques marinhos, sem alterar o login', async ({
   page,
 }) => {
   const lightness = (color: string) => {
@@ -796,6 +797,9 @@ test('tema clínico contemporâneo mantém as superfícies claras em toda a gest
     page.evaluate(() =>
       [...document.querySelectorAll<HTMLElement>('.app-shell *')]
         .filter((element) => {
+          // The approved theme uses navy for navigation and summary bands only.
+          if (element.closest('.sidebar, .topbar, .central-summary, .meta-ads-summary'))
+            return false;
           const box = element.getBoundingClientRect();
           if (box.width * box.height < 2_000 || box.bottom <= 0 || box.top >= innerHeight)
             return false;
@@ -858,8 +862,16 @@ test('tema clínico contemporâneo mantém as superfícies claras em toda a gest
       };
     }, surface);
     expect(lightness(colors.page), `dark page on ${hash}`).toBeGreaterThan(0.85);
-    expect(lightness(colors.header), `dark header on ${hash}`).toBeGreaterThan(0.85);
-    expect(lightness(colors.surface), `dark surface on ${hash}`).toBeGreaterThan(0.85);
+    expect(colors.header, `transparent desktop header on ${hash}`).toBe('rgba(0, 0, 0, 0)');
+    if (hash === 'central') {
+      expect(colors.surface).toBe('rgb(16, 41, 66)');
+      await expect(page.locator('.central-summary strong').first()).toHaveCSS(
+        'color',
+        'rgb(255, 255, 255)',
+      );
+    } else
+      expect(lightness(colors.surface), `dark content surface on ${hash}`).toBeGreaterThan(0.85);
+    await expect(page.locator('.sidebar')).toHaveCSS('background-color', 'rgb(16, 41, 66)');
     expect(lightness(colors.text), `light root text on ${hash}`).toBeLessThan(0.4);
     expect(await darkSurfaces(), `legacy dark surface on ${hash}`).toEqual([]);
     if (hash === 'reports')
@@ -1538,10 +1550,6 @@ test('central aceita consulta lenta e usa a mesma fotografia para equipe e leads
   page,
 }) => {
   await login(page);
-  const expected = await (await page.request.get('/api/v1/distribution/board')).json();
-  const firstUser = expected.users.find(
-    (u: { id: string }) => u.id === expected.rows[0].reserved_to,
-  );
   await page.getByRole('button', { name: 'Configurações', exact: true }).click();
   // Simulate the workspace's independent snapshot lagging behind the board.
   await page.route('**/api/v1/workspace*', async (route) => {
@@ -1552,9 +1560,19 @@ test('central aceita consulta lenta e usa a mesma fotografia para equipe e leads
     });
   });
   let calls = 0;
+  let expectedLeadName = '';
+  let expectedResponsible = '';
   await page.route('**/api/v1/distribution/board?*', async (route) => {
     calls++;
     const response = await route.fetch();
+    // Use the same ordered snapshot delivered to the UI. A separate request
+    // without order=RECENT can return another lead first, even without the theme.
+    const expected = await response.json();
+    const lead = expected.rows[0];
+    expectedLeadName = lead.name;
+    expectedResponsible =
+      expected.users.find((user: { id: string }) => user.id === (lead.owner_id ?? lead.reserved_to))
+        ?.name ?? '';
     await new Promise((resolve) => setTimeout(resolve, 6500));
     await route.fulfill({ response });
   });
@@ -1569,9 +1587,13 @@ test('central aceita consulta lenta e usa a mesma fotografia para equipe e leads
   // being restarted by each five-second workspace poll.
   expect(calls).toBeLessThanOrEqual(2);
   await expect(page.locator('.central-rule')).toContainText('10 min');
+  expect(expectedResponsible).not.toBe('');
+  await expect(
+    page.locator('.central-table tbody tr').first().locator('.central-contact'),
+  ).toContainText(expectedLeadName);
   await expect(
     page.locator('.central-table tbody tr').first().locator('.central-owner'),
-  ).toContainText(firstUser.name);
+  ).toContainText(expectedResponsible);
 });
 
 test('central recupera falhas e descarta respostas de filtros anteriores', async ({ page }) => {

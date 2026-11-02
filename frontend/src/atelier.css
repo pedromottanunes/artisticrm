@@ -1,0 +1,880 @@
+/* Artisti — Atelier orgânico.
+   Presentation only: scoped to the authenticated workspace and its existing dialogs.
+   Keep semantic states, responsive navigation and viewport/keyboard handling in their
+   component stylesheets. This final layer changes the visual treatment only. */
+.app-shell {
+  --navy: #102942;
+  --gold: #b49761;
+  --muted: #61778a;
+  --line: #dbe5ed;
+  --panel: #fff;
+  --light-page: #f1f5f8;
+  --light-soft: #e7eff5;
+  --light-ink: #102942;
+  --light-secondary: #61778a;
+  --light-border: #dbe5ed;
+  --light-teal: #36657b;
+  --light-teal-soft: #e4edf4;
+  --mint: #36657b;
+  --teal: #36657b;
+  --light-shadow: 0 6px 24px #10294204;
+  color: #102942;
+  background: #f1f5f8;
+  font-family: 'Montserrat', sans-serif;
+}
+html:has(.app-shell),
+body:has(.app-shell),
+.app-shell,
+:where(.app-shell) .main-shell {
+  background: #f1f5f8;
+}
+.app-shell {
+  padding: 16px 18px 18px 0;
+}
+:where(.app-shell) .sidebar {
+  inset: 16px auto 16px 16px;
+  width: 228px;
+  border: 0;
+  border-radius: 26px;
+  background: #102942;
+  box-shadow: none;
+}
+:where(.app-shell) .brand {
+  padding: 24px 18px 20px;
+  border-bottom: 1px solid #ffffff13;
+}
+:where(.app-shell) .brand img {
+  width: 155px;
+  height: 68px;
+  filter: brightness(0) invert(1);
+  opacity: 0.94;
+}
+:where(.app-shell) .sidebar nav {
+  padding: 0 12px 16px;
+}
+:where(.app-shell) .nav-group {
+  padding-top: 25px;
+}
+:where(.app-shell) .nav-group > p {
+  font-size: 12px;
+  color: #a2b7c7;
+  letter-spacing: 1.5px;
+  margin: 0 13px 12px;
+}
+:where(.app-shell) .nav-item {
+  font-size: 13px;
+  line-height: 1.5;
+  min-height: 46px;
+  border-radius: 14px;
+  padding: 11px 13px;
+  margin-bottom: 6px;
+  color: #d6e0e8;
+  gap: 12px;
+}
+:where(.app-shell) .nav-item:hover {
+  background: #ffffff0c;
+  color: #fff;
+}
+:where(.app-shell) .nav-item.active {
+  background: #b49761;
+  color: #102942;
+  box-shadow: none;
+}
+:where(.app-shell) .nav-item svg {
+  width: 17px;
+  height: 17px;
+  stroke-width: 1.5;
+}
+:where(.app-shell) .nav-item b {
+  border: 0;
+  border-radius: 9px;
+  background: #ffffff1b;
+  color: #fff;
+}
+:where(.app-shell) .main-shell {
+  margin-left: 263px;
+  overflow-x: visible;
+}
+:where(.app-shell) .topbar {
+  height: 88px;
+  padding: 0 25px;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+:where(.app-shell) .breadcrumbs h1 {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-weight: 400;
+  font-size: 34px;
+  letter-spacing: -0.7px;
+  color: #102942;
+}
+:where(.app-shell) .topbar-right {
+  gap: 14px;
+}
+:where(.app-shell) .sync-status {
+  font-size: 12px;
+}
+:where(.app-shell) .icon-button {
+  border-radius: 12px;
+  color: #637b8d;
+}
+:where(.app-shell) .main-shell > main {
+  padding: 14px 25px 30px;
+  max-width: none;
+}
+:where(.app-shell) .button {
+  border-radius: 12px;
+  box-shadow: none;
+  font-weight: 600;
+}
+:where(.app-shell) .button.gold {
+  background: #b49761;
+  color: #102942;
+  box-shadow: none;
+}
+:where(.app-shell) .button.outline {
+  border-color: #cfdae3;
+  background: #fff;
+  color: #29465e;
+}
+:where(.app-shell) .button.compact {
+  padding: 9px 14px;
+  border-radius: 11px;
+}
+:where(.app-shell) input,
+:where(.app-shell) select,
+:where(.app-shell) textarea {
+  border-radius: 12px;
+  border-color: #d4e0e8;
+  background: #f9fbfd;
+  color: #18334d;
+}
+:where(.app-shell) input:focus,
+:where(.app-shell) select:focus,
+:where(.app-shell) textarea:focus {
+  border-color: #809cad;
+  box-shadow: 0 0 0 3px #1029420c;
+}
+:where(.app-shell) .search-field {
+  border-radius: 12px;
+}
+:where(.app-shell) .panel,
+:where(.app-shell) .report-card,
+:where(.app-shell) .central-leads,
+:where(.app-shell) .pipeline-list,
+:where(.app-shell) .kanban-column,
+:where(.app-shell) .lead-card,
+:where(.app-shell) .operational-card,
+:where(.app-shell) .settings-section,
+:where(.app-shell) .lead-lists-results {
+  border-radius: 22px;
+  border: 1px solid #e0e8ee;
+  box-shadow: none;
+  background: #fff;
+}
+:where(.app-shell) .panel-heading {
+  border-color: #e5ebf0;
+}
+:where(.app-shell) .panel-heading h2 {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-weight: 400;
+}
+:where(.app-shell) .eyebrow,
+:where(.app-shell) .section-label {
+  color: #907244;
+  letter-spacing: 1.35px;
+  font-size: 12px;
+}
+:where(.app-shell) .badge,
+:where(.app-shell) .stage-pill {
+  border-radius: 8px;
+}
+:where(.app-shell) .stage-pill {
+  background: #eef3f7;
+  border-color: #d7e3eb;
+  color: #536c80;
+}
+:where(.app-shell) .central-commandbar {
+  background: transparent;
+}
+:where(.app-shell) .central-summary {
+  border-radius: 22px;
+  background: #102942;
+  border-color: #102942;
+  overflow: hidden;
+  box-shadow: none;
+}
+:where(.app-shell) .central-summary button {
+  color: #eaf1f5;
+  border-color: #ffffff20;
+  background: transparent;
+}
+:where(.app-shell) .central-summary button:hover,
+:where(.app-shell) .central-summary button[aria-pressed='true'] {
+  background: #1b3852;
+}
+:where(.app-shell) .central-summary span {
+  color: #c3d1dd;
+}
+:where(.app-shell) .central-summary strong {
+  color: #fff;
+  font-size: 28px;
+  font-weight: 500;
+}
+:where(.app-shell) .central-summary svg {
+  color: #c4a76e;
+}
+:where(.app-shell) .central-summary button i {
+  background: #c4a76e;
+}
+:where(.app-shell) .attendant-card {
+  border-radius: 18px;
+  box-shadow: none;
+  border-color: #dde7ee;
+}
+:where(.app-shell) .attendant-card[data-next='true'] {
+  border-color: #bca573;
+}
+:where(.app-shell) .attendant-card-head > i {
+  border-radius: 7px;
+}
+:where(.app-shell) .central-scopes,
+:where(.app-shell) .pipeline-view-switch,
+:where(.app-shell) .consultant-status-tabs,
+:where(.app-shell) .comment-pool-tabs {
+  border-radius: 13px;
+  border-color: #e0e8ee;
+  background: #e8eff5;
+  padding: 4px;
+}
+:where(.app-shell) .central-scopes button,
+:where(.app-shell) .pipeline-view-switch button,
+:where(.app-shell) .consultant-status-tabs button,
+:where(.app-shell) .comment-pool-tabs button {
+  border-radius: 10px;
+}
+:where(.app-shell) .central-scopes button[aria-pressed='true'],
+:where(.app-shell) .pipeline-view-switch button[aria-pressed='true'],
+:where(.app-shell) .consultant-status-tabs button[aria-pressed='true'],
+:where(.app-shell) .comment-pool-tabs button.active {
+  background: #fff;
+  color: #102942;
+  box-shadow: 0 2px 6px #10294208;
+}
+:where(.app-shell) .central-status-tabs button {
+  border-radius: 9px;
+}
+:where(.app-shell) .central-status-tabs button[aria-pressed='true'] {
+  background: #e7eff5;
+  color: #234e68;
+}
+:where(.app-shell) .central-table th,
+:where(.app-shell) .pipeline-table th,
+:where(.app-shell) .leads-table th {
+  background: #f3f7fa;
+  color: #6d8192;
+  letter-spacing: 0.4px;
+}
+:where(.app-shell) .central-table td,
+:where(.app-shell) .pipeline-table td,
+:where(.app-shell) .leads-table td {
+  border-color: #edf1f5;
+}
+:where(.app-shell) .central-table tbody tr:hover,
+:where(.app-shell) .pipeline-table tbody tr:hover {
+  background: #f7f9fb;
+}
+:where(.app-shell) .queue-person,
+:where(.app-shell) .queue-card,
+:where(.app-shell) .kanban-card {
+  border-radius: 15px;
+  box-shadow: none;
+  border-color: #e2e9ef;
+}
+:where(.app-shell) .reports-filter {
+  border-radius: 18px;
+  border-color: #e0e8ee;
+  background: #fff;
+  padding: 12px 18px;
+}
+:where(.app-shell) .report-card > header {
+  border-color: #edf1f5;
+}
+:where(.app-shell) .report-card > header h2 {
+  font-family: 'Montserrat', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+}
+:where(.app-shell) .report-card > header svg {
+  color: #8d744b;
+}
+:where(.app-shell) .report-average {
+  border-radius: 18px;
+  background: #e5eef4;
+  border: 0;
+}
+:where(.app-shell) .report-average strong {
+  color: #102942;
+}
+:where(.app-shell) .report-average > svg {
+  color: #8e7447;
+}
+:where(.app-shell) .reports-section-heading {
+  margin: 12px 2px 2px;
+}
+:where(.app-shell) .reports-section-heading h2 {
+  color: #102942;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 22px;
+  font-weight: 400;
+}
+:where(.app-shell) .reports-section-heading svg {
+  color: #8e7447;
+}
+:where(.app-shell) .meta-ads-panel {
+  border-radius: 24px;
+  border: 1px solid #dce6ed;
+  background: #fff;
+  box-shadow: none;
+}
+:where(.app-shell) .meta-ads-updated {
+  background: #fff;
+  color: #647e90;
+  padding: 13px 20px;
+}
+:where(.app-shell) .meta-ads-summary {
+  margin: 8px 16px 0;
+  border-radius: 18px;
+  background: #102942;
+  overflow: hidden;
+  border: 0;
+}
+:where(.app-shell) .meta-ads-summary article {
+  border-color: #ffffff1b;
+  padding: 18px;
+}
+:where(.app-shell) .meta-ads-summary strong {
+  font-size: 24px;
+  font-weight: 500;
+  color: #fff;
+}
+:where(.app-shell) .meta-ads-summary span {
+  color: #d2dfe8;
+}
+:where(.app-shell) .meta-ads-summary small {
+  color: #acbfce;
+}
+:where(.app-shell) .meta-ads-summary span,
+:where(.app-shell) .meta-ads-summary small {
+  font-size: 12px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+:where(.app-shell) .meta-ads-summary svg {
+  color: #c4a76e;
+}
+:where(.app-shell) .meta-origin-breakdown {
+  background: #edf3f7;
+  border: 0;
+  border-radius: 17px;
+  margin: 16px;
+  padding: 18px;
+}
+:where(.app-shell) .meta-origin-heading h3,
+:where(.app-shell) .meta-ads-list-heading h3 {
+  color: #102942;
+}
+:where(.app-shell) .meta-origin-heading p,
+:where(.app-shell) .meta-ads-list-heading p,
+:where(.app-shell) .meta-origin-heading > span {
+  color: #647b8f;
+}
+:where(.app-shell) .meta-origin-legend strong {
+  color: #23425b;
+}
+:where(.app-shell) .meta-origin-legend span {
+  color: #627a8f;
+}
+:where(.app-shell) .meta-origin-bar .identified,
+:where(.app-shell) .meta-origin-legend .identified > i {
+  background: #305c7a;
+}
+:where(.app-shell) .meta-origin-bar .unattributed,
+:where(.app-shell) .meta-origin-legend .unattributed > i {
+  background: #aac1d2;
+}
+:where(.app-shell) .meta-origin-bar .pending,
+:where(.app-shell) .meta-origin-legend .pending > i {
+  background: #b49761;
+}
+:where(.app-shell) .meta-ads-list-heading {
+  border-top: 0;
+  border-bottom: 1px solid #dfe8ee;
+  padding: 12px 20px 16px;
+}
+:where(.app-shell) .meta-ad-tabs button {
+  color: #61788b;
+  border-color: #dce5ec;
+}
+:where(.app-shell) .meta-ad-tabs button[aria-pressed='true'] {
+  background: #e5edf3;
+  color: #254761;
+  border-color: #c3d4e1;
+}
+:where(.app-shell) .meta-ad-result {
+  padding: 17px 20px;
+  gap: 16px;
+  grid-template-columns: minmax(205px, 1.1fr) minmax(0, 3.6fr) minmax(112px, 0.55fr);
+  border-color: #e5edf3;
+}
+:where(.app-shell) .meta-ad-result:nth-child(even) {
+  background: #fafcfd;
+}
+:where(.app-shell) .meta-ad-identity h3 {
+  color: #102942;
+  font-weight: 600;
+  white-space: normal;
+}
+:where(.app-shell) .meta-ad-identity p,
+:where(.app-shell) .meta-ad-identity small,
+:where(.app-shell) .meta-ad-origin-actions span {
+  color: #647b8e;
+  font-size: 12px;
+  white-space: normal;
+}
+:where(.app-shell) .meta-ad-source.confirmed {
+  background: #e7eff5;
+  color: #3c637f;
+}
+:where(.app-shell) .meta-ad-metrics {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+:where(.app-shell) .meta-ad-metrics > div {
+  background: transparent;
+  padding: 6px 0 6px 10px;
+  border-left: 1px solid #e1e8ee;
+  border-radius: 0;
+}
+:where(.app-shell) .meta-ad-metrics dt {
+  color: #61778b;
+  white-space: normal;
+  min-height: 28px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+:where(.app-shell) .meta-ad-metrics dd {
+  color: #18334c;
+  font-weight: 600;
+  font-size: 13px;
+}
+:where(.app-shell) .meta-ad-metrics small {
+  color: #728699;
+  line-height: 1.5;
+}
+:where(.app-shell) .meta-ad-result-actions .button {
+  border-radius: 11px;
+  white-space: normal;
+  font-size: 12px;
+}
+:where(.app-shell) .meta-ads-panel > footer {
+  color: #61778a;
+}
+:where(.app-shell) .report-funnel b,
+:where(.app-shell) .report-bars b {
+  background: #517996;
+}
+:where(.app-shell) .report-columns button i {
+  background: #517996;
+  border-radius: 6px 6px 0 0;
+}
+:where(.app-shell) .instagram-inbox {
+  gap: 20px;
+  min-height: calc(100vh - 160px);
+}
+:where(.app-shell) .inbox-list,
+:where(.app-shell) .inbox-thread {
+  border-radius: 24px;
+  overflow: hidden;
+  border-color: #e0e8ee;
+}
+:where(.app-shell) .inbox-list > header,
+:where(.app-shell) .thread-header {
+  padding: 22px;
+  background: #fff;
+  border-color: #e5edf3;
+}
+:where(.app-shell) .inbox-list h2,
+:where(.app-shell) .thread-header h2 {
+  color: #102942;
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 600;
+  font-size: 15px;
+}
+:where(.app-shell) .inbox-list header span,
+:where(.app-shell) .thread-header span {
+  color: #8399ab;
+  font-size: 12px;
+}
+:where(.app-shell) .inbox-search {
+  padding: 12px 18px;
+  border: 0;
+}
+:where(.app-shell) .inbox-owner-filter {
+  padding-top: 4px;
+  border: 0;
+}
+:where(.app-shell) .inbox-conversations {
+  padding: 6px 8px;
+  gap: 3px;
+}
+:where(.app-shell) .inbox-conversations > button {
+  border: 0;
+  border-radius: 14px;
+  padding: 17px 12px;
+}
+:where(.app-shell) .inbox-conversations > button.active {
+  background: #e8f0f6;
+  box-shadow: inset 3px 0 #577d99;
+}
+:where(.app-shell) .inbox-conversations > button.unread {
+  background: #e9f0e6 !important;
+  color: #18334d !important;
+  box-shadow: inset 3px 0 #82966e;
+}
+:where(.app-shell) .inbox-conversations > button.unread strong,
+:where(.app-shell) .inbox-conversations > button.unread span,
+:where(.app-shell) .inbox-conversations > button.unread small {
+  color: #18334d !important;
+}
+:where(.app-shell) .inbox-conversations > button.active.unread {
+  background: #e2edf2 !important;
+}
+:where(.app-shell) .inbox-avatar {
+  background: #dbe7ef;
+  color: #3e607b;
+}
+:where(.app-shell) .thread-messages {
+  background: #f3f6f9;
+  padding: 26px;
+}
+:where(.app-shell) .message-bubble,
+:where(.app-shell) .inbox-message {
+  border-radius: 17px;
+  box-shadow: none;
+}
+:where(.app-shell) .thread-composer {
+  background: #fff;
+  border-color: #e4ecf2;
+}
+:where(.app-shell) .thread-message {
+  border-radius: 18px;
+  border-color: #e1e8ee;
+  box-shadow: none;
+}
+:where(.app-shell) .thread-message.outbound {
+  background: #e3edf4;
+  border-color: #cddfe9;
+  color: #17364f;
+}
+:where(.app-shell) .thread-message.inbound {
+  background: #fff;
+}
+:where(.app-shell) .instagram-avatar {
+  background: #e6eef5;
+  color: #53758f;
+}
+:where(.app-shell) .thread-locked {
+  background: #edf3f7;
+  color: #617b8f;
+}
+:where(.app-shell) .quality-tabs {
+  padding: 9px 14px;
+  gap: 7px;
+}
+:where(.app-shell) .quality-tabs button {
+  border-radius: 10px;
+}
+:where(.app-shell) .quality-tabs button[aria-pressed='true'] {
+  background: #e6eef5;
+  color: #284c67;
+  border-color: #d4e1ea;
+}
+:where(.app-shell) .thread-notice {
+  background: #edf3f7;
+  color: #657d90;
+}
+:where(.app-shell) .settings-section-toggle {
+  border-radius: 22px;
+  padding: 23px 26px;
+}
+:where(.app-shell) .settings-section-icon {
+  background: #e9f0f5;
+  color: #6d8295;
+  border-radius: 15px;
+}
+:where(.app-shell) .settings-section[data-expanded='true'] {
+  border-color: #c4d5e2;
+}
+:where(.app-shell) .settings-section-body {
+  border-color: #e5edf2;
+}
+:where(.app-shell) .manager-settings {
+  max-width: none;
+  gap: 28px;
+}
+:where(.app-shell) .settings-group-title {
+  color: #758899;
+  font-size: 12px;
+}
+:where(.app-shell) .settings-channels .panel {
+  border-radius: 16px;
+}
+:where(.app-shell) .modal {
+  border-radius: 24px;
+  border-color: #d9e4ec;
+  box-shadow: 0 24px 90px #10294228;
+}
+:where(.app-shell) .modal-heading {
+  border-radius: 24px 24px 0 0;
+}
+:where(.app-shell) .modal-heading h2 {
+  color: #102942;
+}
+:where(.app-shell) .modal-actions {
+  border-radius: 0 0 24px 24px;
+  background: #fff;
+}
+:where(.app-shell) .modal::backdrop {
+  background: #10294255;
+  backdrop-filter: blur(3px);
+}
+:where(.app-shell) .commercial-editor-card {
+  border-radius: 18px;
+}
+:where(.app-shell) .lead-list-tabs button {
+  border-radius: 12px;
+}
+:where(.app-shell) .agenda-list,
+:where(.app-shell) .agenda-filters,
+:where(.app-shell) .shortcuts-form {
+  border-radius: 18px;
+}
+@media (max-width: 1300px) and (min-width: 1025px) {
+  :where(.app-shell) .meta-ad-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 1024px) {
+  .app-shell {
+    padding: 0;
+  }
+  :where(.app-shell) .sidebar {
+    display: none;
+  }
+  :where(.app-shell) .main-shell {
+    margin-left: 0;
+  }
+  :where(.app-shell) .main-shell > main {
+    padding: 18px max(14px, env(safe-area-inset-right, 0px)) calc(var(--bottom-nav-height) + 30px)
+      max(14px, env(safe-area-inset-left, 0px));
+  }
+  :where(.app-shell) .topbar {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas: 'logo actions' 'title title';
+    gap: 13px 14px;
+    background: #102942;
+    color: #fff;
+    border-radius: 0 0 24px 24px;
+    padding: calc(16px + env(safe-area-inset-top, 0px)) max(18px, env(safe-area-inset-right, 0px))
+      19px max(18px, env(safe-area-inset-left, 0px));
+    height: auto;
+    min-height: 148px;
+  }
+  :where(.app-shell) .topbar .mobile-header-logo {
+    grid-area: logo;
+  }
+  :where(.app-shell) .topbar .topbar-right {
+    grid-area: actions;
+  }
+  :where(.app-shell) .topbar .breadcrumbs {
+    grid-area: title;
+    width: 100%;
+    max-width: none;
+  }
+  :where(.app-shell) .topbar .breadcrumbs h1 {
+    color: #fff;
+    font-size: clamp(20px, 5vw, 27px);
+    letter-spacing: -0.5px;
+  }
+  :where(.app-shell) .topbar .breadcrumbs > .consultant-queue-position {
+    max-width: 100%;
+    overflow: visible;
+    white-space: normal;
+    line-height: 1.5;
+  }
+  :where(.app-shell) .mobile-header-logo {
+    filter: brightness(0) invert(1);
+  }
+  :where(.app-shell) .topbar .icon-button {
+    color: #e0eaf1;
+  }
+  :where(.app-shell) .topbar .button.gold {
+    background: #b49761;
+  }
+  :where(.app-shell) .consultant-queue-position {
+    background: #ffffff10;
+    color: #dbe6ee;
+    border-color: #ffffff20;
+    font-size: 12px;
+  }
+  :where(.app-shell) .mobile-bottom-nav {
+    margin: 0 10px 9px;
+    bottom: 0;
+    border: 1px solid #e1e9ef;
+    border-radius: 22px;
+    box-shadow: 0 5px 22px #10294212;
+    background: #fff;
+  }
+  :where(.app-shell) .mobile-bottom-nav button.active,
+  :where(.app-shell) .mobile-bottom-nav button[aria-current='page'] {
+    color: #947640;
+    background: #f5f1e8;
+    border-radius: 14px;
+  }
+  :where(.app-shell) .instagram-inbox {
+    min-height: 0;
+    gap: 0;
+  }
+  :where(.app-shell) .inbox-list {
+    border-radius: 20px;
+  }
+  :where(.app-shell) .thread-header {
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 16px;
+  }
+  :where(.app-shell) .thread-heading {
+    flex: 1 1 100%;
+  }
+  :where(.app-shell) .thread-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  :where(.app-shell) .thread-actions .button > span {
+    letter-spacing: normal;
+    font-size: 12px;
+  }
+  :where(.app-shell) .thread-messages {
+    padding: 18px;
+  }
+  :where(.app-shell) .meta-ad-result {
+    grid-template-columns: 1fr;
+  }
+  :where(.app-shell) .meta-ad-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  :where(.app-shell) .meta-ads-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  :where(.app-shell) .reports-filter {
+    flex-wrap: wrap;
+  }
+  :where(.app-shell) .settings-section-toggle {
+    padding: 20px 17px;
+  }
+  :where(.app-shell) .panel {
+    border-radius: 20px;
+  }
+}
+
+:where(.app-shell) .sidebar nav {
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #5b7285 transparent;
+}
+:where(.app-shell) .nav-item.active:hover {
+  background: #c0a572;
+  color: #102942;
+}
+:where(.app-shell) .nav-item.active b {
+  color: #102942;
+}
+:where(.app-shell) .button.gold:hover:not(:disabled) {
+  background: #c0a572;
+  color: #102942;
+}
+:where(.app-shell) .button:focus-visible,
+:where(.app-shell) a:focus-visible {
+  outline-color: #8b6b35;
+}
+:where(.app-shell) .sidebar button:focus-visible {
+  outline-color: #e1c58e;
+  outline-offset: -3px;
+}
+:where(.app-shell) .topbar .icon-button:hover {
+  background: #e4edf4;
+}
+:where(.app-shell) .meta-ad-result-actions {
+  grid-column: auto;
+}
+:where(.app-shell) .meta-ad-result > * {
+  min-width: 0;
+}
+:where(.app-shell) .meta-ad-metrics dd {
+  overflow-wrap: anywhere;
+}
+:where(.app-shell) .inbox-conversations > button.unread.active {
+  box-shadow: inset 3px 0 #577d99;
+}
+@media (max-width: 1024px) {
+  :where(.app-shell) .topbar .icon-button:hover {
+    background: #ffffff14;
+    color: #fff;
+  }
+  :where(.app-shell) .topbar .icon-button:focus-visible {
+    outline-color: #e1c58e;
+  }
+  :where(.app-shell) .meta-ad-result-actions {
+    grid-column: 1 / -1;
+  }
+  :where(.app-shell) .central-summary strong {
+    font-size: 24px;
+  }
+}
+@media (max-width: 760px) {
+  :where(.app-shell) .meta-ad-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  :where(.app-shell) .meta-ads-summary {
+    margin: 8px 12px 0;
+  }
+  :where(.app-shell) .meta-ads-summary article {
+    padding: 14px 12px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  :where(.app-shell) .meta-ads-summary svg {
+    grid-row: auto;
+  }
+  :where(.app-shell) .meta-ads-summary strong {
+    font-size: clamp(18px, 5vw, 24px);
+    overflow-wrap: anywhere;
+  }
+  :where(.app-shell) .meta-ad-result {
+    padding: 16px;
+  }
+  :where(.app-shell) .meta-ads-list-heading {
+    padding: 14px 16px;
+  }
+  :where(.app-shell) .meta-origin-breakdown {
+    margin: 12px;
+    padding: 14px;
+  }
+  :where(.app-shell) .thread-heading h2 {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}

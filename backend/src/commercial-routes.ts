@@ -125,9 +125,17 @@ export function registerCommercial(
         expected_revision: revision,
         decision: z.enum(['confirm', 'reject']),
         result: extractionSchema.optional(),
-        reason,
+        reason: z.string().trim().max(500).optional(),
       })
       .strict()
+      .superRefine((value, context) => {
+        if (value.decision === 'reject' && (!value.reason || value.reason.length < 10))
+          context.addIssue({
+            code: 'custom',
+            path: ['reason'],
+            message: 'Descreva o motivo da decisão.',
+          });
+      })
       .parse(request.body);
     return service.review(
       request.user,
