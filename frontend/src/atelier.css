@@ -499,7 +499,7 @@ body:has(.app-shell),
   overflow: hidden;
   border-color: #e0e8ee;
 }
-:where(.app-shell) .inbox-list > header,
+:where(.app-shell) .inbox-list-toolbar > header,
 :where(.app-shell) .thread-header {
   padding: 22px;
   background: #fff;
@@ -682,38 +682,59 @@ body:has(.app-shell),
   }
   :where(.app-shell) .topbar {
     display: grid;
-    grid-template-columns: 1fr auto;
-    grid-template-areas: 'logo actions' 'title title';
-    gap: 13px 14px;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: 'logo title actions';
+    gap: 6px 8px;
     background: #102942;
     color: #fff;
     border-radius: 0 0 24px 24px;
-    padding: calc(16px + env(safe-area-inset-top, 0px)) max(18px, env(safe-area-inset-right, 0px))
-      19px max(18px, env(safe-area-inset-left, 0px));
+    padding: calc(12px + env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px))
+      12px max(12px, env(safe-area-inset-left, 0px));
     height: auto;
-    min-height: 148px;
+    min-height: calc(76px + env(safe-area-inset-top, 0px));
+  }
+  :where(.app-shell) .topbar:has(.consultant-queue-position) {
+    grid-template-areas: 'logo title actions' 'status status status';
   }
   :where(.app-shell) .topbar .mobile-header-logo {
     grid-area: logo;
+    width: clamp(66px, 20vw, 104px);
+    height: 34px;
   }
   :where(.app-shell) .topbar .topbar-right {
     grid-area: actions;
+    gap: 4px;
+  }
+  :where(.app-shell) .topbar .header-primary-action,
+  :where(.app-shell) .topbar .topbar-right .icon-button {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+    padding: 0;
   }
   :where(.app-shell) .topbar .breadcrumbs {
-    grid-area: title;
-    width: 100%;
-    max-width: none;
+    display: contents;
   }
   :where(.app-shell) .topbar .breadcrumbs h1 {
+    grid-area: title;
+    min-width: 0;
     color: #fff;
-    font-size: clamp(20px, 5vw, 27px);
+    font-size: clamp(16px, 4.5vw, 22px);
     letter-spacing: -0.5px;
+    text-align: center;
+    white-space: normal;
+    overflow-wrap: normal;
   }
   :where(.app-shell) .topbar .breadcrumbs > .consultant-queue-position {
+    grid-area: status;
+    justify-self: center;
     max-width: 100%;
+    padding: 4px 8px;
     overflow: visible;
     white-space: normal;
-    line-height: 1.5;
+    font-size: 11px;
+    line-height: 1.2;
   }
   :where(.app-shell) .mobile-header-logo {
     filter: brightness(0) invert(1);
@@ -751,6 +772,96 @@ body:has(.app-shell),
   :where(.app-shell) .inbox-list {
     border-radius: 20px;
   }
+  :where(.app-shell) .topbar .mobile-inbox-header-slot:not(:empty) {
+    display: block;
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+  :where(.app-shell) .mobile-inbox-header-slot .quality-tabs {
+    padding: 0;
+    gap: 6px;
+    border: 0;
+  }
+  :where(.app-shell) .mobile-inbox-header-slot .quality-tabs button {
+    min-width: 0;
+    min-height: 44px;
+    padding: 6px 8px;
+    font-size: 12px;
+    color: #e0eaf1;
+    border-color: #ffffff25;
+    background: #ffffff08;
+  }
+  :where(.app-shell) .mobile-inbox-header-slot .quality-tabs button[aria-pressed='true'] {
+    color: #102942;
+    background: #b49761;
+    border-color: #b49761;
+  }
+  :where(.app-shell) .main-shell > main:has(.instagram-inbox) {
+    padding-top: 10px;
+  }
+  :where(.app-shell) .inbox-list-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px;
+    gap: 6px;
+    padding: 10px 12px 8px;
+    flex-shrink: 0;
+  }
+  :where(.app-shell) .inbox-list-toolbar > header {
+    display: contents;
+  }
+  :where(.app-shell) .inbox-list-toolbar > header > div {
+    display: none;
+  }
+  :where(.app-shell) .inbox-list-toolbar .icon-button {
+    grid-column: 2;
+    grid-row: 1;
+    width: 44px;
+    height: 44px;
+  }
+  :where(.app-shell) .inbox-list-toolbar .inbox-search {
+    grid-column: 1;
+    grid-row: 1;
+    padding: 0;
+    min-width: 0;
+  }
+  :where(.app-shell) .inbox-owner-filter {
+    padding: 0 12px 8px;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  :where(.app-shell) .inbox-conversations {
+    min-height: 0;
+    padding: 0 6px 6px;
+    gap: 2px;
+  }
+  :where(.app-shell) .inbox-conversations > button {
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    padding: 9px 8px;
+    gap: 8px;
+  }
+  :where(.app-shell) .inbox-conversations .instagram-avatar {
+    width: 34px;
+    height: 34px;
+  }
+  :where(.app-shell) .inbox-conversations strong {
+    font-size: 14px;
+  }
+  :where(.app-shell) .inbox-conversations .inbox-conversation-owner {
+    margin-top: 2px;
+  }
+  :where(.app-shell) .inbox-list-pagination {
+    flex-wrap: nowrap;
+    flex-shrink: 0;
+    padding: 4px 8px;
+    gap: 4px;
+  }
+  :where(.app-shell) .inbox-list-pagination .button {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 6px 4px;
+    font-size: 11px;
+    white-space: nowrap;
+  }
   :where(.app-shell) .thread-header {
     flex-wrap: wrap;
     gap: 12px;
@@ -787,6 +898,12 @@ body:has(.app-shell),
   }
   :where(.app-shell) .panel {
     border-radius: 20px;
+  }
+}
+
+@media (max-width: 760px) {
+  :where(.app-shell) .topbar .mobile-inbox-header-slot:has(.thread-open) {
+    display: none;
   }
 }
 

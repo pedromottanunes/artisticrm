@@ -36,6 +36,7 @@ export function CommentPool({
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
+  const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const mounted = useRef(false);
   const sequence = useRef(0);
@@ -45,6 +46,10 @@ export function CommentPool({
   const load = useCallback(
     async (before?: string, quiet = false) => {
       if (quiet && request.current) return;
+      if (!quiet) {
+        setLoading(true);
+        setError('');
+      }
       const seq = ++sequence.current;
       request.current?.abort();
       const controller = new AbortController();
@@ -81,7 +86,10 @@ export function CommentPool({
       } finally {
         timed.dispose();
         if (request.current === controller) request.current = null;
-        if (mounted.current && seq === sequence.current) setLoadingMore(false);
+        if (mounted.current && seq === sequence.current) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
       }
     },
     [onSessionExpired],
@@ -150,116 +158,124 @@ export function CommentPool({
           <RefreshCw size={18} />
         </button>
       </div>
-      {error && (
-        <p className="comment-error" role="alert">
-          {error}
-        </p>
-      )}
-      {!result ? (
-        <p className="muted">Carregando comentários…</p>
-      ) : !result.configured ? (
-        <Empty
-          title="Instagram não conectado"
-          description="A gestão precisa configurar a integração."
-        />
-      ) : !result.comments.length ? (
-        <Empty
-          title="Nenhum comentário disponível"
-          description="Novos comentários aparecerão aqui quando forem recebidos do Instagram."
-        />
-      ) : (
-        <>
-          <div className="comment-grid">
-            {result.comments.map((comment) => (
-              <article className="comment-card" key={comment.id}>
-                <div className="comment-profile">
-                  <span className="comment-avatar" aria-hidden="true">
-                    <MessageCircle size={20} />
-                  </span>
-                  {comment.username ? (
+      <div className="comment-pool-body">
+        {error && (
+          <p className="comment-error" role="alert">
+            {error}
+          </p>
+        )}
+        {!result ? (
+          loading ? (
+            <p className="muted comment-pool-status" role="status">
+              Carregando comentários…
+            </p>
+          ) : null
+        ) : !result.configured ? (
+          <Empty
+            title="Instagram não conectado"
+            description="A gestão precisa configurar a integração."
+          />
+        ) : !result.comments.length ? (
+          <Empty
+            title="Nenhum comentário disponível"
+            description="Novos comentários aparecerão aqui quando forem recebidos do Instagram."
+          />
+        ) : (
+          <>
+            <div className="comment-grid">
+              {result.comments.map((comment) => (
+                <article className="comment-card" key={comment.id}>
+                  <div className="comment-profile">
+                    <span className="comment-avatar" aria-hidden="true">
+                      <MessageCircle size={20} />
+                    </span>
+                    {comment.username ? (
+                      <a
+                        href={`https://www.instagram.com/${encodeURIComponent(comment.username)}/`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        @{comment.username} <ExternalLink size={13} />
+                      </a>
+                    ) : (
+                      <strong>Perfil do Instagram</strong>
+                    )}
+                    {comment.comment_count > 1 && (
+                      <small>{comment.comment_count} comentários</small>
+                    )}
+                  </div>
+                  <p className="comment-text">{comment.text || 'Comentário sem texto'}</p>
+                  {comment.permalink && (
                     <a
-                      href={`https://www.instagram.com/${encodeURIComponent(comment.username)}/`}
+                      className="comment-publication"
+                      href={comment.permalink}
                       target="_blank"
                       rel="noreferrer"
                     >
-                      @{comment.username} <ExternalLink size={13} />
+                      {comment.thumbnail_url && (
+                        <img
+                          src={comment.thumbnail_url}
+                          alt=""
+                          loading="lazy"
+                          referrerPolicy="no-referrer"
+                          onError={(event) => {
+                            event.currentTarget.hidden = true;
+                          }}
+                        />
+                      )}
+                      Ver publicação <ExternalLink size={13} />
                     </a>
-                  ) : (
-                    <strong>Perfil do Instagram</strong>
                   )}
-                  {comment.comment_count > 1 && <small>{comment.comment_count} comentários</small>}
-                </div>
-                <p className="comment-text">{comment.text || 'Comentário sem texto'}</p>
-                {comment.permalink && (
-                  <a
-                    className="comment-publication"
-                    href={comment.permalink}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {comment.thumbnail_url && (
-                      <img
-                        src={comment.thumbnail_url}
-                        alt=""
-                        loading="lazy"
-                        referrerPolicy="no-referrer"
-                        onError={(event) => {
-                          event.currentTarget.hidden = true;
-                        }}
-                      />
-                    )}
-                    Ver publicação <ExternalLink size={13} />
-                  </a>
-                )}
-                <small className="muted">
-                  Responder até{' '}
-                  {new Intl.DateTimeFormat('pt-BR', {
-                    day: '2-digit',
-                    month: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  }).format(new Date(comment.reply_deadline_at))}
-                </small>
-                {user.role === 'attendant' && (
-                  <div className="comment-actions">
-                    <button
-                      className="button outline compact"
-                      disabled={!!busy || comment.can_claim === false}
-                      onClick={() => void act(comment, 'ignore')}
-                    >
-                      Ignorar
-                    </button>
-                    <button
-                      className="button gold compact"
-                      disabled={!!busy || comment.can_claim === false}
-                      onClick={() => void act(comment, 'claim')}
-                    >
-                      <MessageCircle size={16} />
-                      {comment.can_claim === false
-                        ? 'Perfil reservado'
-                        : busy === comment.id
-                          ? 'Aguarde…'
-                          : 'Assumir e conversar'}
-                    </button>
-                  </div>
-                )}
-              </article>
-            ))}
-          </div>
-          {result.next_cursor && (
-            <button
-              className="button outline"
-              disabled={loadingMore || !!busy}
-              onClick={() => {
-                setLoadingMore(true);
-                void load(result.next_cursor!);
-              }}
-            >
-              {loadingMore ? 'Carregando…' : 'Carregar mais'}
-            </button>
-          )}
-        </>
-      )}
+                  <small className="muted">
+                    Responder até{' '}
+                    {new Intl.DateTimeFormat('pt-BR', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    }).format(new Date(comment.reply_deadline_at))}
+                  </small>
+                  {user.role === 'attendant' && (
+                    <div className="comment-actions">
+                      <button
+                        className="button outline compact"
+                        disabled={!!busy || comment.can_claim === false}
+                        onClick={() => void act(comment, 'ignore')}
+                      >
+                        Ignorar
+                      </button>
+                      <button
+                        className="button gold compact"
+                        disabled={!!busy || comment.can_claim === false}
+                        onClick={() => void act(comment, 'claim')}
+                      >
+                        <MessageCircle size={16} />
+                        {comment.can_claim === false
+                          ? 'Perfil reservado'
+                          : busy === comment.id
+                            ? 'Aguarde…'
+                            : 'Assumir e conversar'}
+                      </button>
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
+            {result.next_cursor && (
+              <button
+                className="button outline"
+                disabled={loadingMore || !!busy}
+                onClick={() => {
+                  setLoadingMore(true);
+                  void load(result.next_cursor!);
+                }}
+              >
+                {loadingMore ? 'Carregando…' : 'Carregar mais'}
+              </button>
+            )}
+          </>
+        )}
+      </div>
     </section>
   );
 }

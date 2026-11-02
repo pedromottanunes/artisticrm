@@ -421,9 +421,11 @@ test('gestão móvel: todas as telas pela barra inferior, cartões e formulário
       await logo.evaluate((element: HTMLImageElement) => element.naturalWidth),
     ).toBeGreaterThan(0);
     const logoBounds = (await logo.boundingBox())!;
-    const titleBounds = (await page.locator('.breadcrumbs').boundingBox())!;
-    // The Atelier mobile header gives the title its own row below the logo.
-    expect(logoBounds.y + logoBounds.height).toBeLessThanOrEqual(titleBounds.y);
+    const titleBounds = (await page.locator('.breadcrumbs h1').boundingBox())!;
+    expect(logoBounds.x + logoBounds.width).toBeLessThanOrEqual(titleBounds.x);
+    expect(
+      Math.abs(logoBounds.y + logoBounds.height / 2 - (titleBounds.y + titleBounds.height / 2)),
+    ).toBeLessThan(2);
     for (const name of [
       'Central de atendimentos',
       'Funil',

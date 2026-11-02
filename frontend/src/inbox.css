@@ -16,7 +16,15 @@
   overflow: hidden;
 }
 
-.inbox-list > header,
+.inbox-list-toolbar {
+  display: contents;
+}
+
+.mobile-inbox-header-slot {
+  display: none;
+}
+
+.inbox-list-toolbar > header,
 .thread-header {
   display: flex;
   align-items: center;

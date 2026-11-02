@@ -1,5 +1,6 @@
 import { LeadQualityControl, qualityReasons } from './lead-quality';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -448,6 +449,7 @@ export function InstagramInbox({
   connected,
   targetOpportunityId,
   targetArchived,
+  mobileHeaderHost,
   onTargetConsumed,
   onOpenLead,
   onNotice,
@@ -459,6 +461,7 @@ export function InstagramInbox({
   connected: boolean;
   targetOpportunityId: string;
   targetArchived: boolean;
+  mobileHeaderHost: HTMLDivElement | null;
   onTargetConsumed: () => void;
   onOpenLead: (id: string) => void;
   onNotice: (message: string) => void;
@@ -476,6 +479,9 @@ export function InstagramInbox({
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [mobileThreadOpen, setMobileThreadOpen] = useState(false);
+  const [useMobileHeader, setUseMobileHeader] = useState(
+    () => window.matchMedia('(max-width: 1024px)').matches,
+  );
   const [thread, setThread] = useState<ThreadResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -523,6 +529,14 @@ export function InstagramInbox({
   const mobileThreadOpenRef = useRef(false);
   const shortcutPickerRef = useRef<HTMLDivElement>(null);
   const shortcutTriggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const mobile = window.matchMedia('(max-width: 1024px)');
+    const resize = () => setUseMobileHeader(mobile.matches);
+    resize();
+    mobile.addEventListener('change', resize);
+    return () => mobile.removeEventListener('change', resize);
+  }, []);
 
   const handleError = useCallback(
     (error: unknown) => {
@@ -1145,20 +1159,26 @@ export function InstagramInbox({
           : viewportHeight;
       inbox.style.setProperty('--inbox-mobile-height', `${Math.max(180, bottom - top)}px`);
     };
+    const header = document.querySelector('.topbar');
     const frame = window.requestAnimationFrame(() => {
-      if (mobile.matches) inbox.scrollIntoView({ block: 'start' });
+      if (mobile.matches) header?.scrollIntoView({ block: 'start' });
       resize();
     });
     viewport?.addEventListener('resize', resize);
     viewport?.addEventListener('scroll', resize);
     window.addEventListener('resize', resize);
     mobile.addEventListener('change', resize);
+    // The header changes height when its filters, queue indicator or chat view change.
+    const headerObserver =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(resize);
+    if (header) headerObserver?.observe(header);
     return () => {
       window.cancelAnimationFrame(frame);
       viewport?.removeEventListener('resize', resize);
       viewport?.removeEventListener('scroll', resize);
       window.removeEventListener('resize', resize);
       mobile.removeEventListener('change', resize);
+      headerObserver?.disconnect();
       inbox.style.removeProperty('--inbox-mobile-height');
     };
   }, [loading, mobileThreadOpen]);
@@ -1409,6 +1429,53 @@ export function InstagramInbox({
     }
   };
 
+  const categoryTabs = (
+    <div
+      className={`quality-tabs inbox-category-tabs${mobileThreadOpen ? ' thread-open' : ''}`}
+      role="group"
+      aria-label="Tipo de atendimento"
+    >
+      <button
+        type="button"
+        aria-pressed={!archive && !review}
+        onClick={() => {
+          listCache.current = null;
+          resetConversationPagination();
+          setArchive(false);
+          setReview(false);
+        }}
+      >
+        Ativos
+      </button>
+      <button
+        type="button"
+        aria-pressed={archive}
+        onClick={() => {
+          listCache.current = null;
+          resetConversationPagination();
+          setArchive(true);
+          setReview(false);
+        }}
+      >
+        Não comerciais
+      </button>
+      {user.role === 'attendant' && (
+        <button
+          type="button"
+          aria-pressed={review}
+          onClick={() => {
+            listCache.current = null;
+            resetConversationPagination();
+            setArchive(false);
+            setReview(true);
+          }}
+        >
+          Para revisar
+        </button>
+      )}
+    </div>
+  );
+
   if (loading)
     return (
       <section className="instagram-inbox panel">
@@ -1435,31 +1502,33 @@ export function InstagramInbox({
       aria-label="Caixa de entrada multicanal"
     >
       <aside className="inbox-list panel">
-        <header>
-          <div>
-            <span>CAIXA MULTICANAL</span>
-            <h2>Conversas</h2>
+        <div className="inbox-list-toolbar">
+          <header>
+            <div>
+              <span>CAIXA MULTICANAL</span>
+              <h2>Conversas</h2>
+            </div>
+            <button
+              className="icon-button"
+              aria-label="Atualizar conversas"
+              onClick={() => void refresh(false, true)}
+            >
+              <RefreshCw size={17} />
+            </button>
+          </header>
+          <div className="inbox-search">
+            <label className="search-field">
+              <Search size={17} aria-hidden="true" />
+              <input
+                type="search"
+                aria-label="Buscar lead por nome"
+                placeholder="Buscar lead por nome"
+                maxLength={100}
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </label>
           </div>
-          <button
-            className="icon-button"
-            aria-label="Atualizar conversas"
-            onClick={() => void refresh(false, true)}
-          >
-            <RefreshCw size={17} />
-          </button>
-        </header>
-        <div className="inbox-search">
-          <label className="search-field">
-            <Search size={17} aria-hidden="true" />
-            <input
-              type="search"
-              aria-label="Buscar lead por nome"
-              placeholder="Buscar lead por nome"
-              maxLength={100}
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-          </label>
         </div>
         {user.role === 'manager' && (
           <div className="inbox-owner-filter">
@@ -1492,46 +1561,9 @@ export function InstagramInbox({
             </select>
           </div>
         )}
-        <div className="quality-tabs" role="group" aria-label="Tipo de atendimento">
-          <button
-            type="button"
-            aria-pressed={!archive && !review}
-            onClick={() => {
-              listCache.current = null;
-              resetConversationPagination();
-              setArchive(false);
-              setReview(false);
-            }}
-          >
-            Ativos
-          </button>
-          <button
-            type="button"
-            aria-pressed={archive}
-            onClick={() => {
-              listCache.current = null;
-              resetConversationPagination();
-              setArchive(true);
-              setReview(false);
-            }}
-          >
-            Não comerciais
-          </button>
-          {user.role === 'attendant' && (
-            <button
-              type="button"
-              aria-pressed={review}
-              onClick={() => {
-                listCache.current = null;
-                resetConversationPagination();
-                setArchive(false);
-                setReview(true);
-              }}
-            >
-              Para revisar
-            </button>
-          )}
-        </div>
+        {useMobileHeader && mobileHeaderHost
+          ? createPortal(categoryTabs, mobileHeaderHost)
+          : categoryTabs}
         <div className="inbox-conversations" aria-busy={managerListChanging}>
           {conversations.map((conversation) => (
             <button

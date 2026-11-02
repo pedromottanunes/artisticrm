@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 test.use({ serviceWorkers: 'block' });
 
-for (const width of [390, 1280]) {
+for (const width of [320, 390, 1280]) {
   test(`comment pool opens the assigned chat and waits for a reply (${width}px)`, async ({
     page,
   }) => {
@@ -124,6 +124,16 @@ for (const width of [390, 1280]) {
     await expect(page.getByText('Como funciona a avaliação?')).toBeVisible();
     await expect(page.getByText('2 comentários')).toBeVisible();
     await expect(page.locator('.comment-card')).toHaveCount(1);
+    const card = (await page.locator('.comment-card').boundingBox())!;
+    for (const button of await page.locator('.comment-actions button').all()) {
+      const bounds = (await button.boundingBox())!;
+      expect(bounds.x).toBeGreaterThanOrEqual(card.x);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(card.x + card.width);
+    }
+    await page.screenshot({
+      path: test.info().outputPath('comments-with-profile.png'),
+      fullPage: true,
+    });
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
     ).toBeTruthy();
@@ -142,3 +152,86 @@ for (const width of [390, 1280]) {
     ).toBeTruthy();
   });
 }
+
+for (const width of [390, 1440]) {
+  test(`comment pool: aviso da gestão fica alinhado e encerra o carregamento (${width}px)`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const login = await page.request.post('/api/v1/auth/login', {
+      headers: { 'X-Artisti-Client': 'web' },
+      data: { login: 'cadu@demo.artisti.local', password: 'Artisti.demo2026!' },
+    });
+    expect(login.ok()).toBeTruthy();
+    await page.route('**/api/v1/instagram/comments', (route) =>
+      route.fulfill({
+        status: 403,
+        json: { code: 'FORBIDDEN', message: 'Bolsão disponível somente para consultores.' },
+      }),
+    );
+    await page.goto('/#comments');
+    const panel = page.getByRole('region', { name: 'Bolsão de comentários' });
+    const alert = panel.getByRole('alert');
+    await expect(alert).toHaveText('Bolsão disponível somente para consultores.');
+    await page.screenshot({ path: test.info().outputPath('comments-access.png'), fullPage: true });
+    await expect(panel.getByText('Carregando comentários…')).toHaveCount(0);
+    const bounds = (await panel.boundingBox())!;
+    const notice = (await alert.boundingBox())!;
+    const title = (await panel
+      .getByRole('heading', { name: 'Comentários do Instagram' })
+      .boundingBox())!;
+    const refresh = (await panel
+      .getByRole('button', { name: 'Atualizar comentários' })
+      .boundingBox())!;
+    expect(Math.abs(notice.x - title.x)).toBeLessThanOrEqual(1);
+    expect(notice.x - bounds.x).toBeGreaterThanOrEqual(16);
+    expect(bounds.x + bounds.width - (notice.x + notice.width)).toBeGreaterThanOrEqual(16);
+    expect(bounds.y + bounds.height - (notice.y + notice.height)).toBeGreaterThanOrEqual(16);
+    expect(refresh.x).toBeGreaterThanOrEqual(title.x + title.width);
+    expect(refresh.y + refresh.height).toBeLessThanOrEqual(notice.y);
+    await expect(panel.getByRole('button', { name: 'Assumir e conversar' })).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+  });
+}
+
+test('comment pool: falha no carregamento permite tentar novamente e mostrar a lista vazia', async ({
+  page,
+}) => {
+  const login = await page.request.post('/api/v1/auth/login', {
+    headers: { 'X-Artisti-Client': 'web' },
+    data: { login: 'vanessa@demo.artisti.local', password: 'Artisti.demo2026!' },
+  });
+  expect(login.ok()).toBeTruthy();
+  let attempts = 0;
+  let recovered = false;
+  let finishFirstRequest!: () => void;
+  const firstRequest = new Promise<void>((resolve) => {
+    finishFirstRequest = resolve;
+  });
+  await page.route('**/api/v1/instagram/comments', async (route) => {
+    attempts++;
+    if (!recovered) {
+      await firstRequest;
+      return route.fulfill({
+        status: 503,
+        json: { message: 'Não foi possível carregar os comentários.' },
+      });
+    }
+    return route.fulfill({ json: { configured: true, comments: [], next_cursor: null } });
+  });
+  await page.goto('/#comments');
+  const panel = page.getByRole('region', { name: 'Bolsão de comentários' });
+  await expect(panel.getByText('Carregando comentários…')).toBeVisible();
+  finishFirstRequest();
+  await expect(panel.getByRole('alert')).toHaveText('Não foi possível carregar os comentários.');
+  await expect(panel.getByText('Carregando comentários…')).toHaveCount(0);
+  const attemptsBeforeRetry = attempts;
+  recovered = true;
+  await panel.getByRole('button', { name: 'Atualizar comentários' }).click();
+  await expect(panel.getByRole('heading', { name: 'Nenhum comentário disponível' })).toBeVisible();
+  await expect(panel.getByRole('alert')).toHaveCount(0);
+  await expect(panel.getByText('Carregando comentários…')).toHaveCount(0);
+  expect(attempts).toBe(attemptsBeforeRetry + 1);
+});

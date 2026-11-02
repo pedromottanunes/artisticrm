@@ -11,6 +11,97 @@ async function login(page: Page, profile: 'cadu' | 'vanessa') {
   return (await page.request.get('/api/v1/workspace')).json();
 }
 
+for (const profile of ['cadu', 'vanessa'] as const) {
+  for (const width of [320, 390]) {
+    test(`Atelier: cabeçalho compacto em todas as áreas de ${profile} (${width}px)`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 844 });
+      await login(page, profile);
+      const sections =
+        profile === 'cadu'
+          ? [
+              ['central', 'Central de atendimentos'],
+              ['inbox', 'Conversas'],
+              ['comments', 'Comentários'],
+              ['pipeline', 'Funil de vendas'],
+              ['lists', 'Listas'],
+              ['agenda', 'Agenda'],
+              ['reports', 'Relatórios'],
+              ['contracts', 'Contratos'],
+              ['settings', 'Configurações'],
+            ]
+          : [
+              ['mine', 'Meus atendimentos'],
+              ['lists', 'Listas'],
+              ['inbox', 'Conversas'],
+              ['pool', 'Bolsão'],
+              ['comments', 'Bolsão'],
+              ['agenda', 'Agenda'],
+              ['shortcuts', 'Atalhos'],
+              ['settings', 'Meu perfil'],
+            ];
+      for (const [section, title] of sections) {
+        await page.goto(`/#${section}`);
+        await expect(
+          page.getByRole('heading', { level: 1, name: title, exact: true }),
+        ).toBeVisible();
+        if (profile === 'vanessa')
+          await expect(page.locator('.consultant-queue-position')).toBeVisible();
+        const layout = await page.locator('.topbar').evaluate((header) => {
+          const bounds = header.getBoundingClientRect();
+          const logo = header.querySelector('.mobile-header-logo')!.getBoundingClientRect();
+          const heading = header.querySelector<HTMLElement>('h1')!;
+          const title = heading.getBoundingClientRect();
+          const actions = header.querySelector('.topbar-right')!.getBoundingClientRect();
+          const queue = header.querySelector('.consultant-queue-position')?.getBoundingClientRect();
+          return {
+            height: bounds.height,
+            logoGap: title.left - logo.right,
+            actionsGap: actions.left - title.right,
+            titleAligned: Math.abs(title.top + title.height / 2 - (logo.top + logo.height / 2)),
+            titleCentered: Math.abs(title.left + title.width / 2 - (logo.right + actions.left) / 2),
+            titleClipped: heading.scrollWidth > heading.clientWidth + 1,
+            buttonsAccessible: [
+              ...header.querySelectorAll('.header-primary-action, .topbar-right > .icon-button'),
+            ].every((button) => {
+              const box = button.getBoundingClientRect();
+              return (
+                box.width >= 44 &&
+                box.height >= 44 &&
+                box.right <= bounds.right &&
+                box.bottom <= bounds.bottom
+              );
+            }),
+            queueFits:
+              !queue ||
+              (queue.top >= title.bottom &&
+                queue.bottom <= bounds.bottom &&
+                queue.left >= bounds.left &&
+                queue.right <= bounds.right),
+          };
+        });
+        expect(layout.height, `${section}: altura`).toBeLessThanOrEqual(
+          profile === 'cadu' ? 84 : 112,
+        );
+        expect(layout.logoGap, `${section}: logo e título`).toBeGreaterThanOrEqual(7);
+        expect(layout.actionsGap, `${section}: título e botões`).toBeGreaterThanOrEqual(7);
+        expect(layout.titleAligned, `${section}: alinhamento vertical`).toBeLessThan(2);
+        expect(layout.titleCentered, `${section}: título centralizado`).toBeLessThan(2);
+        expect(layout.titleClipped, `${section}: título completo`).toBe(false);
+        expect(layout.buttonsAccessible, `${section}: botões acessíveis`).toBe(true);
+        expect(layout.queueFits, `${section}: indicador de vez`).toBe(true);
+        if (section === 'central' || section === 'settings' || section === 'mine') {
+          await page.screenshot({
+            path: test.info().outputPath(`${section}.png`),
+            fullPage: false,
+          });
+        }
+      }
+    });
+  }
+}
+
 test('Atelier: menu completo continua acessível em notebook de pouca altura', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 600 });
   await login(page, 'cadu');

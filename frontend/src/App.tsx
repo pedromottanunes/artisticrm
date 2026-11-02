@@ -108,6 +108,7 @@ export function App() {
   const [whatsappUrl, setWhatsappUrl] = useState('');
   const [inboxTargetId, setInboxTargetId] = useState(readInboxTarget);
   const [inboxTargetArchived, setInboxTargetArchived] = useState(false);
+  const [inboxHeaderHost, setInboxHeaderHost] = useState<HTMLDivElement | null>(null);
   const [busyId, setBusyId] = useState('');
   const [poolCounts, setPoolCounts] = useState({ leads: 0, comments: 0 });
   const [now, setNow] = useState(Date.now());
@@ -743,6 +744,9 @@ export function App() {
               </IconButton>
             </span>
           </div>
+          {activePage === 'inbox' && (
+            <div className="mobile-inbox-header-slot" ref={setInboxHeaderHost} />
+          )}
         </header>
         <main>
           {!connected && activePage !== 'central' && (
@@ -789,6 +793,7 @@ export function App() {
               connected={connected}
               targetOpportunityId={inboxTargetId}
               targetArchived={inboxTargetArchived}
+              mobileHeaderHost={inboxHeaderHost}
               onTargetConsumed={consumeInboxTarget}
               onOpenLead={(id) => void openDetail(id)}
               onNotice={setNotice}
